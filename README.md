@@ -41,6 +41,8 @@ reviewers, maintainers, and compliance workflows.
   views.
 - **Provenance export** produces portable bundles for developer, OSS,
   corporate, audit, release, and CI workflows.
+- **Git notes interop** can publish compact Git AI-compatible authorship notes
+  under `refs/notes/ai` so commit-level attribution travels with Git history.
 - **Secret redaction** detects and sanitizes common keys, tokens, passwords, and
   private key material.
 
@@ -54,8 +56,8 @@ capture -> attribution -> event log -> SQLite index -> CLI/editor/reports
 
 Implemented surfaces include the CLI, Claude Code hooks, importers for Cursor,
 Aider, Codex CLI, and GitHub Copilot, a local token-authenticated daemon, an MCP
-stdio server, a VS Code extension, provenance export, and a static session replay
-dashboard backed by daemon data.
+stdio server, a VS Code extension, provenance export, Git notes interop, and a
+static session replay dashboard backed by daemon data.
 
 Team/server mode is not implemented yet.
 
@@ -146,6 +148,10 @@ tellur policy check                 # Evaluate configured policies
 tellur event --event-type file.write --session <id> --file <path>
 tellur import <adapter> <source>    # Import external AI tool data
 tellur export --format json         # Export provenance data
+tellur notes export                 # Write Git AI-compatible refs/notes/ai
+tellur notes import                 # Import refs/notes/ai into the local index
+tellur notes push                   # Push refs/notes/ai to origin
+tellur notes fetch                  # Fetch refs/notes/ai from origin
 tellur daemon                       # Run local HTTP ingestion/dashboard API
 tellur mcp                          # Run MCP server over stdio
 tellur gc --dry-run                 # Garbage-collect expired events
@@ -239,6 +245,24 @@ Tellur/
 Core storage is intentionally simple: append-only JSONL for auditability,
 SQLite for query speed, and Git blob SHAs for stable attribution across file
 states.
+
+## Git Notes Interop
+
+Tellur can publish compact authorship attestations as Git notes using the Git
+AI-compatible `refs/notes/ai` namespace:
+
+```bash
+tellur notes export --print   # inspect the note payload
+tellur notes export           # attach it to HEAD
+tellur notes push             # publish refs/notes/ai
+tellur notes fetch            # fetch refs/notes/ai
+tellur notes import           # import a note back into Tellur's local index
+```
+
+Git notes are treated as an interoperability and transport layer, not as
+Tellur's primary database. Prompts, transcripts, redaction state, replay data,
+and policy evidence remain in Tellur's local/private storage; notes contain only
+line ranges, lightweight session metadata, and commit-scoped attribution.
 
 ## Development
 

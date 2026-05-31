@@ -10,6 +10,7 @@ pub mod daemon;
 pub mod export;
 pub mod glob;
 pub mod mcp;
+pub mod notes;
 pub mod policy;
 pub mod redaction;
 pub mod remap;

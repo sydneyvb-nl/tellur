@@ -3,6 +3,8 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use tellur_core::schema::types::{AttributionRange, AttributionState, EvidenceStrength, Origin};
+use tellur_core::storage::{RepoStorage, TraceIndex};
 
 fn tellur_binary() -> PathBuf {
     if let Ok(path) = std::env::var("CARGO_BIN_EXE_tellur") {
@@ -102,6 +104,110 @@ fn test_help() {
     assert!(stdout.contains("doctor"));
     assert!(stdout.contains("blame"));
     assert!(stdout.contains("pr-report"));
+    assert!(stdout.contains("notes"));
+}
+
+#[test]
+fn test_notes_help_lists_git_ai_commands() {
+    let output = tellur().args(["notes", "--help"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("export"));
+    assert!(stdout.contains("show"));
+    assert!(stdout.contains("refs/notes/ai"));
+}
+
+#[test]
+fn test_notes_export_prints_and_writes_git_ai_note() {
+    let dir = temp_repo();
+    fs::write(dir.join("src.rs"), "fn main() {}\n").unwrap();
+    Command::new("git")
+        .args(["add", "src.rs"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "init"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    require_binary()
+        .arg("init")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    let storage = RepoStorage::from_git_root(&dir).unwrap();
+    let index = TraceIndex::open(&storage.index_path).unwrap();
+    index
+        .index_attribution(
+            &AttributionRange {
+                range_id: "rng_note".to_string(),
+                start_line: 1,
+                end_line: 1,
+                origin: Origin::Ai,
+                evidence_strength: EvidenceStrength::Recorded,
+                confidence: 1.0,
+                state: AttributionState::Exact,
+                session_id: "sess_note".to_string(),
+                event_ids: vec![],
+                agent_id: "codex".to_string(),
+                model_id: Some("gpt-5".to_string()),
+                prompt_hash: None,
+                context_set_id: None,
+                policy_tags: vec![],
+                risk_tags: vec![],
+                risk_level: None,
+                tests_run: vec![],
+                tests_passed: false,
+                reviewer: None,
+                reviewed_at: None,
+            },
+            "src.rs",
+            "blob",
+            "2026-05-31T00:00:00Z",
+        )
+        .unwrap();
+
+    let printed = require_binary()
+        .args(["notes", "export", "--print"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(printed.status.success());
+    let stdout = String::from_utf8_lossy(&printed.stdout);
+    assert!(stdout.contains("src.rs"));
+    assert!(stdout.contains("\"schema_version\": \"authorship/3.0.0\""));
+    assert!(stdout.contains("\"tool\": \"codex\""));
+
+    let written = require_binary()
+        .args(["notes", "export"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(written.status.success());
+
+    let note = Command::new("git")
+        .args(["notes", "--ref", "refs/notes/ai", "show", "HEAD"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(note.status.success());
+    let note_stdout = String::from_utf8_lossy(&note.stdout);
+    assert!(note_stdout.contains("src.rs"));
+    assert!(note_stdout.contains("authorship/3.0.0"));
+
+    let imported = require_binary()
+        .args(["notes", "import"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(imported.status.success());
+    let import_stdout = String::from_utf8_lossy(&imported.stdout);
+    assert!(import_stdout.contains("Imported 1 attribution range"));
+
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]

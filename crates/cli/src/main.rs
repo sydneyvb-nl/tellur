@@ -162,10 +162,80 @@ enum Commands {
     /// Run the MCP server over stdio (for AI agents)
     Mcp,
 
+    /// Manage Git AI-compatible authorship notes (default ref: refs/notes/ai)
+    Notes {
+        #[command(subcommand)]
+        action: NotesActions,
+    },
+
     /// Manage editor/agent hook integrations
     Hooks {
         #[command(subcommand)]
         action: HookActions,
+    },
+}
+
+#[derive(Subcommand)]
+enum NotesActions {
+    /// Export indexed attribution to a Git AI-compatible note
+    Export {
+        /// Commit to annotate
+        #[arg(default_value = "HEAD")]
+        commit: String,
+        /// Notes ref to write
+        #[arg(long, default_value = tellur_core::notes::GIT_AI_NOTES_REF)]
+        notes_ref: String,
+        /// Print note content instead of writing Git notes
+        #[arg(long)]
+        print: bool,
+    },
+    /// Show and parse the authorship note for a commit
+    Show {
+        /// Commit to inspect
+        #[arg(default_value = "HEAD")]
+        commit: String,
+        /// Notes ref to read
+        #[arg(long, default_value = tellur_core::notes::GIT_AI_NOTES_REF)]
+        notes_ref: String,
+        /// Output parsed note as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Import a Git AI authorship note into the local Tellur index
+    Import {
+        /// Commit to import notes from
+        #[arg(default_value = "HEAD")]
+        commit: String,
+        /// Notes ref to read
+        #[arg(long, default_value = tellur_core::notes::GIT_AI_NOTES_REF)]
+        notes_ref: String,
+    },
+    /// Fetch authorship notes from a remote
+    Fetch {
+        /// Remote name
+        #[arg(default_value = "origin")]
+        remote: String,
+        /// Notes ref to fetch
+        #[arg(long, default_value = tellur_core::notes::GIT_AI_NOTES_REF)]
+        notes_ref: String,
+    },
+    /// Push authorship notes to a remote
+    Push {
+        /// Remote name
+        #[arg(default_value = "origin")]
+        remote: String,
+        /// Notes ref to push
+        #[arg(long, default_value = tellur_core::notes::GIT_AI_NOTES_REF)]
+        notes_ref: String,
+    },
+    /// Configure this repository to fetch and rewrite authorship notes
+    InstallConfig {
+        /// Remote name
+        #[arg(default_value = "origin")]
+        remote: String,
+        /// Notes ref to configure
+        #[arg(long, default_value = tellur_core::notes::GIT_AI_NOTES_REF)]
+        notes_ref: String,
     },
 }
 
@@ -230,6 +300,24 @@ async fn main() -> Result<()> {
         Commands::Sessions { session_id, json } => cmd_sessions(session_id.as_deref(), json),
         Commands::Daemon { host, port } => cmd_daemon(&host, port).await,
         Commands::Mcp => cmd_mcp(),
+        Commands::Notes { action } => match action {
+            NotesActions::Export {
+                commit,
+                notes_ref,
+                print,
+            } => cmd_notes_export(&commit, &notes_ref, print),
+            NotesActions::Show {
+                commit,
+                notes_ref,
+                json,
+            } => cmd_notes_show(&commit, &notes_ref, json),
+            NotesActions::Import { commit, notes_ref } => cmd_notes_import(&commit, &notes_ref),
+            NotesActions::Fetch { remote, notes_ref } => cmd_notes_fetch(&remote, &notes_ref),
+            NotesActions::Push { remote, notes_ref } => cmd_notes_push(&remote, &notes_ref),
+            NotesActions::InstallConfig { remote, notes_ref } => {
+                cmd_notes_install_config(&remote, &notes_ref)
+            }
+        },
         Commands::Hooks { action } => match action {
             HookActions::Install { tool } => cmd_hooks_install(&tool),
             HookActions::Claude => cmd_hooks_claude(),
@@ -1242,6 +1330,308 @@ fn cmd_mcp() -> Result<()> {
         return Ok(());
     }
     tellur_core::mcp::serve_stdio(&storage.root)
+}
+
+fn cmd_notes_export(commit: &str, notes_ref: &str, print: bool) -> Result<()> {
+    let storage = RepoStorage::discover()?;
+    if !storage.is_initialized() {
+        println!("Tellur not initialized. Run `tellur init` first.");
+        return Ok(());
+    }
+
+    let index = TraceIndex::open(&storage.index_path)?;
+    let attributions = index.list_attributions()?;
+    if attributions.is_empty() {
+        println!("No attribution data to export.");
+        return Ok(());
+    }
+
+    let commit_sha = resolve_commit(&storage.root, commit)?;
+    let note = tellur_core::notes::render_git_ai_note(
+        &attributions,
+        &commit_sha,
+        env!("CARGO_PKG_VERSION"),
+    )?;
+
+    if print {
+        print!("{}", note);
+        return Ok(());
+    }
+
+    write_git_note(&storage.root, notes_ref, &commit_sha, &note)?;
+    println!(
+        "Exported {} attribution range(s) to {} on {}",
+        attributions.len(),
+        notes_ref,
+        short_sha(&commit_sha)
+    );
+    println!("Push with: tellur notes push");
+    Ok(())
+}
+
+fn cmd_notes_show(commit: &str, notes_ref: &str, json: bool) -> Result<()> {
+    let storage = RepoStorage::discover()?;
+    let commit_sha = resolve_commit(&storage.root, commit)?;
+    let note = read_git_note(&storage.root, notes_ref, &commit_sha)?;
+    let parsed = tellur_core::notes::parse_git_ai_note(&note)?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "schema_version": parsed.schema_version,
+                "base_commit_sha": parsed.base_commit_sha,
+                "files": parsed.files.iter().map(|f| &f.path).collect::<Vec<_>>(),
+                "session_count": parsed.sessions.len(),
+                "human_count": parsed.humans.len(),
+            }))?
+        );
+        return Ok(());
+    }
+
+    println!("Git AI authorship note ({})", notes_ref);
+    println!("Commit: {}", short_sha(&commit_sha));
+    println!("Schema: {}", parsed.schema_version);
+    println!("Base: {}", short_sha(&parsed.base_commit_sha));
+    println!("Files: {}", parsed.files.len());
+    println!("Sessions: {}", parsed.sessions.len());
+    println!("Humans: {}", parsed.humans.len());
+    for file in parsed.files {
+        println!(
+            "  {} ({} entr{})",
+            file.path,
+            file.entries.len(),
+            if file.entries.len() == 1 { "y" } else { "ies" }
+        );
+    }
+    Ok(())
+}
+
+fn cmd_notes_import(commit: &str, notes_ref: &str) -> Result<()> {
+    let storage = RepoStorage::discover()?;
+    if !storage.is_initialized() {
+        println!("Tellur not initialized. Run `tellur init` first.");
+        return Ok(());
+    }
+
+    let commit_sha = resolve_commit(&storage.root, commit)?;
+    let note = read_git_note(&storage.root, notes_ref, &commit_sha)?;
+    let parsed = tellur_core::notes::parse_git_ai_note(&note)?;
+    let index = TraceIndex::open(&storage.index_path)?;
+
+    let mut imported = 0u32;
+    for file in &parsed.files {
+        let blob_sha = git_output(
+            &storage.root,
+            &["rev-parse", &format!("{}:{}", commit_sha, file.path)],
+        )
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| commit_sha.clone());
+        for entry in &file.entries {
+            for (start, end) in &entry.ranges {
+                let (origin, session_id, agent_id, model_id, reviewer) =
+                    if let Some(session_key) = entry.key.split_once("::").map(|(s, _)| s) {
+                        let session = parsed.sessions.get(session_key);
+                        (
+                            tellur_core::schema::types::Origin::Ai,
+                            session
+                                .map(|s| s.agent_id.id.clone())
+                                .unwrap_or_else(|| session_key.to_string()),
+                            session
+                                .map(|s| s.agent_id.tool.clone())
+                                .unwrap_or_else(|| "unknown".to_string()),
+                            session.map(|s| s.agent_id.model.clone()),
+                            session.and_then(|s| s.human_author.clone()),
+                        )
+                    } else if let Some(human) = parsed.humans.get(&entry.key) {
+                        (
+                            tellur_core::schema::types::Origin::Human,
+                            entry.key.clone(),
+                            "human".to_string(),
+                            None,
+                            Some(human.author.clone()),
+                        )
+                    } else {
+                        (
+                            tellur_core::schema::types::Origin::Ai,
+                            entry.key.clone(),
+                            "unknown".to_string(),
+                            None,
+                            None,
+                        )
+                    };
+
+                let range = tellur_core::schema::types::AttributionRange {
+                    range_id: format!(
+                        "gitai_{}_{}_{}_{}_{}",
+                        short_sha(&commit_sha),
+                        sanitize_id(&file.path),
+                        sanitize_id(&entry.key),
+                        start,
+                        end
+                    ),
+                    start_line: *start,
+                    end_line: *end,
+                    origin,
+                    evidence_strength: tellur_core::schema::types::EvidenceStrength::Imported,
+                    confidence: 1.0,
+                    state: tellur_core::schema::types::AttributionState::Exact,
+                    session_id,
+                    event_ids: vec![],
+                    agent_id,
+                    model_id,
+                    prompt_hash: None,
+                    context_set_id: None,
+                    policy_tags: vec![],
+                    risk_tags: vec![],
+                    risk_level: None,
+                    tests_run: vec![],
+                    tests_passed: false,
+                    reviewer,
+                    reviewed_at: None,
+                };
+                index.index_attribution(
+                    &range,
+                    &file.path,
+                    &blob_sha,
+                    &chrono::Utc::now().to_rfc3339(),
+                )?;
+                imported += 1;
+            }
+        }
+    }
+
+    println!(
+        "Imported {} attribution range(s) from {} on {}",
+        imported,
+        notes_ref,
+        short_sha(&commit_sha)
+    );
+    Ok(())
+}
+
+fn cmd_notes_fetch(remote: &str, notes_ref: &str) -> Result<()> {
+    let storage = RepoStorage::discover()?;
+    run_git(
+        &storage.root,
+        &["fetch", remote, &format!("{}:{}", notes_ref, notes_ref)],
+    )?;
+    println!("Fetched {} from {}", notes_ref, remote);
+    Ok(())
+}
+
+fn cmd_notes_push(remote: &str, notes_ref: &str) -> Result<()> {
+    let storage = RepoStorage::discover()?;
+    run_git(&storage.root, &["push", remote, notes_ref])?;
+    println!("Pushed {} to {}", notes_ref, remote);
+    Ok(())
+}
+
+fn cmd_notes_install_config(remote: &str, notes_ref: &str) -> Result<()> {
+    let storage = RepoStorage::discover()?;
+    run_git(
+        &storage.root,
+        &[
+            "config",
+            "--add",
+            &format!("remote.{}.fetch", remote),
+            &format!("+{}:{}", notes_ref, notes_ref),
+        ],
+    )?;
+    run_git(
+        &storage.root,
+        &["config", "--add", "notes.rewriteRef", notes_ref],
+    )?;
+    run_git(
+        &storage.root,
+        &["config", "notes.rewriteMode", "concatenate"],
+    )?;
+    println!(
+        "Configured {} fetch and rewrite support for {}",
+        remote, notes_ref
+    );
+    Ok(())
+}
+
+fn resolve_commit(repo_root: &std::path::Path, commit: &str) -> Result<String> {
+    let output = git_output(repo_root, &["rev-parse", commit])?;
+    Ok(output.trim().to_string())
+}
+
+fn write_git_note(
+    repo_root: &std::path::Path,
+    notes_ref: &str,
+    commit: &str,
+    note: &str,
+) -> Result<()> {
+    let path = std::env::temp_dir().join(format!(
+        "tellur-note-{}-{}.txt",
+        std::process::id(),
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    ));
+    std::fs::write(&path, note)?;
+    let result = run_git(
+        repo_root,
+        &[
+            "notes",
+            "--ref",
+            notes_ref,
+            "add",
+            "-f",
+            "-F",
+            &path.to_string_lossy(),
+            commit,
+        ],
+    );
+    let _ = std::fs::remove_file(path);
+    result
+}
+
+fn read_git_note(repo_root: &std::path::Path, notes_ref: &str, commit: &str) -> Result<String> {
+    git_output(repo_root, &["notes", "--ref", notes_ref, "show", commit])
+}
+
+fn run_git(repo_root: &std::path::Path, args: &[&str]) -> Result<()> {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(repo_root)
+        .output()
+        .with_context(|| format!("failed to run git {}", args.join(" ")))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+fn git_output(repo_root: &std::path::Path, args: &[&str]) -> Result<String> {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(repo_root)
+        .output()
+        .with_context(|| format!("failed to run git {}", args.join(" ")))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn short_sha(sha: &str) -> String {
+    sha.chars().take(8).collect()
+}
+
+fn sanitize_id(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
 }
 
 fn cmd_hooks_install(tool: &str) -> Result<()> {

@@ -1,11 +1,17 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-05-31 (Codex + Copilot adapter pass, Codex)
+**Last updated:** 2026-05-31 (Git notes interop, Codex)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0
 
+> **2026-05-31 — Git notes interop.** Added Git AI-compatible authorship notes
+> support under `refs/notes/ai`: `tellur notes export/show/import/fetch/push`
+> plus `install-config` for notes fetch/rewrite setup. Notes are a compact
+> commit-attestation layer; Tellur's richer event log, redaction state, replay
+> data, and policy evidence remain in local/private storage.
+>
 > **2026-05-31 — Codex + Copilot adapters.** Added `tellur import codex`
 > for Codex CLI JSONL event streams/session transcripts and
 > `tellur import copilot` for GitHub Copilot metadata exports. Both adapters

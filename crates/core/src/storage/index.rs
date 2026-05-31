@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::schema::types::TraceEvent;
 
+pub use crate::notes::IndexedAttribution;
+
 /// Summary row for a session, used by `tellur sessions --json`, the MCP
 /// server, and the editor extension.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -444,6 +446,63 @@ impl TraceIndex {
 
         results.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
+
+    /// List every indexed attribution range with its file path and blob SHA.
+    pub fn list_attributions(&self) -> Result<Vec<IndexedAttribution>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT file_path, git_blob_sha, range_id, start_line, end_line, origin, evidence_strength,
+                    confidence, state, session_id, agent_id, model_id, policy_tags, risk_tags,
+                    risk_level, tests_run, tests_passed, reviewer, reviewed_at, event_ids,
+                    prompt_hash, context_set_id
+             FROM attributions ORDER BY file_path, start_line",
+        )?;
+
+        let results = stmt.query_map([], |row| {
+            let origin_str: String = row.get(5)?;
+            let evidence_str: String = row.get(6)?;
+            let state_str: String = row.get(8)?;
+            let policy_tags_str: String = row.get(12)?;
+            let risk_tags_str: String = row.get(13)?;
+            let risk_level_str: Option<String> = row.get(14)?;
+            let tests_run_str: String = row.get(15)?;
+            let event_ids_str: String = row.get(19)?;
+
+            Ok(IndexedAttribution {
+                file_path: row.get(0)?,
+                git_blob_sha: row.get(1)?,
+                range: crate::schema::types::AttributionRange {
+                    range_id: row.get(2)?,
+                    start_line: row.get(3)?,
+                    end_line: row.get(4)?,
+                    origin: serde_json::from_value(serde_json::Value::String(origin_str))
+                        .unwrap_or(crate::schema::types::Origin::Unknown),
+                    evidence_strength: serde_json::from_value(serde_json::Value::String(
+                        evidence_str,
+                    ))
+                    .unwrap_or(crate::schema::types::EvidenceStrength::Unknown),
+                    confidence: row.get(7)?,
+                    state: serde_json::from_value(serde_json::Value::String(state_str))
+                        .unwrap_or(crate::schema::types::AttributionState::Uncertain),
+                    session_id: row.get(9)?,
+                    event_ids: serde_json::from_str(&event_ids_str).unwrap_or_default(),
+                    agent_id: row.get(10)?,
+                    model_id: row.get(11)?,
+                    prompt_hash: row.get(20)?,
+                    context_set_id: row.get(21)?,
+                    policy_tags: serde_json::from_str(&policy_tags_str).unwrap_or_default(),
+                    risk_tags: serde_json::from_str(&risk_tags_str).unwrap_or_default(),
+                    risk_level: risk_level_str
+                        .and_then(|s| serde_json::from_value(serde_json::Value::String(s)).ok()),
+                    tests_run: serde_json::from_str(&tests_run_str).unwrap_or_default(),
+                    tests_passed: row.get(16)?,
+                    reviewer: row.get(17)?,
+                    reviewed_at: row.get(18)?,
+                },
+            })
+        })?;
+
+        results.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
 }
 
 #[cfg(test)]
@@ -550,6 +609,45 @@ mod tests {
         // The bug this guards: prompt_hash/event_ids were dropped on read.
         assert_eq!(got[0].1.prompt_hash.as_deref(), Some("sha256:deadbeef"));
         assert_eq!(got[0].1.event_ids, vec!["evt1".to_string()]);
+    }
+
+    #[test]
+    fn test_list_attributions_returns_file_path_blob_and_range() {
+        use crate::schema::types::*;
+        let index = TraceIndex::open_in_memory().unwrap();
+        let range = AttributionRange {
+            range_id: "rng_all".to_string(),
+            start_line: 2,
+            end_line: 4,
+            origin: Origin::Ai,
+            evidence_strength: EvidenceStrength::Recorded,
+            confidence: 0.9,
+            state: AttributionState::Exact,
+            session_id: "sess_all".to_string(),
+            event_ids: vec![],
+            agent_id: "codex".to_string(),
+            model_id: Some("gpt-5".to_string()),
+            prompt_hash: None,
+            context_set_id: None,
+            policy_tags: vec![],
+            risk_tags: vec![],
+            risk_level: None,
+            tests_run: vec![],
+            tests_passed: false,
+            reviewer: None,
+            reviewed_at: None,
+        };
+
+        index
+            .index_attribution(&range, "src/lib.rs", "blob_all", "2026-05-31T00:00:00Z")
+            .unwrap();
+
+        let got = index.list_attributions().unwrap();
+
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].file_path, "src/lib.rs");
+        assert_eq!(got[0].git_blob_sha, "blob_all");
+        assert_eq!(got[0].range.range_id, "rng_all");
     }
 
     #[test]
