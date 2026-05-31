@@ -1,0 +1,129 @@
+{
+  "name": "tracegit-vscode",
+  "displayName": "TraceGit — AI Code Provenance",
+  "description": "See who changed what: AI or human. Line-level attribution, session replay, and PR risk reports.",
+  "version": "0.1.0",
+  "publisher": "tracegit",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sydneyvb-nl/TraceGit"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Debuggers",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "attribution",
+    "provenance",
+    "code review",
+    "git"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "tracegit.init",
+        "title": "TraceGit: Initialize"
+      },
+      {
+        "command": "tracegit.explain",
+        "title": "TraceGit: Explain Current Line"
+      },
+      {
+        "command": "tracegit.blame",
+        "title": "TraceGit: Show File Attribution"
+      },
+      {
+        "command": "tracegit.prReport",
+        "title": "TraceGit: Generate PR Report"
+      },
+      {
+        "command": "tracegit.sessions",
+        "title": "TraceGit: Show Sessions"
+      },
+      {
+        "command": "tracegit.policyCheck",
+        "title": "TraceGit: Check Policy"
+      },
+      {
+        "command": "tracegit.startWatch",
+        "title": "TraceGit: Start Watching"
+      },
+      {
+        "command": "tracegit.stopWatch",
+        "title": "TraceGit: Stop Watching"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "tracegit",
+          "title": "TraceGit",
+          "icon": "images/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "tracegit": [
+        {
+          "id": "tracegit.sessions",
+          "name": "Sessions"
+        },
+        {
+          "id": "tracegit.attributions",
+          "name": "Attributions"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "TraceGit",
+      "properties": {
+        "tracegit.tracegitPath": {
+          "type": "string",
+          "default": "tracegit",
+          "description": "Path to the tracegit CLI binary"
+        },
+        "tracegit.showInlineDecorations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline attribution decorations in the editor"
+        },
+        "tracegit.aiColor": {
+          "type": "string",
+          "default": "rgba(138, 43, 226, 0.15)",
+          "description": "Background color for AI-generated lines"
+        },
+        "tracegit.humanColor": {
+          "type": "string",
+          "default": "rgba(34, 139, 34, 0.15)",
+          "description": "Background color for human-written lines"
+        },
+        "tracegit.autoWatch": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically start watching when opening a workspace"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  }
+}
