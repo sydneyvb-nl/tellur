@@ -1,0 +1,220 @@
+# TraceGit — Project Status & Agent Guide
+
+**Last updated:** 2026-05-31 17:15 CEST  
+**Maintained by:** Jane (agent) — alle agents mogen dit updaten  
+**Repo:** github.com/sydneyvb-nl/TraceGit  
+**Branch:** main  
+**License:** Apache-2.0
+
+---
+
+## Wat is TraceGit
+
+AI code provenance platform. Git vertelt je *wat* er veranderde. TraceGit vertelt je *hoe AI participeerde*.
+
+Open-source, lokaal-first, geen cloud dependency. Rust core + CLI, TypeScript editor extension.
+
+---
+
+## PRD Referentie
+
+De PRD bevindt zich op een locatie die Sydney bepaalt. Als je de PRD niet hebt, vraag Sydney.
+
+## Hoe te werken aan deze repo
+
+### Regels voor alle agents
+
+1. **Altijd `PROJECT_STATUS.md` updaten** na elke wijziging — dit is het single source of truth
+2. **Build moet groen zijn** voor je commit: `cargo build && cargo test`
+3. **Rust code** in `crates/` — TypeScript alleen in `editor/` (nog te maken)
+4. **Commits** in het Engels, conventional commits format (`feat:`, `fix:`, `docs:`)
+5. **Push altijd** na commit — `git push origin main`
+6. **Als je een module afmaakt**, update dan de checklist hieronder met ✅
+7. **Als je iets tegenhoudt**, zet het in de Blockers sectie
+8. **Geen breaking changes** aan bestaande schemas zonder Sydney's goedkeuring
+
+### Build & Test
+
+```bash
+source "$HOME/.cargo/env"  # Rust toolchain
+cd /Users/sydneyassistent/.openclaw/workspace/TraceGit
+cargo build          # Alle crates compileren
+cargo test           # Alle tests draaien (35 tests)
+cargo run -p tracegit-cli -- init  # CLI testen
+```
+
+### Structuur
+
+```
+TraceGit/
+├── PROJECT_STATUS.md        ← DIT BESTAND
+├── Cargo.toml               ← Rust workspace root
+├── crates/
+│   ├── core/                ← Core library (schemas, attribution, storage, policy, redaction, export)
+│   ├── cli/                 ← CLI binary (tracegit command)
+│   └── adapters/            ← AI tool adapters
+├── schemas/                 ← JSON Schema definities
+├── .github/workflows/       ← GitHub Actions
+└── editor/                  ← VS Code extension (NOG TE MAKEN)
+```
+
+---
+
+## PRD Implementatie Checklist
+
+### Phase 1: Foundation (PRD secties 1-7)
+
+| # | Module | PRD Sectie | Status | Details |
+|---|--------|-----------|--------|---------|
+| 1 | Project scaffold | 32.1 | ✅ Done | Rust workspace, 3 crates |
+| 2 | Core schemas (Session, Event, Attribution, Policy, ProvenanceBundle, PRReport) | 4-6 | ✅ Done | `crates/core/src/schema/types.rs` |
+| 3 | ID generation (hash_event, hash_content, generate_session_id, etc.) | 4.2 | ✅ Done | `crates/core/src/schema/ids.rs` |
+| 4 | JSON Schema definities | 4-6 | ✅ Done | `schemas/*.json` |
+| 5 | EventWriter (JSONL + SHA-256 hash chain) | 7 | ✅ Done | `crates/core/src/storage/event_log.rs` |
+| 6 | TraceIndex (SQLite) | 7.3 | ✅ Done | `crates/core/src/storage/index.rs` |
+| 7 | RepoStorage (.tracegit directory) | 7.1 | ✅ Done | `crates/core/src/storage/repo.rs` |
+| 8 | File change capture (git diff + blob SHA) | 8.3 | ✅ Done | `crates/core/src/storage/file_watcher.rs` |
+
+### Phase 2: Core Intelligence (PRD secties 8-14)
+
+| # | Module | PRD Sectie | Status | Details |
+|---|--------|-----------|--------|---------|
+| 9 | AttributionEngine (line-level patch attribution) | 9 | ✅ Done | `crates/core/src/attribution/engine.rs` |
+| 10 | RedactionEngine (regex secret detection) | 14 | ✅ Done | `crates/core/src/redaction/mod.rs` |
+| 11 | PolicyEngine (YAML rules, sensitive paths) | 13 | ✅ Done | `crates/core/src/policy/mod.rs` |
+| 12 | AgentAdapter trait (async_trait) | 8.3 | ✅ Done | `crates/core/src/adapter/mod.rs` |
+| 13 | Built-in adapters (Claude Code, Aider, Cursor, Generic) | 8.3 | ✅ Done | `crates/core/src/adapter/builtin.rs` |
+| 14 | Claude Code adapter implementation | 8.1 | ⬜ Stub | Alleen struct/shell, geen hook installer |
+| 15 | Aider adapter implementation | 8.2 | ⬜ Stub | Alleen struct, geen commit parser |
+| 16 | Cursor adapter implementation | 8.2 | ⬜ Stub | Alleen struct, geen Agent Trace parser |
+
+### Phase 3: CLI (PRD sectie 8.1)
+
+| # | Module | PRD Sectie | Status | Details |
+|---|--------|-----------|--------|---------|
+| 17 | `tracegit init` | 8.1 | ✅ Done | CLI main.rs |
+| 18 | `tracegit doctor` | 8.1 | ✅ Done | Detecteert AI tools |
+| 19 | `tracegit status` | 8.1 | ✅ Done | Sessions overview |
+| 20 | `tracegit explain <file:line>` | 8.1 | ✅ Done | Line attribution lookup |
+| 21 | `tracegit blame <file>` | 8.1 | ✅ Done | File-wide attribution |
+| 22 | `tracegit pr-report` | 12 | ✅ Done | Risk report + markdown |
+| 23 | `tracegit policy check` | 13 | ✅ Done | Policy evaluation |
+| 24 | `tracegit watch` | 8.1 | ✅ Done | Filesystem watcher (basic) |
+| 25 | `tracegit event` | 8.1 | ✅ Done | Single event emission |
+| 26 | `tracegit export` | 15 | ✅ Done | Provenance bundle export |
+| 27 | `tracegit import` | 8.1 | ✅ Done | JSONL import |
+| 28 | `tracegit verify` | 11 | ✅ Done | Hash chain verification |
+| 29 | `tracegit sessions` | 8.1 | ✅ Done | Session listing |
+| 30 | `tracegit gc` | 8.1 | ✅ Done | Garbage collection |
+| 31 | `tracegit redact` | 14 | ✅ Done | Content redaction |
+
+### Phase 4: Reports & Export (PRD secties 12, 15, 20)
+
+| # | Module | PRD Sectie | Status | Details |
+|---|--------|-----------|--------|---------|
+| 32 | PRReportGenerator | 12 | ✅ Done | `crates/core/src/report/pr_report.rs` |
+| 33 | Markdown report output | 12.3 | ✅ Done | `PRReportGenerator::to_markdown()` |
+| 34 | Provenance export (6 profiles) | 15, 20 | ✅ Done | `crates/core/src/storage/export.rs` |
+| 35 | GitHub Action (PR check) | 12.4 | ✅ Done | `.github/workflows/tracelens.yml` |
+
+### Phase 5: Editor Extension (PRD sectie 10)
+
+| # | Module | PRD Sectie | Status | Details |
+|---|--------|-----------|--------|---------|
+| 36 | VS Code extension scaffold | 10 | ❌ Not started | TypeScript, nog geen `editor/` map |
+| 37 | Inline attribution decorations | 10.1 | ❌ Not started | |
+| 38 | Hover cards (origin, model, confidence) | 10.2 | ❌ Not started | |
+| 39 | Sidebar panel | 10.3 | ❌ Not started | |
+| 40 | Session explorer | 10.4 | ❌ Not started | |
+
+### Phase 6: Advanced Features (PRD secties 16-25)
+
+| # | Module | PRD Sectie | Status | Details |
+|---|--------|-----------|--------|---------|
+| 41 | Session replay | 16 | ❌ Not started | Web dashboard |
+| 42 | Git remapping (rebase/squash) | 17 | ❌ Not started | |
+| 43 | SLSA/SPDX export | 20 | ❌ Not started | |
+| 44 | Local HTTP daemon (event API) | 22 | ❌ Not started | |
+| 45 | MCP server | 23 | ❌ Not started | |
+| 46 | Team/server mode | 24 | ❌ Not started | |
+| 47 | Plugin SDK | 25 | ❌ Not started | |
+
+### Phase 7: Distribution (PRD sectie 32.3)
+
+| # | Module | PRD Sectie | Status | Details |
+|---|--------|-----------|--------|---------|
+| 48 | Cross-compilation (linux/mac/win) | 32.3 | ❌ Not started | |
+| 49 | Homebrew formula | 32.3 | ❌ Not started | |
+| 50 | npm package (CLI wrapper) | 32.3 | ❌ Not started | |
+| 51 | GitHub Release automation | 32.3 | ❌ Not started | |
+
+---
+
+## Wat is NIET uit de PRD opgepakt
+
+Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney's beslissing:
+
+1. **Pricing / Business model** (PRD sectie 27-31) — niet relevant voor dev, Sydney beslist
+2. **Team/server mode auth** (PRD sectie 24) — later, eerst local-first afmaken
+3. **SOC 2 compliance** (PRD sectie 26) — far future
+4. **MCP server** (PRD sectie 23) — mooi om te hebben, niet urgent
+5. **Plugin SDK** (PRD sectie 25) — API stabiliteit eerst nodig
+6. **Release signing / SLSA provenance** (PRD sectie 20) — na v1.0
+
+---
+
+## Huidige Test Status
+
+```
+35 tests, 0 failures
+- core: 35 tests (schema validation, storage, attribution, redaction, policy, export, PR report)
+- cli: 0 tests (CLI integration tests pending)
+- adapters: 0 tests
+```
+
+---
+
+## Blockers
+
+| Blocker | Impact | Oplossing |
+|---------|--------|-----------|
+| Geen | — | — |
+
+---
+
+## Tech Stack Beslissingen
+
+| Keuze | PRD Sectie | Reden |
+|-------|-----------|-------|
+| Rust (core + CLI) | 32.1 | Performance, safety, single binary |
+| SQLite (index) | 7.3 | Local, zero-config, fast queries |
+| JSONL (event log) | 7.2 | Append-only, human-readable, git-friendly |
+| SHA-256 (hash chain) | 7.2 | Tamper evidence, lightweight |
+| TypeScript (editor) | 10 | VS Code API vereist TS |
+| YAML (policy) | 13 | Git-friendly config |
+
+---
+
+## Git Log (laatste 5 commits)
+
+```
+b9a052e feat: GitHub Action, README update, roadmap
+5345365 feat: PR report generator, file watcher, provenance export
+1db9723 feat: Rust rewrite — core engine, CLI, attribution, policy, redaction
+8cb1d1e feat: initial project scaffold — core schemas, CLI foundation, monorepo setup
+2a20ab8 Initial commit
+```
+
+---
+
+## Volgende Stappen (prioriteit)
+
+1. **Claude Code hook installer** — PRD 8.1, adapter is er maar hooks installeren ontbreekt
+2. **Aider commit parser** — PRD 8.2, git commit messages parsen voor attributie
+3. **VS Code extension scaffold** — PRD 10, TypeScript project opzetten
+4. **CLI integration tests** — robuustheid testen
+5. **Cross-compilation** — linux/mac/windows builds
+
+---
+
+*Agents: update dit bestand na elke werk sessie. Voeg je naam + timestamp toe aan de "Last updated" regel.*
