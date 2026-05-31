@@ -7,6 +7,7 @@ pub mod adapter;
 pub mod attribution;
 pub mod policy;
 pub mod redaction;
+pub mod report;
 pub mod schema;
 pub mod storage;
 
