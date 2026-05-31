@@ -1,13 +1,23 @@
 //! Local HTTP daemon — event ingestion API
 //!
-//! Runs a lightweight HTTP server for receiving events from AI tools,
+//! Lightweight HTTP server for receiving events from AI tools,
 //! editor extensions, and CI systems.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Result;
+use axum::{
+    extract::{Json, State},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post},
+    Router,
+};
 use serde::{Deserialize, Serialize};
+
+use crate::schema::types::TraceEvent;
 
 /// Daemon configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,47 +37,169 @@ impl Default for DaemonConfig {
     }
 }
 
-/// API response wrapper
-#[derive(Serialize)]
-#[allow(dead_code)]
-struct ApiResponse<T: Serialize> {
-    status: String,
-    data: T,
+/// Shared state for the daemon
+#[derive(Clone)]
+pub struct DaemonState {
+    pub repo_root: PathBuf,
 }
 
-/// API error response
+/// Generic JSON response
 #[derive(Serialize)]
-#[allow(dead_code)]
-struct ApiError {
+struct ApiResponse {
     status: String,
-    error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<serde_json::Value>,
+}
+
+/// Event submission request
+#[derive(Debug, Deserialize)]
+pub struct SubmitEventRequest {
+    pub event: TraceEvent,
+}
+
+/// Batch event submission request
+#[derive(Debug, Deserialize)]
+pub struct SubmitEventsRequest {
+    pub events: Vec<TraceEvent>,
+}
+
+/// Build the axum router
+pub fn build_router(state: DaemonState) -> Router {
+    Router::new()
+        .route("/status", get(get_status))
+        .route("/event", post(submit_event))
+        .route("/events", post(submit_events))
+        .route("/sessions", get(list_sessions))
+        .route("/export", post(export_bundle))
+        .with_state(Arc::new(state))
 }
 
 /// Run the daemon
 pub async fn run_daemon(config: DaemonConfig) -> Result<()> {
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
+    let state = DaemonState {
+        repo_root: config.repo_root.clone(),
+    };
+    let app = build_router(state);
+
     println!("TraceGit daemon listening on {}", addr);
     println!("Repository: {}", config.repo_root.display());
-
-    // For now, use a simple TCP listener approach
-    // In production, this would use axum/actix/warp
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-
-    println!("Ready to accept events");
+    println!();
     println!("Endpoints:");
-    println!("  POST /event        — Submit a single event");
-    println!("  POST /events       — Submit multiple events");
-    println!("  GET  /status       — Daemon status");
-    println!("  GET  /sessions     — List sessions");
-    println!("  GET  /attributions — Get file attributions");
-    println!("  POST /export       — Generate export bundle");
+    println!("  POST /event    — Submit a single event");
+    println!("  POST /events   — Submit multiple events");
+    println!("  GET  /status   — Daemon status");
+    println!("  GET  /sessions — List sessions");
+    println!("  POST /export   — Generate export bundle");
 
-    loop {
-        let (stream, _addr) = listener.accept().await?;
-        // Handle connection — simplified for now
-        // Full implementation would parse HTTP and route to handlers
-        drop(stream);
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+// ─── Handlers ──────────────────────────────────────────────────────────────
+
+async fn get_status() -> Json<ApiResponse> {
+    Json(ApiResponse {
+        status: "ok".to_string(),
+        data: Some(serde_json::json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "status": "running",
+        })),
+    })
+}
+
+async fn submit_event(
+    State(state): State<Arc<DaemonState>>,
+    Json(req): Json<SubmitEventRequest>,
+) -> (StatusCode, Json<ApiResponse>) {
+    match write_event_to_disk(&state.repo_root, &req.event) {
+        Ok(id) => (
+            StatusCode::CREATED,
+            Json(ApiResponse {
+                status: "created".to_string(),
+                data: Some(serde_json::json!({ "event_id": id })),
+            }),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                status: "error".to_string(),
+                data: Some(serde_json::json!({ "error": e.to_string() })),
+            }),
+        ),
     }
+}
+
+async fn submit_events(
+    State(state): State<Arc<DaemonState>>,
+    Json(req): Json<SubmitEventsRequest>,
+) -> (StatusCode, Json<ApiResponse>) {
+    let mut ids = Vec::new();
+    for event in &req.events {
+        match write_event_to_disk(&state.repo_root, event) {
+            Ok(id) => ids.push(id),
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        status: "error".to_string(),
+                        data: Some(serde_json::json!({
+                            "error": format!("Failed after {} events: {}", ids.len(), e),
+                            "written": ids.len(),
+                        })),
+                    }),
+                );
+            }
+        }
+    }
+    (
+        StatusCode::CREATED,
+        Json(ApiResponse {
+            status: "created".to_string(),
+            data: Some(serde_json::json!({ "event_ids": ids, "count": ids.len() })),
+        }),
+    )
+}
+
+async fn list_sessions() -> Json<ApiResponse> {
+    // Placeholder — returns basic info
+    Json(ApiResponse {
+        status: "ok".to_string(),
+        data: Some(serde_json::json!({
+            "message": "Query tracegit sessions via CLI for full data"
+        })),
+    })
+}
+
+async fn export_bundle() -> Json<ApiResponse> {
+    Json(ApiResponse {
+        status: "ok".to_string(),
+        data: Some(serde_json::json!({
+            "message": "Export endpoint ready. POST with { profile: 'oss|developer|corporate|audit' }"
+        })),
+    })
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
+
+fn write_event_to_disk(repo_root: &PathBuf, event: &TraceEvent) -> Result<String> {
+    let traces_dir = repo_root.join(".tracegit").join("traces").join("sessions");
+    std::fs::create_dir_all(&traces_dir)?;
+
+    let today = chrono::Local::now().format("%Y/%m").to_string();
+    let log_dir = traces_dir.join(&today);
+    std::fs::create_dir_all(&log_dir)?;
+
+    let log_path = log_dir.join("events.jsonl");
+
+    // Append event to JSONL
+    let json = serde_json::to_string(event)?;
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&log_path)?;
+    writeln!(file, "{}", json)?;
+
+    Ok(event.id.clone())
 }
 
 #[cfg(test)]
@@ -79,5 +211,13 @@ mod tests {
         let config = DaemonConfig::default();
         assert_eq!(config.host, "127.0.0.1");
         assert_eq!(config.port, 4917);
+    }
+
+    #[test]
+    fn test_build_router() {
+        let state = DaemonState {
+            repo_root: PathBuf::from("/tmp"),
+        };
+        let _router = build_router(state);
     }
 }

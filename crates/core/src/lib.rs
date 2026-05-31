@@ -6,8 +6,11 @@
 pub mod adapter;
 pub mod attribution;
 pub mod daemon;
+pub mod export;
+pub mod mcp;
 pub mod policy;
 pub mod redaction;
+pub mod remap;
 pub mod report;
 pub mod schema;
 pub mod storage;
