@@ -47,11 +47,10 @@ impl PolicyEngine {
     pub fn requires_human_review(&self, file_path: &str) -> bool {
         if let Some(ref paths) = self.policy.sensitive_paths {
             for sp in paths {
-                if glob_match(&sp.path, file_path) {
-                    if sp.require_human_review.unwrap_or(false) {
+                if glob_match(&sp.path, file_path)
+                    && sp.require_human_review.unwrap_or(false) {
                         return true;
                     }
-                }
             }
         }
         false
@@ -61,11 +60,10 @@ impl PolicyEngine {
     pub fn requires_tests(&self, file_path: &str) -> bool {
         if let Some(ref paths) = self.policy.sensitive_paths {
             for sp in paths {
-                if glob_match(&sp.path, file_path) {
-                    if sp.require_tests.unwrap_or(false) {
+                if glob_match(&sp.path, file_path)
+                    && sp.require_tests.unwrap_or(false) {
                         return true;
                     }
-                }
             }
         }
         false
@@ -131,7 +129,8 @@ impl PolicyEngine {
 
         // Check if the rule applies based on origin
         if let Some(origin) = when.get("attribution.origin").and_then(|v| v.as_str()) {
-            if serde_json::to_string(&attr.origin).unwrap().trim_matches('"') != origin {
+            let attr_origin = serde_json::to_string(&attr.origin).unwrap_or_default();
+            if attr_origin.trim_matches('"') != origin {
                 return None;
             }
         }
@@ -149,18 +148,16 @@ impl PolicyEngine {
         let mut evidence = Vec::new();
 
         if let Some(ref require) = rule.require {
-            if require.get("tests_run").and_then(|v| v.as_bool()).unwrap_or(false) {
-                if attr.tests_run.is_empty() {
+            if require.get("tests_run").and_then(|v| v.as_bool()).unwrap_or(false)
+                && attr.tests_run.is_empty() {
                     passed = false;
                     evidence.push("No tests were run".to_string());
                 }
-            }
-            if require.get("reviewer_from_codeowners").and_then(|v| v.as_bool()).unwrap_or(false) {
-                if attr.reviewer.is_none() {
+            if require.get("reviewer_from_codeowners").and_then(|v| v.as_bool()).unwrap_or(false)
+                && attr.reviewer.is_none() {
                     passed = false;
                     evidence.push("No code owner review".to_string());
                 }
-            }
         }
 
         Some(PolicyResult {

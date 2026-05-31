@@ -7,6 +7,12 @@ use anyhow::Result;
 /// Generic adapter for capturing events from any source
 pub struct GenericAdapter;
 
+impl Default for GenericAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GenericAdapter {
     pub fn new() -> Self {
         Self

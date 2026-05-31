@@ -28,6 +28,12 @@ pub struct CursorAdapter {
     info: AdapterInfo,
 }
 
+impl Default for CursorAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CursorAdapter {
     pub fn new() -> Self {
         Self {
@@ -78,7 +84,7 @@ impl CursorAdapter {
 
             events.push(TraceEvent {
                 schema: "tracegit.event.v1".to_string(),
-                id: entry.id.unwrap_or_else(|| tracegit_core::schema::ids::generate_event_id()),
+                id: entry.id.unwrap_or_else(tracegit_core::schema::ids::generate_event_id),
                 session_id: session_id.to_string(),
                 timestamp: entry.timestamp.unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
                 event_type,
@@ -133,7 +139,7 @@ impl AgentAdapter for CursorAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    
 
     #[test]
     fn test_adapter_info() {

@@ -119,7 +119,7 @@ impl EventWriter {
             for entry in fs::read_dir(&self.log_dir)? {
                 let entry = entry?;
                 let path = entry.path();
-                if path.extension().map_or(false, |e| e == "jsonl") {
+                if path.extension().is_some_and(|e| e == "jsonl") {
                     files.push(path);
                 }
             }
@@ -148,7 +148,7 @@ pub fn read_events(log_dir: &Path) -> Result<Vec<TraceEvent>> {
     for entry in fs::read_dir(log_dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().map_or(false, |e| e == "jsonl") {
+        if path.extension().is_some_and(|e| e == "jsonl") {
             files.push(path);
         }
     }

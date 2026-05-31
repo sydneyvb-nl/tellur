@@ -46,7 +46,8 @@ impl RepoStorage {
     pub fn init(&self) -> Result<()> {
         std::fs::create_dir_all(&self.tracegit_dir)?;
         std::fs::create_dir_all(&self.traces_dir)?;
-        std::fs::create_dir_all(self.index_path.parent().unwrap())?;
+        let index_parent = self.index_path.parent().ok_or_else(|| anyhow::anyhow!("Index path has no parent: {:?}", self.index_path))?;
+        std::fs::create_dir_all(index_parent)?;
         std::fs::create_dir_all(&self.policies_dir)?;
         std::fs::create_dir_all(&self.exports_dir)?;
 

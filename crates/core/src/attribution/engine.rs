@@ -10,6 +10,12 @@ use crate::schema::types::*;
 /// Attribution engine — maps file changes to AI/human origin
 pub struct AttributionEngine;
 
+impl Default for AttributionEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AttributionEngine {
     /// Create a new attribution engine
     pub fn new() -> Self {
@@ -20,6 +26,7 @@ impl AttributionEngine {
     ///
     /// Takes a diff (unified format) and creates attribution ranges
     /// for the changed lines, linked to the session that produced them.
+    #[allow(clippy::too_many_arguments)]
     pub fn attribute_patch(
         &self,
         session_id: &str,
@@ -76,7 +83,7 @@ impl AttributionEngine {
         }
         let line_ratio = matched_lines as f64 / current_lines as f64;
         let base = original.confidence;
-        (base * line_ratio).min(1.0).max(0.0)
+        (base * line_ratio).clamp(0.0, 1.0)
     }
 
     /// Determine the attribution state based on how ranges have changed

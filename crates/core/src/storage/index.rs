@@ -122,6 +122,20 @@ impl TraceIndex {
                 event.event_hash,
             ],
         )?;
+
+        // Auto-create session if not exists
+        self.conn.execute(
+            "INSERT OR IGNORE INTO sessions (id, repo_id, started_at, agent_id, agent_name, status)\n             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                event.session_id,
+                "local",
+                event.timestamp,
+                actor_str,
+                actor_str,
+                "active",
+            ],
+        )?;
+
         Ok(())
     }
 
@@ -202,7 +216,7 @@ impl TraceIndex {
                 attr.model_id,
                 policy_tags,
                 risk_tags,
-                attr.risk_level.as_ref().map(|l| enum_to_str(l)),
+                attr.risk_level.as_ref().map(enum_to_str),
                 attr.tests_passed,
                 updated_at,
             ],

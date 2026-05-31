@@ -24,6 +24,12 @@ pub struct AiderAdapter {
     info: AdapterInfo,
 }
 
+impl Default for AiderAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AiderAdapter {
     pub fn new() -> Self {
         Self {

@@ -3,7 +3,6 @@
 //! Generates SLSA provenance and SPDX SBOM documents from TraceGit data
 //! for compliance and supply chain security.
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::schema::types::*;

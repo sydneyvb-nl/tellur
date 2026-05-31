@@ -209,7 +209,7 @@ async fn cmd_doctor() -> Result<()> {
     let policies: Vec<_> = std::fs::read_dir(&storage.policies_dir)
         .unwrap_or_else(|_| panic!("No policies dir"))
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "yml"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "yml"))
         .collect();
     println!("✓ {} polic{} found", policies.len(), if policies.len() == 1 { "y" } else { "ies" });
     for p in &policies {
@@ -231,7 +231,7 @@ async fn cmd_doctor() -> Result<()> {
         let trace_files: Vec<_> = std::fs::read_dir(&storage.traces_dir)
             .unwrap_or_else(|_| panic!("No traces dir"))
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map_or(false, |ext| ext == "jsonl"))
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "jsonl"))
             .collect();
         println!("✓ Traces directory ({} log files)", trace_files.len());
     }
@@ -369,13 +369,13 @@ fn cmd_blame(file: &str) -> Result<()> {
     println!("─────────────────────────────────────────────");
     for (_blob_sha, attr) in &attributions {
         println!(
-            "  L{:3}-{:<3} {:?} {} conf={:.0}% [{}]",
+            "  L{:3}-{:<3} {:?} {} conf={:.0}% [{:?}]",
             attr.start_line,
             attr.end_line,
             attr.origin,
             attr.agent_id,
             attr.confidence * 100.0,
-            format!("{:?}", attr.state),
+            attr.state,
         );
     }
 
@@ -484,15 +484,51 @@ fn cmd_policy_explain(rule_id: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn cmd_export(format: &str, _output: Option<&std::path::Path>) -> Result<()> {
+fn cmd_export(format: &str, output: Option<&std::path::Path>) -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
         println!("TraceGit not initialized. Run `tracegit init` first.");
         return Ok(());
     }
 
-    println!("Exporting provenance data (format: {})...", format);
-    println!("⚠ Export is under development.");
+    let events = tracegit_core::storage::read_events(&storage.traces_dir)?;
+    if events.is_empty() {
+        println!("No events to export.");
+        return Ok(());
+    }
+
+    let result = match format {
+        "json" => serde_json::to_string_pretty(&events)?,
+        "jsonl" => events.iter()
+            .map(|e| serde_json::to_string(e).unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        "markdown" | "md" => {
+            let mut md = String::from("# TraceGit Export\n\n");
+            for e in &events {
+                md.push_str(&format!("## Event {}\n", e.id));
+                md.push_str(&format!("- **Session:** {}\n", e.session_id));
+                md.push_str(&format!("- **Time:** {}\n", e.timestamp));
+                md.push_str(&format!("- **Type:** {:?}\n", e.event_type));
+                md.push_str(&format!("- **Actor:** {:?}\n", e.actor));
+                if !e.payload.is_null() {
+                    md.push_str(&format!("- **Payload:** `{}`\n", e.payload));
+                }
+                md.push('\n');
+            }
+            md
+        }
+        _ => serde_json::to_string_pretty(&events)?,
+    };
+
+    match output {
+        Some(path) => {
+            std::fs::write(path, &result)?;
+            println!("Exported {} events to {}", events.len(), path.display());
+        }
+        None => println!("{}", result),
+    }
+
     Ok(())
 }
 
@@ -570,14 +606,31 @@ fn cmd_event(
     let event = writer.write_event(session, event_type, "agent", payload, None)?;
     writer.close();
 
+    // Index the event
+    let index = TraceIndex::open(&storage.index_path)?;
+    index.index_event(&event)?;
+
     println!("Event recorded: {} ({})", event.id, event_type);
     Ok(())
 }
 
 fn cmd_gc(dry_run: bool) -> Result<()> {
-    let _storage = RepoStorage::discover()?;
+    let storage = RepoStorage::discover()?;
     println!("Garbage collection{}", if dry_run { " (dry run)" } else { "" });
-    println!("⚠ GC is under development.");
+
+    let events = tracegit_core::storage::read_events(&storage.traces_dir)?;
+    let index = TraceIndex::open(&storage.index_path)?;
+    let sessions = index.session_count()?;
+    let indexed_events = index.event_count()?;
+
+    println!("  Trace files: {} events on disk", events.len());
+    println!("  Index: {} events, {} sessions", indexed_events, sessions);
+
+    if events.len() > indexed_events as usize {
+        let missing = events.len() - indexed_events as usize;
+        println!("  {} unindexed events found", missing);
+    }
+
     Ok(())
 }
 
@@ -626,7 +679,35 @@ fn cmd_verify() -> Result<()> {
 }
 
 fn cmd_redact() -> Result<()> {
-    println!("⚠ Redaction command is under development.");
+    let storage = RepoStorage::discover()?;
+    if !storage.is_initialized() {
+        println!("TraceGit not initialized. Run `tracegit init` first.");
+        return Ok(());
+    }
+
+    let events = tracegit_core::storage::read_events(&storage.traces_dir)?;
+    if events.is_empty() {
+        println!("No events to redact.");
+        return Ok(());
+    }
+
+    let engine = tracegit_core::redaction::RedactionEngine::new(tracegit_core::redaction::RedactionConfig::default());
+    let mut redacted = 0;
+    for event in &events {
+        let payload_str = serde_json::to_string(&event.payload)?;
+        let result = engine.scan_and_redact(&payload_str);
+        if result.has_secrets {
+            redacted += 1;
+            println!("  Event {}: {} finding(s)", event.id, result.findings.len());
+        }
+    }
+
+    if redacted == 0 {
+        println!("No secrets detected in {} events.", events.len());
+    } else {
+        println!("Redaction scan complete: {} events with potential secrets found in {} events.", redacted, events.len());
+    }
+
     Ok(())
 }
 
@@ -655,10 +736,10 @@ fn cmd_sessions(session_id: Option<&str>) -> Result<()> {
                 .trim_matches('"')
                 .to_string();
             println!(
-                "  {} {} {}",
+                "  {} {} {:?}",
                 &event.timestamp[..19.min(event.timestamp.len())],
                 event_type_str,
-                format!("{:?}", event.actor),
+                event.actor,
             );
         }
     } else {

@@ -4,14 +4,14 @@
 //! editor extensions, and CI systems.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
 use axum::{
     extract::{Json, State},
     http::StatusCode,
-    response::{Html, IntoResponse},
+    response::Html,
     routing::{get, post},
     Router,
 };
@@ -188,7 +188,7 @@ async fn export_bundle() -> Json<ApiResponse> {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-fn write_event_to_disk(repo_root: &PathBuf, event: &TraceEvent) -> Result<String> {
+fn write_event_to_disk(repo_root: &Path, event: &TraceEvent) -> Result<String> {
     let traces_dir = repo_root.join(".tracegit").join("traces").join("sessions");
     std::fs::create_dir_all(&traces_dir)?;
 

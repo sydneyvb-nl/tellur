@@ -87,7 +87,7 @@ pub fn apply_remap(
         .map(|e| (e.old_sha.as_str(), e))
         .collect();
 
-    for (file_path, current_sha) in file_shas.iter_mut() {
+    for (_file_path, current_sha) in file_shas.iter_mut() {
         if let Some(entry) = remap_lookup.get(current_sha.as_str()) {
             *current_sha = entry.new_sha.clone();
             remapped += 1;

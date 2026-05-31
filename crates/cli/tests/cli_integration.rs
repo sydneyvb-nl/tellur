@@ -119,7 +119,7 @@ fn test_status_without_init() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(combined.contains("not") || combined.contains("No") || combined.contains("tracegit") || !output.status.success() || combined.len() > 0);
+    assert!(combined.contains("not") || combined.contains("No") || combined.contains("tracegit") || !output.status.success() || !combined.is_empty());
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -143,7 +143,7 @@ fn test_doctor() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{}{}", stdout, stderr);
     // Doctor should produce output OR exit with a status
-    assert!(combined.len() > 0 || output.status.code().is_some());
+    assert!(!combined.is_empty() || output.status.code().is_some());
 
     let _ = fs::remove_dir_all(&dir);
 }
