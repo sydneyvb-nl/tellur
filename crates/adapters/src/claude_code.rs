@@ -60,64 +60,47 @@ impl ClaudeCodeAdapter {
         }
     }
 
-    /// Install hooks into Claude Code's settings
+    /// Install TraceGit hooks into the repository's Claude Code settings
+    /// (`.claude/settings.json`), using Claude Code's real hook schema:
+    /// `PostToolUse` matchers and `SessionStart`, each invoking
+    /// `tracegit hooks claude`, which reads the hook JSON from stdin.
     pub fn install_hooks(repo_root: &Path) -> Result<()> {
         let settings_path = repo_root.join(".claude").join("settings.json");
-
-        // Create .claude directory if it doesn't exist
         if let Some(parent) = settings_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
-        // Read existing settings or create new
         let mut settings: serde_json::Value = if settings_path.exists() {
             let content = std::fs::read_to_string(&settings_path)
                 .context("Failed to read Claude Code settings")?;
-            serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
+            serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
         } else {
             serde_json::json!({})
         };
 
-        // Add TraceGit hooks
-        let tracegit_path = find_tracegit();
+        let tracegit = find_tracegit();
+        let command = format!("{} hooks claude", tracegit);
 
-        let hooks = serde_json::json!({
-            "hooks": {
-                "afterToolUse": [
-                    {
-                        "command": format!("{} event --event-type file.write --session $TRACEGIT_SESSION", tracegit_path),
-                        "match": "Write|Edit|MultiEdit"
-                    }
-                ],
-                "afterCommand": [
-                    {
-                        "command": format!("{} event --event-type command.exec --session $TRACEGIT_SESSION", tracegit_path),
-                    }
-                ],
-                "sessionStart": [
-                    {
-                        "command": format!("{} event --event-type session.start --session $TRACEGIT_SESSION", tracegit_path),
-                    }
-                ]
-            }
-        });
-
-        // Merge hooks into settings
-        if let Some(existing) = settings.get_mut("hooks") {
-            // Merge with existing hooks
-            if let (Some(existing_obj), Some(new_obj)) = (existing.as_object_mut(), hooks.as_object()) {
-                for (key, value) in new_obj {
-                    existing_obj.insert(key.clone(), value.clone());
-                }
-            }
-        } else {
-            settings["hooks"] = hooks["hooks"].clone();
+        // Ensure settings.hooks is an object.
+        if !settings.get("hooks").map(|h| h.is_object()).unwrap_or(false) {
+            settings["hooks"] = serde_json::json!({});
         }
+        let hooks = settings["hooks"].as_object_mut().unwrap();
 
-        // Write back
-        let output = serde_json::to_string_pretty(&settings)?;
-        std::fs::write(&settings_path, output)?;
+        // PostToolUse — fire after file-editing tools.
+        let post_entry = serde_json::json!({
+            "matcher": "Write|Edit|MultiEdit",
+            "hooks": [ { "type": "command", "command": command } ]
+        });
+        merge_hook_array(hooks, "PostToolUse", post_entry, &command);
 
+        // SessionStart — record the start of an AI session.
+        let start_entry = serde_json::json!({
+            "hooks": [ { "type": "command", "command": command } ]
+        });
+        merge_hook_array(hooks, "SessionStart", start_entry, &command);
+
+        std::fs::write(&settings_path, serde_json::to_string_pretty(&settings)?)?;
         Ok(())
     }
 
@@ -205,6 +188,67 @@ impl AgentAdapter for ClaudeCodeAdapter {
     async fn capture_event(&self, _event: &TraceEvent) -> Result<()> {
         // Events are captured via hooks, not actively pushed
         Ok(())
+    }
+}
+
+/// Parsed Claude Code hook payload (delivered on stdin to a hook command).
+#[derive(Debug, Default, Deserialize)]
+pub struct HookPayload {
+    pub session_id: Option<String>,
+    pub hook_event_name: Option<String>,
+    pub tool_name: Option<String>,
+    pub tool_input: Option<serde_json::Value>,
+    pub cwd: Option<String>,
+}
+
+impl HookPayload {
+    /// Parse a hook payload from JSON (typically read from stdin).
+    pub fn parse(json: &str) -> Result<Self> {
+        Ok(serde_json::from_str(json).unwrap_or_default())
+    }
+
+    /// File path touched by the tool, if any.
+    pub fn file_path(&self) -> Option<String> {
+        self.tool_input.as_ref().and_then(|v| {
+            v.get("file_path")
+                .or_else(|| v.get("path"))
+                .and_then(|p| p.as_str())
+                .map(|s| s.to_string())
+        })
+    }
+}
+
+/// Insert a hook entry into the array for `key`, unless an entry already invokes
+/// the same command (idempotent re-install).
+fn merge_hook_array(
+    hooks: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    entry: serde_json::Value,
+    command: &str,
+) {
+    let arr = hooks
+        .entry(key.to_string())
+        .or_insert_with(|| serde_json::json!([]));
+    if !arr.is_array() {
+        *arr = serde_json::json!([]);
+    }
+    let already = arr
+        .as_array()
+        .map(|items| {
+            items.iter().any(|item| {
+                item.get("hooks")
+                    .and_then(|h| h.as_array())
+                    .map(|hs| {
+                        hs.iter().any(|h| {
+                            h.get("command").and_then(|c| c.as_str()) == Some(command)
+                        })
+                    })
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false);
+    if !already {
+        arr.as_array_mut().unwrap().push(entry);
     }
 }
 

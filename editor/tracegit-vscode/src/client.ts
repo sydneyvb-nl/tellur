@@ -26,7 +26,9 @@ export interface Session {
     started_at: string;
     ended_at?: string;
     agent_id: string;
-    model_id?: string;
+    agent_name: string;
+    model_name?: string;
+    status: string;
     event_count: number;
 }
 

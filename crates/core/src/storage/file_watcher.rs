@@ -59,15 +59,46 @@ pub fn capture_git_diff(repo_root: &Path) -> Result<Vec<FileChange>> {
             _ => FileChangeType::Modified,
         };
 
+        let blob_sha_after = if change_type == FileChangeType::Deleted {
+            None
+        } else {
+            get_working_blob_sha(repo_root, path)
+        };
+
         changes.push(FileChange {
             path: path.to_string(),
             change_type,
             blob_sha_before: get_blob_sha(repo_root, path, "HEAD"),
-            blob_sha_after: None, // Will be filled after staging
+            blob_sha_after,
             diff: get_file_diff(repo_root, path).ok(),
             timestamp: chrono::Utc::now().to_rfc3339(),
         });
     }
+
+    // `git diff HEAD` omits untracked files, but an AI agent creating a *new*
+    // file is exactly what we want to capture. Enumerate untracked, non-ignored
+    // files and add them as `Created` with a synthesized whole-file hunk.
+    if let Ok(out) = std::process::Command::new("git")
+        .args(["ls-files", "--others", "--exclude-standard"])
+        .current_dir(repo_root)
+        .output()
+        && out.status.success() {
+            let listing = String::from_utf8_lossy(&out.stdout);
+            for path in listing.lines().map(str::trim).filter(|p| !p.is_empty()) {
+                let abs = repo_root.join(path);
+                let line_count = std::fs::read_to_string(&abs)
+                    .map(|c| c.lines().count().max(1))
+                    .unwrap_or(1);
+                changes.push(FileChange {
+                    path: path.to_string(),
+                    change_type: FileChangeType::Created,
+                    blob_sha_before: None,
+                    blob_sha_after: get_working_blob_sha(repo_root, path),
+                    diff: Some(format!("@@ -0,0 +1,{} @@\n", line_count)),
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                });
+            }
+        }
 
     Ok(changes)
 }
@@ -97,16 +128,22 @@ fn get_file_diff(repo_root: &Path, file_path: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-/// Take a snapshot of a file's contents (for blob SHA computation)
-pub fn compute_file_hash(path: &Path) -> Result<String> {
-    let contents = std::fs::read(path)?;
-    let _hash = crate::schema::ids::hash_content(&format!("blob {}\0", contents.len()));
-    // Reconstruct proper git blob hash
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(format!("blob {}\0", contents.len()).as_bytes());
-    hasher.update(&contents);
-    Ok(format!("{:x}", hasher.finalize()))
+/// Compute the git blob SHA for a working-tree file (matches `git rev-parse`).
+///
+/// Uses `git hash-object` so the result is the real git blob object id (the
+/// same hash algorithm git uses for `blob_sha_before`), keeping before/after
+/// SHAs directly comparable.
+pub fn get_working_blob_sha(repo_root: &Path, file_path: &str) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["hash-object", "--", file_path])
+        .current_dir(repo_root)
+        .output()
+        .ok()?;
+    if output.status.success() {
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        None
+    }
 }
 
 /// Check if a path should be ignored (gitignore-aware)

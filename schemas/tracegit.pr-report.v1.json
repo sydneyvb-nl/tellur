@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://tracegit.dev/schemas/tracegit.pr-report.v1.json",
+  "title": "TraceGit PR Report",
+  "description": "A pull-request risk report with AI involvement stats and a reviewer checklist",
+  "type": "object",
+  "required": [
+    "schema", "generated_at", "base_ref", "head_ref", "overall_risk",
+    "summary", "ai_involvement", "reviewer_checklist"
+  ],
+  "properties": {
+    "schema": { "type": "string", "const": "tracegit.pr-report.v1" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "base_ref": { "type": "string" },
+    "head_ref": { "type": "string" },
+    "overall_risk": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+    "summary": { "type": "string" },
+    "ai_involvement": {
+      "type": "object",
+      "required": ["ai_lines", "human_lines", "unknown_lines", "ai_percentage"],
+      "properties": {
+        "ai_lines": { "type": "integer", "minimum": 0 },
+        "human_lines": { "type": "integer", "minimum": 0 },
+        "unknown_lines": { "type": "integer", "minimum": 0 },
+        "ai_percentage": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "sensitive_files": { "type": "array", "items": { "type": "string" } },
+    "commands_executed": { "type": "array", "items": { "type": "object" } },
+    "tests_run": { "type": "array", "items": { "type": "object" } },
+    "tests_missing": { "type": "array", "items": { "type": "string" } },
+    "policy_violations": { "type": "array", "items": { "type": "object" } },
+    "unattributed_changes": { "type": "array", "items": { "type": "string" } },
+    "reviewer_checklist": { "type": "array", "items": { "type": "string" } }
+  }
+}

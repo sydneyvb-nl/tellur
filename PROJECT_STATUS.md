@@ -1,10 +1,22 @@
 # TraceGit — Project Status & Agent Guide
 
-**Last updated:** 2026-05-31 17:25 CEST  
-**Maintained by:** Jane (agent) — alle agents mogen dit updaten  
-**Repo:** github.com/sydneyvb-nl/TraceGit  
-**Branch:** main  
+**Last updated:** 2026-05-31 (full code review + remediation pass, Claude Opus 4.8)
+**Maintained by:** agents — alle agents mogen dit updaten
+**Repo:** github.com/sydneyvb-nl/TraceGit
+**Branch:** main
 **License:** Apache-2.0
+
+> **2026-05-31 — Code review & remediation.** A full review found that many
+> modules previously marked ✅ were stubs or not wired together (watch, MCP,
+> daemon, Claude Code hooks, gc, redact, Homebrew, npm) and that the core
+> attribution pipeline was never connected end-to-end. All findings are
+> documented in [`docs/FINDINGS.md`](docs/FINDINGS.md) and have been fixed:
+> the capture → attribution → index → explain/blame/pr-report pipeline now
+> works end-to-end, the daemon is loopback-only + token-authenticated, the MCP
+> server speaks real stdio JSON-RPC, hooks use Claude Code's real schema, and
+> two security issues (CI command injection, unauthenticated daemon) are
+> resolved. `cargo build`, `cargo clippy` (0 warnings) and `cargo test`
+> (73 tests) are green.
 
 ---
 
@@ -84,7 +96,7 @@ TraceGit/
 | 11 | PolicyEngine (YAML rules, sensitive paths) | 13 | ✅ Done | `crates/core/src/policy/mod.rs` |
 | 12 | AgentAdapter trait (async_trait) | 8.3 | ✅ Done | `crates/core/src/adapter/mod.rs` |
 | 13 | Built-in adapters (Claude Code, Aider, Cursor, Generic) | 8.3 | ✅ Done | `crates/core/src/adapter/builtin.rs` |
-| 14 | Claude Code adapter implementation | 8.1 | ✅ Done | Hook install, transcript parse, 3 tests |
+| 14 | Claude Code adapter implementation | 8.1 | ✅ Done | Real Claude Code hook schema (PostToolUse/SessionStart), `tracegit hooks install`, stdin payload handler `tracegit hooks claude` wired to capture pipeline, transcript parse |
 | 15 | Aider adapter implementation | 8.2 | ✅ Done | Git log parser, Aider pattern detection, 2 tests |
 | 16 | Cursor adapter implementation | 8.2 | ✅ Done | JSON/JSONL trace parsing, workspace detection, 3 tests |
 
@@ -99,14 +111,14 @@ TraceGit/
 | 21 | `tracegit blame <file>` | 8.1 | ✅ Done | File-wide attribution |
 | 22 | `tracegit pr-report` | 12 | ✅ Done | Risk report + markdown |
 | 23 | `tracegit policy check` | 13 | ✅ Done | Policy evaluation |
-| 24 | `tracegit watch` | 8.1 | ✅ Done | Filesystem watcher (basic) |
+| 24 | `tracegit watch` | 8.1 | ✅ Done | Real `notify` filesystem watcher with debounce → git-diff capture → attribution → index (incl. untracked/new files) |
 | 25 | `tracegit event` | 8.1 | ✅ Done | Single event emission |
 | 26 | `tracegit export` | 15 | ✅ Done | Provenance bundle export |
 | 27 | `tracegit import` | 8.1 | ✅ Done | JSONL import |
 | 28 | `tracegit verify` | 11 | ✅ Done | Hash chain verification |
 | 29 | `tracegit sessions` | 8.1 | ✅ Done | Session listing |
-| 30 | `tracegit gc` | 8.1 | ✅ Done | Garbage collection |
-| 31 | `tracegit redact` | 14 | ✅ Done | Content redaction |
+| 30 | `tracegit gc` | 8.1 | ✅ Done | Real retention-based deletion (keep_days from config), rewrites logs + rebuilds index; `--dry-run` is truly dry |
+| 31 | `tracegit redact` | 14 | ✅ Done | Rewrites stored payloads in place, records RedactionInfo, re-seals hash chain so `verify` stays intact |
 
 ### Phase 4: Reports & Export (PRD secties 12, 15, 20)
 
@@ -134,8 +146,8 @@ TraceGit/
 | 41 | Session replay web UI | 16 | ✅ Done | Dark theme timeline, session sidebar, attribution bar, diff viewer, demo mode | Web dashboard |
 | 42 | Git remapping | 17 | ✅ Done | SHA remap via git diff-tree, rebase detection, 3 tests | |
 | 43 | SLSA/SPDX export | 20 | ✅ Done | SLSA v1.0 provenance + SPDX 2.3 SBOM with AI metadata, 2 tests | |
-| 44 | HTTP daemon (axum) | 22 | ✅ Done | 5 endpoints: status, event, events, sessions, export | TCP listener scaffold, needs axum/warp routing | |
-| 45 | MCP server | 23 | ✅ Done | 6 tools: explain, blame, sessions, policy, pr-report, verify | |
+| 44 | HTTP daemon (axum) | 22 | ✅ Done | `tracegit daemon` (loopback-only, token-auth, Host check). Server **recomputes the hash chain** via EventWriter — clients cannot forge provenance. 5 endpoints. |
+| 45 | MCP server | 23 | ✅ Done | `tracegit mcp` — real stdio JSON-RPC 2.0 (initialize/tools/list/tools/call). 6 tools backed by actual index/policy/verify queries. |
 | 46 | Team/server mode | 24 | ❌ Not started | |
 | 47 | Plugin SDK | 25 | ❌ Not started | |
 
@@ -144,8 +156,8 @@ TraceGit/
 | # | Module | PRD Sectie | Status | Details |
 |---|--------|-----------|--------|---------|
 | 48 | Cross-compilation | 32.3 | ✅ Done | mac arm64/x64 + linux x64 (musl), 3.7-4.4MB binaries | |
-| 49 | Homebrew formula | 32.3 | ✅ Done | dist/tracegit.rb, brew install support | |
-| 50 | npm package (CLI wrapper) | 32.3 | ✅ Done | JS API wrapper + CLI runner + post-install downloader | |
+| 49 | Homebrew formula | 32.3 | ✅ Done | `dist/tracegit.rb` (build-from-source; `sha256` placeholder to fill at release tag) |
+| 50 | npm package (CLI wrapper) | 32.3 | ✅ Done | JS API wrapper + CLI runner + post-install downloader that **verifies SHA-256** against the release `.sha256` sidecar before installing |
 | 51 | GitHub Release automation | 32.3 | ✅ Done | 5-target matrix build on tag push | |
 
 ---
@@ -155,23 +167,28 @@ TraceGit/
 Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney's beslissing:
 
 1. **Pricing / Business model** (PRD sectie 27-31) — niet relevant voor dev, Sydney beslist
-2. **Team/server mode auth** (PRD sectie 24) — later, eerst local-first afmaken
+2. **Team/server mode** (PRD sectie 24) — later, eerst local-first afmaken
 3. **SOC 2 compliance** (PRD sectie 26) — far future
-4. **MCP server** (PRD sectie 23) — mooi om te hebben, niet urgent
-5. **Plugin SDK** (PRD sectie 25) — API stabiliteit eerst nodig
-6. **Release signing / SLSA provenance** (PRD sectie 20) — na v1.0
+4. **Plugin SDK** (PRD sectie 25) — API stabiliteit eerst nodig
+5. **Release signing** (PRD sectie 20) — na v1.0 (SLSA/SPDX *export* is wel klaar)
+6. **Session replay web dashboard met live data** — statische UI bestaat; live data-koppeling nog te doen
+7. **GitHub Copilot / Codex CLI adapters** — gepland
 
 ---
 
 ## Huidige Test Status
 
 ```
-61 tests, 0 failures
-- core: 35 tests (schema, storage, attribution, redaction, policy, export, PR report)
-- adapters: 8 tests (Claude Code, Aider, Cursor, Generic) (schema validation, storage, attribution, redaction, policy, export, PR report)
-- cli: 0 tests (CLI integration tests pending)
-- adapters: 0 tests
+73 tests, 0 failures, 0 clippy warnings
+- core:     57 tests (schema/event-type round-trip, glob matcher, storage,
+            hash-chain verify + reseal, index session/attribution round-trip,
+            capture pipeline end-to-end, block_ai_read, attribution, redaction,
+            policy, export, PR report)
+- adapters:  8 tests (Claude Code, Aider, Cursor)
+- cli:       8 integration tests (version/help/init/doctor/status/sessions/verify)
 ```
+
+Run: `cargo build && cargo test && cargo clippy --workspace`.
 
 ---
 

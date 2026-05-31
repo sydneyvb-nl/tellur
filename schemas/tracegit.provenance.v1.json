@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://tracegit.dev/schemas/tracegit.provenance.v1.json",
+  "title": "TraceGit Provenance Bundle",
+  "description": "A portable export of provenance data (sessions, events, attributions, policy results)",
+  "type": "object",
+  "required": [
+    "schema", "id", "created_at", "repo_id", "git_ref", "git_commit_sha",
+    "sessions", "events", "attributions", "export_profile", "bundle_hash"
+  ],
+  "properties": {
+    "schema": { "type": "string", "const": "tracegit.provenance.v1" },
+    "id": { "type": "string" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "repo_id": { "type": "string" },
+    "git_ref": { "type": "string" },
+    "git_commit_sha": { "type": "string" },
+    "sessions": { "type": "array", "items": { "type": "object" } },
+    "events": { "type": "array", "items": { "type": "object" } },
+    "attributions": { "type": "array", "items": { "type": "object" } },
+    "context_sets": { "type": "array", "items": { "type": "object" } },
+    "policy_results": { "type": "array", "items": { "type": "object" } },
+    "export_profile": {
+      "type": "string",
+      "enum": [
+        "developerfull", "opensourcepublic", "corporateredacted",
+        "auditprivate", "releaseattestation", "cisummary"
+      ]
+    },
+    "bundle_hash": {
+      "type": "string",
+      "description": "SHA-256 over the canonical bundle JSON with bundle_hash set to \"\""
+    }
+  }
+}

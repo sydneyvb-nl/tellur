@@ -40,12 +40,12 @@ export class SessionProvider implements vscode.TreeDataProvider<SessionItem> {
 
 class SessionItem extends vscode.TreeItem {
     constructor(session: Session) {
-        const label = `${session.agent_id} — ${session.started_at.slice(0, 19)}`;
+        const label = `${session.agent_name || session.agent_id} — ${session.started_at.slice(0, 19)}`;
         super(label, vscode.TreeItemCollapsibleState.None);
 
         const origin = session.event_count > 0 ? '●' : '○';
-        this.description = `${origin} ${session.event_count} events${session.model_id ? ` · ${session.model_id}` : ''}`;
-        this.tooltip = `Session: ${session.id}\nAgent: ${session.agent_id}\nStarted: ${session.started_at}${session.ended_at ? `\nEnded: ${session.ended_at}` : ''}`;
+        this.description = `${origin} ${session.event_count} events${session.model_name ? ` · ${session.model_name}` : ''}`;
+        this.tooltip = `Session: ${session.id}\nAgent: ${session.agent_name || session.agent_id}\nStarted: ${session.started_at}${session.ended_at ? `\nEnded: ${session.ended_at}` : ''}`;
 
         this.contextValue = 'session';
     }

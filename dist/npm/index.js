@@ -1,9 +1,19 @@
 // TraceGit JS API wrapper
 const { execFileSync } = require('child_process');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 
 function getBinary() {
-  return path.resolve(__dirname, '..', '..', 'target', 'release', 'tracegit');
+  const name = os.platform() === 'win32' ? 'tracegit.exe' : 'tracegit';
+  // Downloaded by install.js into ./bin
+  const installed = path.resolve(__dirname, 'bin', name);
+  if (fs.existsSync(installed)) return installed;
+  // Locally built (monorepo dev)
+  const local = path.resolve(__dirname, '..', '..', 'target', 'release', name);
+  if (fs.existsSync(local)) return local;
+  // Fall back to PATH
+  return name;
 }
 
 function run(args) {

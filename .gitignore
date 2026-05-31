@@ -1,5 +1,4 @@
 node_modules/
-dist/
 .turbo/
 *.tsbuildinfo
 .DS_Store
@@ -9,11 +8,16 @@ dist/
 coverage/
 *.log
 
+# Build output of the VS Code extension (TypeScript)
+editor/tracegit-vscode/out/
+editor/tracegit-vscode/*.vsix
+
 # Rust
 target/
 **/*.rs.bk
-Cargo.lock
+# Cargo.lock IS committed for the CLI binary (reproducible, auditable builds).
 
-# TraceGit local data
+# TraceGit local data (logs + index are machine-local; config/policies are committed)
 .tracegit/traces/
 .tracegit/index/
+.tracegit/daemon.token

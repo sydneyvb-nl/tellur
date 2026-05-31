@@ -44,7 +44,21 @@ fn workspace_root() -> PathBuf {
 }
 
 fn temp_repo() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("tracegit-test-{}", std::process::id()));
+    // Unique per test invocation — tests run in parallel within one process,
+    // so the directory name must not collide (process id alone is shared).
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let unique = format!(
+        "{}-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::SeqCst),
+        nanos
+    );
+    let dir = std::env::temp_dir().join(format!("tracegit-test-{}", unique));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
 

@@ -58,44 +58,75 @@ pub fn export_provenance_bundle(
 
 fn filter_sessions(profile: &ExportProfile, sessions: Vec<Session>) -> Vec<Session> {
     match profile {
-        ExportProfile::OpenSourcePublic => {
-            sessions.into_iter().map(|mut s| {
-                // Remove environment metadata
+        // Public OSS: drop environment + prompt excerpts entirely.
+        ExportProfile::OpenSourcePublic => sessions
+            .into_iter()
+            .map(|mut s| {
                 s.environment = None;
-                // Redact task info
                 if let Some(ref mut task) = s.task {
                     task.prompt_redacted = None;
                 }
                 s
-            }).collect()
-        }
+            })
+            .collect(),
+        // Corporate: keep audit trail but never export prompt excerpts; keep
+        // the prompt *hash* for integrity. Environment is dropped.
+        ExportProfile::CorporateRedacted => sessions
+            .into_iter()
+            .map(|mut s| {
+                s.environment = None;
+                if let Some(ref mut task) = s.task {
+                    task.prompt_redacted = None;
+                }
+                s
+            })
+            .collect(),
+        // Audit and release keep full session detail; developer keeps everything.
         _ => sessions,
     }
 }
 
 fn filter_events(profile: &ExportProfile, events: Vec<TraceEvent>) -> Vec<TraceEvent> {
     match profile {
-        ExportProfile::OpenSourcePublic => {
-            // Strip all payloads — only keep event types and timestamps
-            events.into_iter().map(|mut e| {
+        // Public OSS: strip all payloads — only event types and timestamps.
+        ExportProfile::OpenSourcePublic => events
+            .into_iter()
+            .map(|mut e| {
                 e.payload = serde_json::json!({});
                 e.redaction = None;
                 e
-            }).collect()
-        }
-        ExportProfile::CISummary => {
-            // Only keep git and test events
-            events.into_iter().filter(|e| {
-                matches!(e.event_type,
-                    EventType::GitCommit |
-                    EventType::TestResult |
-                    EventType::PolicyViolation |
-                    EventType::SessionStart |
-                    EventType::SessionEnd
+            })
+            .collect(),
+        // Corporate: keep payload structure but drop free-text fields that may
+        // carry secrets (command strings, prompt text, stdout), keep hashes.
+        ExportProfile::CorporateRedacted => events
+            .into_iter()
+            .map(|mut e| {
+                if let Some(obj) = e.payload.as_object_mut() {
+                    for key in ["command", "prompt", "input", "output", "content", "stdout", "stderr"] {
+                        obj.remove(key);
+                    }
+                }
+                e
+            })
+            .collect(),
+        // CI / release: only the events relevant to a build/release decision.
+        ExportProfile::CISummary | ExportProfile::ReleaseAttestation => events
+            .into_iter()
+            .filter(|e| {
+                matches!(
+                    e.event_type,
+                    EventType::GitCommit
+                        | EventType::TestResult
+                        | EventType::PolicyViolation
+                        | EventType::ReviewApproval
+                        | EventType::SessionStart
+                        | EventType::SessionEnd
                 )
-            }).collect()
-        }
-        _ => events,
+            })
+            .collect(),
+        // Developer (full) and audit (full chain) keep everything.
+        ExportProfile::DeveloperFull | ExportProfile::AuditPrivate => events,
     }
 }
 

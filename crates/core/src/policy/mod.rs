@@ -6,6 +6,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
+use crate::glob::glob_match;
 use crate::schema::types::*;
 
 /// Policy engine evaluates rules against TraceGit data
@@ -64,6 +65,19 @@ impl PolicyEngine {
                     && sp.require_tests.unwrap_or(false) {
                         return true;
                     }
+            }
+        }
+        false
+    }
+
+    /// Check if AI agents are forbidden from reading this path (e.g. secrets).
+    /// Capture skips matching files entirely so their contents are never stored.
+    pub fn blocks_ai_read(&self, file_path: &str) -> bool {
+        if let Some(ref paths) = self.policy.sensitive_paths {
+            for sp in paths {
+                if glob_match(&sp.path, file_path) && sp.block_ai_read.unwrap_or(false) {
+                    return true;
+                }
             }
         }
         false
@@ -175,33 +189,6 @@ impl PolicyEngine {
     }
 }
 
-/// Simple glob matching
-fn glob_match(pattern: &str, path: &str) -> bool {
-    if pattern.contains("**") {
-        let parts: Vec<&str> = pattern.split("**").collect();
-        if parts.len() == 2 {
-            let prefix = parts[0];
-            let suffix = parts[1].trim_start_matches('/');
-            if !prefix.is_empty() && !path.starts_with(prefix) {
-                return false;
-            }
-            if !suffix.is_empty() {
-                return path.ends_with(suffix) || path.contains(suffix);
-            }
-            return true;
-        }
-    }
-    if pattern.ends_with('*') {
-        let prefix = pattern.trim_end_matches('*');
-        return path.starts_with(prefix);
-    }
-    if pattern.starts_with('*') {
-        let suffix = pattern.trim_start_matches('*');
-        return path.ends_with(suffix);
-    }
-    path == pattern
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,6 +203,7 @@ mod tests {
                     require_human_review: Some(true),
                     require_tests: Some(true),
                     block_ai_automerge: None,
+                    block_ai_read: None,
                 },
                 SensitivePath {
                     path: "infra/**".to_string(),
@@ -223,6 +211,7 @@ mod tests {
                     require_human_review: None,
                     require_tests: None,
                     block_ai_automerge: Some(true),
+                    block_ai_read: None,
                 },
             ]),
             rules: None,

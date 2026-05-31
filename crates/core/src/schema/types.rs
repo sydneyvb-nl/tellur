@@ -85,79 +85,142 @@ pub enum EventActor {
 
 // ─── Event Types ────────────────────────────────────────────────────────────
 
-/// All possible event types in the TraceGit event stream
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// All possible event types in the TraceGit event stream.
+///
+/// Serialised as a flat wire string (e.g. `"file.write"`). Any unrecognised
+/// string round-trips through [`EventType::Custom`] rather than being silently
+/// coerced — see `as_wire`/`from_wire`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventType {
     // Session lifecycle
-    #[serde(rename = "session.start")]
     SessionStart,
-    #[serde(rename = "session.end")]
     SessionEnd,
     // Prompt
-    #[serde(rename = "prompt.submitted")]
     PromptSubmitted,
-    #[serde(rename = "prompt.context_added")]
     PromptContextAdded,
     // File operations
-    #[serde(rename = "file.read")]
     FileRead,
-    #[serde(rename = "file.write")]
     FileWrite,
-    #[serde(rename = "file.patch")]
     FilePatch,
-    #[serde(rename = "file.delete")]
     FileDelete,
     // Commands
-    #[serde(rename = "command.pre_execute")]
     CommandPreExecute,
-    #[serde(rename = "command.post_execute")]
     CommandPostExecute,
     // Tool calls
-    #[serde(rename = "tool.pre_call")]
     ToolPreCall,
-    #[serde(rename = "tool.post_call")]
     ToolPostCall,
     // MCP
-    #[serde(rename = "mcp.pre_call")]
     McpPreCall,
-    #[serde(rename = "mcp.post_call")]
     McpPostCall,
     // Tests
-    #[serde(rename = "test.run")]
     TestRun,
-    #[serde(rename = "test.result")]
     TestResult,
     // Git
-    #[serde(rename = "git.diff")]
     GitDiff,
-    #[serde(rename = "git.commit")]
     GitCommit,
-    #[serde(rename = "git.branch")]
     GitBranch,
-    #[serde(rename = "git.merge")]
     GitMerge,
-    #[serde(rename = "git.rebase")]
     GitRebase,
     // Policy
-    #[serde(rename = "policy.violation")]
     PolicyViolation,
-    #[serde(rename = "policy.override")]
     PolicyOverride,
     // Review
-    #[serde(rename = "review.approval")]
     ReviewApproval,
     // Export
-    #[serde(rename = "export.created")]
     ExportCreated,
     // Convenience aliases used by adapters
-    #[serde(rename = "command.exec")]
     CommandExecution,
-    #[serde(rename = "code.search")]
     CodeSearch,
-    #[serde(rename = "user.prompt")]
     UserPrompt,
-    #[serde(rename = "custom")]
+    /// Any event type not in the known set. Preserves the original wire string.
     Custom(String),
+}
+
+impl EventType {
+    /// The canonical wire string for this event type.
+    pub fn as_wire(&self) -> String {
+        match self {
+            EventType::SessionStart => "session.start",
+            EventType::SessionEnd => "session.end",
+            EventType::PromptSubmitted => "prompt.submitted",
+            EventType::PromptContextAdded => "prompt.context_added",
+            EventType::FileRead => "file.read",
+            EventType::FileWrite => "file.write",
+            EventType::FilePatch => "file.patch",
+            EventType::FileDelete => "file.delete",
+            EventType::CommandPreExecute => "command.pre_execute",
+            EventType::CommandPostExecute => "command.post_execute",
+            EventType::ToolPreCall => "tool.pre_call",
+            EventType::ToolPostCall => "tool.post_call",
+            EventType::McpPreCall => "mcp.pre_call",
+            EventType::McpPostCall => "mcp.post_call",
+            EventType::TestRun => "test.run",
+            EventType::TestResult => "test.result",
+            EventType::GitDiff => "git.diff",
+            EventType::GitCommit => "git.commit",
+            EventType::GitBranch => "git.branch",
+            EventType::GitMerge => "git.merge",
+            EventType::GitRebase => "git.rebase",
+            EventType::PolicyViolation => "policy.violation",
+            EventType::PolicyOverride => "policy.override",
+            EventType::ReviewApproval => "review.approval",
+            EventType::ExportCreated => "export.created",
+            EventType::CommandExecution => "command.exec",
+            EventType::CodeSearch => "code.search",
+            EventType::UserPrompt => "user.prompt",
+            EventType::Custom(s) => s.as_str(),
+        }
+        .to_string()
+    }
+
+    /// Parse a wire string into an [`EventType`]. Unknown strings become
+    /// [`EventType::Custom`] so no information is lost.
+    pub fn from_wire(s: &str) -> EventType {
+        match s {
+            "session.start" => EventType::SessionStart,
+            "session.end" => EventType::SessionEnd,
+            "prompt.submitted" => EventType::PromptSubmitted,
+            "prompt.context_added" => EventType::PromptContextAdded,
+            "file.read" => EventType::FileRead,
+            "file.write" => EventType::FileWrite,
+            "file.patch" => EventType::FilePatch,
+            "file.delete" => EventType::FileDelete,
+            "command.pre_execute" => EventType::CommandPreExecute,
+            "command.post_execute" => EventType::CommandPostExecute,
+            "tool.pre_call" => EventType::ToolPreCall,
+            "tool.post_call" => EventType::ToolPostCall,
+            "mcp.pre_call" => EventType::McpPreCall,
+            "mcp.post_call" => EventType::McpPostCall,
+            "test.run" => EventType::TestRun,
+            "test.result" => EventType::TestResult,
+            "git.diff" => EventType::GitDiff,
+            "git.commit" => EventType::GitCommit,
+            "git.branch" => EventType::GitBranch,
+            "git.merge" => EventType::GitMerge,
+            "git.rebase" => EventType::GitRebase,
+            "policy.violation" => EventType::PolicyViolation,
+            "policy.override" => EventType::PolicyOverride,
+            "review.approval" => EventType::ReviewApproval,
+            "export.created" => EventType::ExportCreated,
+            "command.exec" => EventType::CommandExecution,
+            "code.search" => EventType::CodeSearch,
+            "user.prompt" => EventType::UserPrompt,
+            other => EventType::Custom(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for EventType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.as_wire())
+    }
+}
+
+impl<'de> Deserialize<'de> for EventType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Ok(EventType::from_wire(&s))
+    }
 }
 
 // ─── Core Entities ──────────────────────────────────────────────────────────
@@ -422,6 +485,10 @@ pub struct SensitivePath {
     pub require_tests: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub block_ai_automerge: Option<bool>,
+    /// If true, AI agents must not read this path (e.g. secrets). Enforced by
+    /// capture: matching files are skipped and never have their content stored.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_ai_read: Option<bool>,
 }
 
 /// A complete policy file
@@ -473,6 +540,43 @@ pub struct AiInvolvement {
     pub human_lines: u64,
     pub unknown_lines: u64,
     pub ai_percentage: f64,
+}
+
+#[cfg(test)]
+mod event_type_tests {
+    use super::EventType;
+
+    #[test]
+    fn test_known_round_trip() {
+        for et in [
+            EventType::FileWrite,
+            EventType::CommandPostExecute,
+            EventType::SessionStart,
+            EventType::UserPrompt,
+        ] {
+            let json = serde_json::to_string(&et).unwrap();
+            let back: EventType = serde_json::from_str(&json).unwrap();
+            assert_eq!(et, back);
+        }
+        // Serialises as a flat string, not an object.
+        assert_eq!(serde_json::to_string(&EventType::FileWrite).unwrap(), "\"file.write\"");
+        assert_eq!(
+            serde_json::to_string(&EventType::CommandPostExecute).unwrap(),
+            "\"command.post_execute\""
+        );
+    }
+
+    #[test]
+    fn test_unknown_becomes_custom_and_round_trips() {
+        // The bug this guards against: unknown types were silently coerced to
+        // file.write and could not round-trip.
+        let parsed = EventType::from_wire("vendor.special_event");
+        assert_eq!(parsed, EventType::Custom("vendor.special_event".to_string()));
+        let json = serde_json::to_string(&parsed).unwrap();
+        assert_eq!(json, "\"vendor.special_event\"");
+        let back: EventType = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, back);
+    }
 }
 
 /// Complete PR risk report

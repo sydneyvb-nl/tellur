@@ -188,11 +188,12 @@ pub fn generate_spdx_sbom(
             attribution_texts.push(format!("Human-written: {} lines", total_human));
         }
 
+        let short_sha: String = commit_sha.chars().take(8).collect();
         let pkg_id = format!("SPDXRef-file-{}", i);
         packages.push(SpdxPackage {
             spdx_id: pkg_id.clone(),
             name: attr.file_path.clone(),
-            version_info: Some(commit_sha[..8].to_string()),
+            version_info: Some(short_sha),
             download_location: format!("git+{}#{}", repo_url, commit_sha),
             files_analyzed: true,
             attribution_texts,

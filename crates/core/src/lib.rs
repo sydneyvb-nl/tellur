@@ -5,8 +5,10 @@
 
 pub mod adapter;
 pub mod attribution;
+pub mod capture;
 pub mod daemon;
 pub mod export;
+pub mod glob;
 pub mod mcp;
 pub mod policy;
 pub mod redaction;

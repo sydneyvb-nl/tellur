@@ -22,21 +22,27 @@ impl AttributionEngine {
         Self
     }
 
-    /// Attribute a patch to a session
+    /// Attribute a patch to a session.
     ///
-    /// Takes a diff (unified format) and creates attribution ranges
-    /// for the changed lines, linked to the session that produced them.
+    /// Takes a unified diff and creates attribution ranges for the changed
+    /// lines. The `origin`, `evidence_strength`, and `confidence` are supplied
+    /// by the caller because only the caller knows *how* the change was
+    /// observed: a recorded AI-tool hook/transcript is strong evidence
+    /// (`Recorded`, `Ai`, 1.0), whereas a bare filesystem change seen by
+    /// `watch` without a known AI session is `Unknown`/`Inferred` with lower
+    /// confidence. This is what keeps AI-vs-human attribution honest.
     #[allow(clippy::too_many_arguments)]
     pub fn attribute_patch(
         &self,
         session_id: &str,
         agent_id: &str,
-        _file_path: &str,
-        _blob_sha_before: &str,
-        _blob_sha_after: &str,
         unified_diff: &str,
+        origin: Origin,
+        evidence_strength: EvidenceStrength,
+        confidence: f64,
         model_id: Option<&str>,
         prompt_hash: Option<&str>,
+        event_ids: &[String],
     ) -> Result<Vec<AttributionRange>> {
         let ranges = parse_diff_ranges(unified_diff);
         let mut attributions = Vec::new();
@@ -46,12 +52,12 @@ impl AttributionEngine {
                 range_id: crate::schema::ids::generate_range_id(),
                 start_line: start,
                 end_line: end,
-                origin: Origin::Ai,
-                evidence_strength: EvidenceStrength::Recorded,
-                confidence: 1.0,
+                origin: origin.clone(),
+                evidence_strength: evidence_strength.clone(),
+                confidence: confidence.clamp(0.0, 1.0),
                 state: AttributionState::Exact,
                 session_id: session_id.to_string(),
-                event_ids: Vec::new(),
+                event_ids: event_ids.to_vec(),
                 agent_id: agent_id.to_string(),
                 model_id: model_id.map(|s| s.to_string()),
                 prompt_hash: prompt_hash.map(|s| s.to_string()),
@@ -163,12 +169,13 @@ mod tests {
             .attribute_patch(
                 "sess_test",
                 "claude-code",
-                "src/main.rs",
-                "abc",
-                "def",
                 diff,
+                Origin::Ai,
+                EvidenceStrength::Recorded,
+                1.0,
                 Some("anthropic:claude-opus-4.7"),
                 Some("sha256:abc"),
+                &[],
             )
             .unwrap();
 

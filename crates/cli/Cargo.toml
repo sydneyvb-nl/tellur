@@ -19,3 +19,5 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 chrono = { workspace = true }
 tokio = { version = "1", features = ["full"] }
+notify = "6"
+ctrlc = "3"

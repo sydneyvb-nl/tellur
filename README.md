@@ -10,7 +10,7 @@ Git tells you *what* changed. TraceGit tells you *how AI participated*.
 
 ## Status
 
-**Early development.** Core engine, CLI, and schemas are functional. Editor extension and full adapter support are in progress.
+**Beta.** The full local pipeline is functional end-to-end: capture (watch + Claude Code hooks) → line attribution → SQLite index → `explain`/`blame`/`pr-report`/`verify`, plus policy-as-code, secret redaction, provenance export, a token-authenticated local daemon, an MCP server, and a VS Code extension. Team/server mode and additional adapters (Copilot, Codex) are planned.
 
 ## Why TraceGit?
 
@@ -84,7 +84,25 @@ tracegit verify
 
 # Export provenance data
 tracegit export --format json
+
+# Install AI-tool hooks (Claude Code) for automatic capture
+tracegit hooks install
+
+# Run the local event-ingestion daemon (loopback only, token-authenticated)
+tracegit daemon
+
+# Run the MCP server over stdio (for AI agents)
+tracegit mcp
+
+# Garbage-collect events past the retention window
+tracegit gc --dry-run
+
+# Redact secrets from stored events
+tracegit redact
 ```
+
+`explain`, `blame`, and `sessions` accept `--json` for machine-readable output
+(used by the editor extension and CI).
 
 ## Data Model
 
@@ -122,12 +140,12 @@ JSON Schema definitions are in [`schemas/`](./schemas/).
 
 | Tool | Adapter | Status |
 |------|---------|--------|
-| Claude Code | Hooks + transcript | Adapter built, hooks pending |
-| Cursor | Agent Trace import | Adapter built, import pending |
-| Aider | Git commit attribution | Adapter built, import pending |
+| Claude Code | Hooks + transcript | Working (`tracegit hooks install`) |
+| Cursor | Agent Trace import | Working (`tracegit import cursor <file>`) |
+| Aider | Git commit attribution | Working (`tracegit import aider <repo>`) |
+| Generic | CLI + JSONL + HTTP daemon | Working |
 | GitHub Copilot | Metadata capture | Planned |
 | Codex CLI | Event stream | Planned |
-| Generic | CLI + HTTP API | Working |
 
 ## Policy Example
 
@@ -162,7 +180,7 @@ rules:
 # Build
 cargo build
 
-# Run tests (35 tests)
+# Run tests
 cargo test
 
 # Run CLI
@@ -172,16 +190,18 @@ cargo run -p tracegit-cli -- doctor
 
 ## Roadmap
 
-- [ ] Claude Code hook installer
-- [ ] Aider commit attribution import
-- [ ] Cursor Agent Trace import/export
-- [ ] VS Code extension (TypeScript)
-- [ ] Session replay web dashboard
-- [ ] Local HTTP event API (daemon mode)
-- [ ] Git remapping across rebases
-- [ ] SLSA/SPDX export integration
+- [x] Claude Code hook installer
+- [x] Aider commit attribution import
+- [x] Cursor Agent Trace import
+- [x] VS Code extension (TypeScript)
+- [x] Local HTTP event API (daemon mode, loopback + token auth)
+- [x] MCP server (stdio)
+- [x] Git remapping across rebases
+- [x] SLSA/SPDX export integration
+- [x] Homebrew formula
+- [ ] Session replay web dashboard (static UI shipped; live data pending)
 - [ ] Team/server mode
-- [ ] Homebrew formula
+- [ ] GitHub Copilot / Codex CLI adapters
 
 ## Contributing
 

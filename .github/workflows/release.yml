@@ -27,7 +27,7 @@ jobs:
             name: tracegit-linux-arm64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            name: tracegit-windows-x64.exe
+            name: tracegit-windows-x64
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -52,15 +52,19 @@ jobs:
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
-          cp target/${{ matrix.target }}/release/tracegit ${{ matrix.name }}
-          chmod +x ${{ matrix.name }}
-          tar czf ${{ matrix.name }}.tar.gz ${{ matrix.name }}
+          # Archive contains a canonical `tracegit` binary so the installer
+          # doesn't need per-platform inner names.
+          cp target/${{ matrix.target }}/release/tracegit tracegit
+          chmod +x tracegit
+          tar czf ${{ matrix.name }}.tar.gz tracegit
+          shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         run: |
-          cp target/${{ matrix.target }}/release/tracegit.exe ${{ matrix.name }}
-          7z a ${{ matrix.name }}.zip ${{ matrix.name }}
+          cp target/${{ matrix.target }}/release/tracegit.exe tracegit.exe
+          7z a ${{ matrix.name }}.zip tracegit.exe
+          (Get-FileHash -Algorithm SHA256 "${{ matrix.name }}.zip").Hash.ToLower() | Out-File -Encoding ascii "${{ matrix.name }}.zip.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -68,7 +72,9 @@ jobs:
           name: ${{ matrix.name }}
           path: |
             ${{ matrix.name }}.tar.gz
+            ${{ matrix.name }}.tar.gz.sha256
             ${{ matrix.name }}.zip
+            ${{ matrix.name }}.zip.sha256
 
   release:
     needs: build

@@ -20,14 +20,24 @@ jobs:
 
       - name: Install TraceGit
         run: |
-          curl -sL https://github.com/sydneyvb-nl/TraceGit/releases/latest/download/tracegit-linux-arm64 -o /usr/local/bin/tracegit
-          chmod +x /usr/local/bin/tracegit
-          tracegit --version || echo "TraceGit not yet released — skipping"
+          set -euo pipefail
+          # Download the linux x64 release tarball (CI runner is x64) and extract.
+          url="https://github.com/sydneyvb-nl/TraceGit/releases/latest/download/tracegit-linux-x64.tar.gz"
+          if curl -fsSL "$url" -o tracegit.tar.gz; then
+            tar xzf tracegit.tar.gz
+            sudo install -m 0755 tracegit-linux-x64 /usr/local/bin/tracegit
+            tracegit --version
+          else
+            echo "TraceGit not yet released — skipping provenance check." >&2
+            echo "skip=true" >> "$GITHUB_ENV"
+          fi
 
       - name: Check for TraceGit config
         id: check
         run: |
-          if [ -d ".tracegit" ]; then
+          if [ "${skip:-false}" = "true" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          elif [ -d ".tracegit" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
@@ -36,8 +46,13 @@ jobs:
 
       - name: Generate PR Report
         if: steps.check.outputs.enabled == 'true'
+        # Pass refs via the environment (never interpolate ${{ }} into the shell)
+        # so a malicious branch name cannot inject commands. See SEC-1.
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
-          tracegit pr-report --base origin/${{ github.base_ref }} --head origin/${{ github.head_ref }} > pr-report.md
+          tracegit pr-report --base "origin/$BASE_REF" --head "origin/$HEAD_REF" > pr-report.md
           tracegit policy check > policy-check.txt 2>&1 || true
 
       - name: Comment PR
