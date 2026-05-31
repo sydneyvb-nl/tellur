@@ -145,7 +145,7 @@ TraceGit/
 |---|--------|-----------|--------|---------|
 | 48 | Cross-compilation | 32.3 | ✅ Done | mac arm64/x64 + linux x64 (musl), 3.7-4.4MB binaries | |
 | 49 | Homebrew formula | 32.3 | ✅ Done | dist/tracegit.rb, brew install support | |
-| 50 | npm package (CLI wrapper) | 32.3 | ❌ Not started | |
+| 50 | npm package (CLI wrapper) | 32.3 | ✅ Done | JS API wrapper + CLI runner + post-install downloader | |
 | 51 | GitHub Release automation | 32.3 | ✅ Done | 5-target matrix build on tag push | |
 
 ---

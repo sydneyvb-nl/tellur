@@ -1,0 +1,36 @@
+{
+  "name": "tracegit",
+  "version": "0.1.0",
+  "description": "AI Code Provenance — track who changed what: AI or human",
+  "main": "index.js",
+  "bin": {
+    "tracegit": "./run.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js",
+    "test": "node run.js --version"
+  },
+  "keywords": [
+    "ai",
+    "attribution",
+    "provenance",
+    "git",
+    "code-review",
+    "cli"
+  ],
+  "author": "Sydney VB",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sydneyvb-nl/TraceGit"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}
