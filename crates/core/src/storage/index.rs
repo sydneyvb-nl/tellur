@@ -202,8 +202,8 @@ impl TraceIndex {
             "INSERT OR REPLACE INTO attributions
              (file_path, git_blob_sha, range_id, start_line, end_line, origin, evidence_strength,
               confidence, state, session_id, agent_id, model_id, policy_tags, risk_tags,
-              risk_level, tests_passed, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+              risk_level, tests_run, tests_passed, reviewer, reviewed_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
             params![
                 file_path,
                 blob_sha,
@@ -220,7 +220,10 @@ impl TraceIndex {
                 policy_tags,
                 risk_tags,
                 attr.risk_level.as_ref().map(enum_to_str),
+                serde_json::to_string(&attr.tests_run).unwrap_or_else(|_| "[]".to_string()),
                 attr.tests_passed,
+                attr.reviewer,
+                attr.reviewed_at,
                 updated_at,
             ],
         )?;

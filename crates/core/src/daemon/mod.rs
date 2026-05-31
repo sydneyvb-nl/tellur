@@ -168,23 +168,42 @@ async fn submit_events(
     )
 }
 
-async fn list_sessions() -> Json<ApiResponse> {
-    // Placeholder — returns basic info
-    Json(ApiResponse {
-        status: "ok".to_string(),
-        data: Some(serde_json::json!({
-            "message": "Query tracegit sessions via CLI for full data"
-        })),
-    })
+async fn list_sessions(State(state): State<Arc<DaemonState>>) -> Json<ApiResponse> {
+    let index_path = state.repo_root.join(".tracegit").join("index").join("tracegit.db");
+    match TraceIndex::open(&index_path) {
+        Ok(index) => {
+            let sessions = index.session_count().unwrap_or(0);
+            let events = index.event_count().unwrap_or(0);
+            Json(ApiResponse {
+                status: "ok".to_string(),
+                data: Some(serde_json::json!({
+                    "sessions": sessions,
+                    "total_events": events,
+                })),
+            })
+        }
+        Err(e) => Json(ApiResponse {
+            status: "error".to_string(),
+            data: Some(serde_json::json!({ "error": e.to_string() })),
+        }),
+    }
 }
 
-async fn export_bundle() -> Json<ApiResponse> {
-    Json(ApiResponse {
-        status: "ok".to_string(),
-        data: Some(serde_json::json!({
-            "message": "Export endpoint ready. POST with { profile: 'oss|developer|corporate|audit' }"
-        })),
-    })
+async fn export_bundle(State(state): State<Arc<DaemonState>>) -> Json<ApiResponse> {
+    let traces_dir = state.repo_root.join(".tracegit").join("traces");
+    match crate::storage::read_events(&traces_dir) {
+        Ok(events) => Json(ApiResponse {
+            status: "ok".to_string(),
+            data: Some(serde_json::json!({
+                "event_count": events.len(),
+                "events": events,
+            })),
+        }),
+        Err(e) => Json(ApiResponse {
+            status: "error".to_string(),
+            data: Some(serde_json::json!({ "error": e.to_string() })),
+        }),
+    }
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────

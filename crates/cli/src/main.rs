@@ -406,11 +406,12 @@ fn cmd_pr_report(base: &str, head: &str) -> Result<()> {
 
     // Get policy results
     let policy_dir = &storage.policies_dir;
-    let policy_files: Vec<_> = std::fs::read_dir(policy_dir)
-        .unwrap_or_else(|_| panic!("No policies dir"))
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().is_some_and(|ext| ext == "yml"))
-        .collect();
+    let policy_files: Vec<_> = match std::fs::read_dir(policy_dir) {
+        Ok(rd) => rd.filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "yml"))
+            .collect(),
+        Err(_) => Vec::new(),
+    };
 
     let mut policy_results = Vec::new();
     for pf in &policy_files {
@@ -687,6 +688,9 @@ fn cmd_event(
         return Ok(());
     }
 
+    // Normalize event_type: underscores to dots (user-friendly)
+    let normalized_type = event_type.replace('_', ".");
+
     let mut payload = serde_json::json!({});
     if let Some(f) = file {
         payload["file"] = serde_json::json!(f);
@@ -700,14 +704,14 @@ fn cmd_event(
 
     let mut writer = EventWriter::new(&storage.traces_dir);
     writer.open()?;
-    let event = writer.write_event(session, event_type, "agent", payload, None)?;
+    let event = writer.write_event(session, &normalized_type, "agent", payload, None)?;
     writer.close();
 
     // Index the event
     let index = TraceIndex::open(&storage.index_path)?;
     index.index_event(&event)?;
 
-    println!("Event recorded: {} ({})", event.id, event_type);
+    println!("Event recorded: {} ({})", event.id, normalized_type);
     Ok(())
 }
 
