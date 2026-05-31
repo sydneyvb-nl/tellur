@@ -1,151 +1,199 @@
 # Tellur
 
-**AI Code Provenance for Teams**
+**Local-first AI code provenance for software teams.**
 
-> Who changed that function? Which model generated it? What prompt and context produced that change? Did tests pass? Who reviewed it?
+Tellur records how AI participated in a codebase: which agent changed which
+lines, what model and prompt context were involved, whether tests ran, and
+whether sensitive changes were reviewed.
 
-Tellur is an open-source AI code provenance platform that records, attributes, and reports on AI-assisted development. It gives teams line-level AI blame, session replay, PR risk reports, and policy-as-code — without uploading your code anywhere.
+Git tells you what changed. Tellur tells you how AI participated.
 
-Git tells you *what* changed. Tellur tells you *how AI participated*.
+Tellur is open source, runs locally, and stores provenance data inside your
+repository. Your source code does not need to leave your machine.
+
+## Why Tellur
+
+AI coding agents are now part of everyday development, but most teams still
+review AI-assisted changes with standard Git metadata only. That leaves
+important questions unanswered:
+
+- Which lines were AI-generated, human-written, or mixed?
+- Which model, tool, prompt, and session produced a change?
+- Did the agent touch sensitive files such as auth, payments, secrets, or infra?
+- Were tests run before the change was merged?
+- Does a PR need extra review because of AI involvement?
+
+Tellur turns those questions into local, queryable evidence for developers,
+reviewers, maintainers, and compliance workflows.
+
+## What It Does
+
+- **Line-level attribution** maps code ranges to an agent, model, session,
+  prompt hash, evidence strength, and confidence score.
+- **Session capture** records AI-assisted activity from CLI commands, editor
+  hooks, importers, and the local daemon.
+- **PR risk reports** summarize AI involvement, sensitive paths, tests, review
+  gaps, and policy warnings.
+- **Policy-as-code** lets teams define YAML rules for sensitive paths, required
+  tests, human review, and blocked AI reads.
+- **Tamper-evident logs** store events as JSONL with a SHA-256 hash chain.
+- **Fast local queries** use a SQLite index for CLI, VS Code, MCP, and dashboard
+  views.
+- **Provenance export** produces portable bundles for developer, OSS,
+  corporate, audit, release, and CI workflows.
+- **Secret redaction** detects and sanitizes common keys, tokens, passwords, and
+  private key material.
 
 ## Status
 
-**Beta.** The full local pipeline is functional end-to-end: capture (watch + Claude Code hooks) → line attribution → SQLite index → `explain`/`blame`/`pr-report`/`verify`, plus policy-as-code, secret redaction, provenance export, a token-authenticated local daemon, an MCP server, and a VS Code extension. Team/server mode and additional adapters (Copilot, Codex) are planned.
+Tellur is in beta. The local pipeline is functional end to end:
 
-## Why Tellur?
-
-AI coding tools (Cursor, Claude Code, Aider, Copilot, Codex, Windsurf, Gemini CLI) write production code every day. But teams have no visibility into:
-
-- Which code was AI-generated vs human-written
-- What prompts, models, and agents produced specific changes
-- Whether tests were run before AI code was committed
-- Whether sensitive files were accessed by agents
-- Whether AI changes were properly reviewed
-
-## Architecture
-
-```
-Tellur/
-├── crates/
-│   ├── core/          # Core library — schemas, attribution, storage, policy, redaction, export
-│   ├── cli/           # CLI binary (tellur command)
-│   └── adapters/      # AI tool adapters (Claude Code, Aider, Cursor, Generic)
-├── schemas/           # JSON Schema definitions
-└── .github/           # GitHub Action for PR checks
+```text
+capture -> attribution -> event log -> SQLite index -> CLI/editor/reports
 ```
 
-**Tech stack:** Rust (core + CLI), SQLite (index), JSONL (append-only event log)
+Implemented surfaces include the CLI, Claude Code hooks, importers for Cursor,
+Aider, Codex CLI, and GitHub Copilot, a local token-authenticated daemon, an MCP
+stdio server, a VS Code extension, provenance export, and a static session replay
+dashboard backed by daemon data.
 
-## Features (implemented)
+Team/server mode is not implemented yet.
 
-- **Line-level AI attribution** — maps code ranges to AI agent, model, prompt hash, and confidence score
-- **Tamper-evident event log** — SHA-256 hash chain across all events in JSONL format
-- **SQLite index** — fast queries for CLI, editor, and PR reports
-- **Policy engine** — YAML-based rules for sensitive paths, required reviews, and test evidence
-- **Secret redaction** — regex-based detection and sanitization of API keys, tokens, passwords
-- **PR risk reports** — risk scoring, AI involvement stats, reviewer checklist, markdown output
-- **Provenance export** — 6 profiles (developer, OSS, corporate, audit, release, CI)
-- **File change capture** — git diff integration with blob SHA tracking
-- **Adapter interface** — async trait for pluggable AI tool integrations
-- **GitHub Action** — automated PR provenance checks
+## Install
 
-## CLI
+From source:
 
 ```bash
-# Install (from source)
 cargo install --path crates/cli
-
-# Initialize in a repository
-tellur init
-
-# Check setup and detect AI tools
-tellur doctor
-
-# Start capturing AI development activity
-tellur watch
-
-# Explain who/what changed a specific line
-tellur explain src/auth/session.ts:84
-
-# Show AI attribution for a file
-tellur blame src/auth/session.ts
-
-# Generate a PR risk report
-tellur pr-report --base main --head feature/auth
-
-# Check policy compliance
-tellur policy check
-
-# Emit a single event (generic adapter / CI)
-tellur event --event-type file.write --session $SESSION --file src/api.ts
-
-# Verify provenance integrity (hash chain)
-tellur verify
-
-# Export provenance data
-tellur export --format json
-
-# Install AI-tool hooks (Claude Code) for automatic capture
-tellur hooks install
-
-# Run the local event-ingestion daemon (loopback only, token-authenticated)
-tellur daemon
-
-# Run the MCP server over stdio (for AI agents)
-tellur mcp
-
-# Garbage-collect events past the retention window
-tellur gc --dry-run
-
-# Redact secrets from stored events
-tellur redact
 ```
 
-`explain`, `blame`, and `sessions` accept `--json` for machine-readable output
-(used by the editor extension and CI).
+For development:
+
+```bash
+cargo build
+cargo test
+cargo run -p tellur-cli -- --help
+```
+
+Tellur currently targets Rust stable with edition 2024.
+
+## Quickstart
+
+Initialize Tellur in a Git repository:
+
+```bash
+tellur init
+```
+
+Check the local setup and detected AI tools:
+
+```bash
+tellur doctor
+```
+
+Start capturing file changes:
+
+```bash
+tellur watch
+```
+
+Install Claude Code hooks for automatic capture:
+
+```bash
+tellur hooks install
+```
+
+Import activity from supported tools:
+
+```bash
+tellur import cursor path/to/agent-trace.json
+tellur import aider path/to/repo
+tellur import codex path/to/codex-events.jsonl
+tellur import copilot path/to/copilot-metadata.jsonl
+```
+
+Query attribution:
+
+```bash
+tellur explain src/auth/session.ts:84
+tellur blame src/auth/session.ts
+```
+
+Generate a PR report:
+
+```bash
+tellur pr-report --base main --head HEAD
+```
+
+Verify the event log:
+
+```bash
+tellur verify
+```
+
+## CLI Reference
+
+```bash
+tellur init                         # Initialize .tellur/
+tellur doctor                       # Check setup and detect tools
+tellur status                       # Show repository capture status
+tellur watch                        # Capture working tree changes
+tellur explain <file:line>          # Explain attribution for one line
+tellur blame <file>                 # Show file attribution ranges
+tellur sessions                     # List captured sessions
+tellur pr-report --base main        # Generate a PR risk report
+tellur policy check                 # Evaluate configured policies
+tellur event --event-type file.write --session <id> --file <path>
+tellur import <adapter> <source>    # Import external AI tool data
+tellur export --format json         # Export provenance data
+tellur daemon                       # Run local HTTP ingestion/dashboard API
+tellur mcp                          # Run MCP server over stdio
+tellur gc --dry-run                 # Garbage-collect expired events
+tellur redact                       # Redact secrets from stored events
+tellur verify                       # Verify hash-chain integrity
+```
+
+`explain`, `blame`, and `sessions` support `--json` for machine-readable output.
+
+## Supported Adapters
+
+| Tool | Input | Status |
+| --- | --- | --- |
+| Claude Code | Hooks + transcript parsing | Working |
+| Cursor | Agent Trace JSON import | Working |
+| Aider | Git commit attribution import | Working |
+| Codex CLI | JSONL event stream/session transcript import | Working |
+| GitHub Copilot | Metadata JSON/JSONL import | Working |
+| Generic | CLI events, JSONL, local HTTP daemon | Working |
+
+The adapter layer is pluggable, so additional tools can normalize their events
+into Tellur's schema without changing the core attribution engine.
 
 ## Data Model
 
-Tellur stores data in `.tellur/` within your repository:
+Tellur stores repository-local data under `.tellur/`:
 
-```
+```text
 .tellur/
-├── config.yml           # Configuration (committed)
+├── config.yml           # Configuration, intended to be committed
 ├── policies/
-│   └── default.yml      # Policy rules (committed)
+│   └── default.yml      # Policy rules, intended to be committed
 ├── traces/
-│   └── sessions/        # JSONL event logs (gitignored by default)
-│       └── 2026/05/
-│           └── events-2026-05-31.jsonl
+│   └── sessions/        # JSONL event logs, gitignored by default
 ├── index/
-│   └── tellur.db      # SQLite index (gitignored)
+│   └── tellur.db        # SQLite index, gitignored by default
 └── exports/             # Generated provenance bundles
 ```
 
-### Schemas
-
-All data conforms to versioned schemas:
+Versioned JSON schemas live in [`schemas/`](./schemas/):
 
 | Schema | Description |
-|--------|-------------|
+| --- | --- |
 | `tellur.session.v1` | A bounded AI-assisted development interaction |
 | `tellur.event.v1` | A timestamped action within a session |
 | `tellur.attribution.v1` | Line-level origin mapping for a file |
 | `tellur.pr-report.v1` | PR risk report with AI involvement stats |
 | `tellur.provenance.v1` | Portable export bundle |
-
-JSON Schema definitions are in [`schemas/`](./schemas/).
-
-## Supported AI Tools
-
-| Tool | Adapter | Status |
-|------|---------|--------|
-| Claude Code | Hooks + transcript | Working (`tellur hooks install`) |
-| Cursor | Agent Trace import | Working (`tellur import cursor <file>`) |
-| Aider | Git commit attribution | Working (`tellur import aider <repo>`) |
-| Generic | CLI + JSONL + HTTP daemon | Working |
-| Codex CLI | JSONL event stream import | Working (`tellur import codex <file>`) |
-| GitHub Copilot | Metadata import | Working (`tellur import copilot <file>`) |
 
 ## Policy Example
 
@@ -174,34 +222,46 @@ rules:
       tests_run: true
 ```
 
+## Architecture
+
+```text
+Tellur/
+├── crates/
+│   ├── core/          # Schemas, attribution, storage, policy, export, daemon, MCP
+│   ├── cli/           # tellur command
+│   └── adapters/      # Claude Code, Cursor, Aider, Codex, Copilot, Generic
+├── editor/            # VS Code extension
+├── schemas/           # JSON Schema definitions
+├── dist/              # npm wrapper and Homebrew formula
+└── web/               # Session replay dashboard
+```
+
+Core storage is intentionally simple: append-only JSONL for auditability,
+SQLite for query speed, and Git blob SHAs for stable attribution across file
+states.
+
 ## Development
 
 ```bash
-# Build
-cargo build
-
-# Run tests
+cargo fmt --check
 cargo test
-
-# Run CLI
-cargo run -p tellur-cli -- init
 cargo run -p tellur-cli -- doctor
+```
+
+VS Code extension:
+
+```bash
+cd editor/tellur-vscode
+npm install
+npm run compile
 ```
 
 ## Roadmap
 
-- [x] Claude Code hook installer
-- [x] Aider commit attribution import
-- [x] Cursor Agent Trace import
-- [x] VS Code extension (TypeScript)
-- [x] Local HTTP event API (daemon mode, loopback + token auth)
-- [x] MCP server (stdio)
-- [x] Git remapping across rebases
-- [x] SLSA/SPDX export integration
-- [x] Homebrew formula
-- [x] Session replay web dashboard (static UI + local daemon live data)
-- [ ] Team/server mode
-- [x] GitHub Copilot / Codex CLI adapters
+- Team/server mode for shared organizational visibility
+- More first-party adapters for emerging AI coding tools
+- Richer policy templates for security-sensitive repositories
+- Packaged releases for npm, Homebrew, and GitHub Releases
 
 ## Contributing
 
