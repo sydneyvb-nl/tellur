@@ -45,7 +45,7 @@ impl PRReportGenerator {
                 }
             }
 
-            if !file_has_ai && attr.ranges.is_empty() {
+            if attr.ranges.is_empty() {
                 unattributed.push(attr.file_path.clone());
             }
         }
