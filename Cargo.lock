@@ -1031,6 +1031,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror",
+ "tokio",
  "toml",
  "uuid",
  "walkdir",

@@ -5,6 +5,7 @@
 
 pub mod adapter;
 pub mod attribution;
+pub mod daemon;
 pub mod policy;
 pub mod redaction;
 pub mod report;
