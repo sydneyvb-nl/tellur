@@ -1,7 +1,7 @@
 //! Git remapping — preserve attribution across rebase, squash, amend
 //!
 //! When git history is rewritten, blob SHAs change. This module remaps
-//! TraceGit attributions from old blob SHAs to new ones.
+//! Tellur attributions from old blob SHAs to new ones.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -33,13 +33,7 @@ pub fn build_remap_from_diff(
     new_ref: &str,
 ) -> Result<Vec<RemapEntry>> {
     let output = std::process::Command::new("git")
-        .args([
-            "diff-tree",
-            "-r",
-            "--no-commit-id",
-            old_ref,
-            new_ref,
-        ])
+        .args(["diff-tree", "-r", "--no-commit-id", old_ref, new_ref])
         .current_dir(repo_root)
         .output()?;
 
@@ -53,10 +47,17 @@ pub fn build_remap_from_diff(
     for line in stdout.lines() {
         // Format: :old_mode new_mode old_sha new_sha status\tfile_path
         let parts: Vec<&str> = line.splitn(2, '\t').collect();
-        if parts.len() < 2 { continue; }
+        if parts.len() < 2 {
+            continue;
+        }
 
-        let meta: Vec<&str> = parts[0].trim_start_matches(':').split_whitespace().collect();
-        if meta.len() < 4 { continue; }
+        let meta: Vec<&str> = parts[0]
+            .trim_start_matches(':')
+            .split_whitespace()
+            .collect();
+        if meta.len() < 4 {
+            continue;
+        }
 
         let old_sha = meta[2].to_string();
         let new_sha = meta[3].to_string();
@@ -75,15 +76,13 @@ pub fn build_remap_from_diff(
 }
 
 /// Apply a SHA remap to a map of file → blob_sha
-pub fn apply_remap(
-    file_shas: &mut HashMap<String, String>,
-    remap: &[RemapEntry],
-) -> RemapResult {
+pub fn apply_remap(file_shas: &mut HashMap<String, String>, remap: &[RemapEntry]) -> RemapResult {
     let mut remapped = 0u32;
     let mut unchanged = 0u32;
     let mut missing = 0u32;
 
-    let remap_lookup: HashMap<(&str, &str), &RemapEntry> = remap.iter()
+    let remap_lookup: HashMap<(&str, &str), &RemapEntry> = remap
+        .iter()
         .map(|e| ((e.old_sha.as_str(), e.file_path.as_str()), e))
         .collect();
 
@@ -97,7 +96,8 @@ pub fn apply_remap(
     }
 
     // Count entries in remap that didn't match any file
-    let matched: std::collections::HashSet<(&str, &str)> = file_shas.iter()
+    let matched: std::collections::HashSet<(&str, &str)> = file_shas
+        .iter()
         .map(|(fp, sha)| (sha.as_str(), fp.as_str()))
         .collect();
     for entry in remap {
@@ -115,11 +115,7 @@ pub fn apply_remap(
 }
 
 /// Detect if a rebase/squash happened by comparing ref SHAs
-pub fn detect_rewrite(
-    repo_root: &Path,
-    ref_before: &str,
-    ref_after: &str,
-) -> Result<bool> {
+pub fn detect_rewrite(repo_root: &Path, ref_before: &str, ref_after: &str) -> Result<bool> {
     let sha_before = get_ref_sha(repo_root, ref_before)?;
     let sha_after = get_ref_sha(repo_root, ref_after)?;
     Ok(sha_before != sha_after)
@@ -149,13 +145,11 @@ mod tests {
         file_shas.insert("src/lib.rs".to_string(), "old_sha_2".to_string());
         file_shas.insert("README.md".to_string(), "unchanged_sha".to_string());
 
-        let remap = vec![
-            RemapEntry {
-                old_sha: "old_sha_1".to_string(),
-                new_sha: "new_sha_1".to_string(),
-                file_path: "src/main.rs".to_string(),
-            },
-        ];
+        let remap = vec![RemapEntry {
+            old_sha: "old_sha_1".to_string(),
+            new_sha: "new_sha_1".to_string(),
+            file_path: "src/main.rs".to_string(),
+        }];
 
         let result = apply_remap(&mut file_shas, &remap);
 

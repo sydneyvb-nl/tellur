@@ -1,6 +1,6 @@
 //! MCP (Model Context Protocol) server
 //!
-//! Exposes TraceGit data as MCP tools so AI agents can query
+//! Exposes Tellur data as MCP tools so AI agents can query
 //! attribution, provenance, and policy status.
 
 use std::io::{BufRead, Write};
@@ -35,7 +35,7 @@ pub struct McpContent {
 pub fn list_tools() -> Vec<McpTool> {
     vec![
         McpTool {
-            name: "tracegit_explain".to_string(),
+            name: "tellur_explain".to_string(),
             description: "Explain who/what changed a specific line of code (AI or human, model, confidence)".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -47,7 +47,7 @@ pub fn list_tools() -> Vec<McpTool> {
             }),
         },
         McpTool {
-            name: "tracegit_blame".to_string(),
+            name: "tellur_blame".to_string(),
             description: "Show AI attribution for an entire file — which lines were AI-generated vs human-written".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -58,7 +58,7 @@ pub fn list_tools() -> Vec<McpTool> {
             }),
         },
         McpTool {
-            name: "tracegit_sessions".to_string(),
+            name: "tellur_sessions".to_string(),
             description: "List recent AI coding sessions with agent, model, and event counts".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -68,15 +68,15 @@ pub fn list_tools() -> Vec<McpTool> {
             }),
         },
         McpTool {
-            name: "tracegit_policy_check".to_string(),
-            description: "Check if current changes comply with TraceGit policies (sensitive paths, required reviews)".to_string(),
+            name: "tellur_policy_check".to_string(),
+            description: "Check if current changes comply with Tellur policies (sensitive paths, required reviews)".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {}
             }),
         },
         McpTool {
-            name: "tracegit_pr_report".to_string(),
+            name: "tellur_pr_report".to_string(),
             description: "Generate a PR risk report with AI involvement stats and reviewer checklist".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -87,8 +87,8 @@ pub fn list_tools() -> Vec<McpTool> {
             }),
         },
         McpTool {
-            name: "tracegit_verify".to_string(),
-            description: "Verify the integrity of the TraceGit event log (hash chain check)".to_string(),
+            name: "tellur_verify".to_string(),
+            description: "Verify the integrity of the Tellur event log (hash chain check)".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {}
@@ -106,11 +106,15 @@ fn text_response(text: String) -> McpToolResponse {
     }
 }
 
-/// Handle a tool call against the TraceGit data in `repo_root`.
+/// Handle a tool call against the Tellur data in `repo_root`.
 ///
 /// These are real queries — they open the index/policies and return actual
 /// attribution, session, policy, and verification results.
-pub fn handle_tool_call(repo_root: &Path, tool_name: &str, args: &serde_json::Value) -> McpToolResponse {
+pub fn handle_tool_call(
+    repo_root: &Path,
+    tool_name: &str,
+    args: &serde_json::Value,
+) -> McpToolResponse {
     match handle_tool_call_inner(repo_root, tool_name, args) {
         Ok(resp) => resp,
         Err(e) => text_response(format!("Error: {}", e)),
@@ -125,7 +129,7 @@ fn handle_tool_call_inner(
     let storage = RepoStorage::from_git_root(repo_root)?;
 
     match tool_name {
-        "tracegit_explain" => {
+        "tellur_explain" => {
             let file = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
             let line = args.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
             let index = TraceIndex::open(&storage.index_path)?;
@@ -134,15 +138,23 @@ fn handle_tool_call_inner(
                 if line >= attr.start_line && line <= attr.end_line {
                     return Ok(text_response(format!(
                         "{}:{} — origin={:?}, confidence={:.0}%, agent={}, model={}, session={}, evidence={:?}",
-                        file, line, attr.origin, attr.confidence * 100.0, attr.agent_id,
+                        file,
+                        line,
+                        attr.origin,
+                        attr.confidence * 100.0,
+                        attr.agent_id,
                         attr.model_id.clone().unwrap_or_else(|| "n/a".to_string()),
-                        attr.session_id, attr.evidence_strength,
+                        attr.session_id,
+                        attr.evidence_strength,
                     )));
                 }
             }
-            Ok(text_response(format!("No attribution recorded for {}:{}", file, line)))
+            Ok(text_response(format!(
+                "No attribution recorded for {}:{}",
+                file, line
+            )))
         }
-        "tracegit_blame" => {
+        "tellur_blame" => {
             let file = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
             let index = TraceIndex::open(&storage.index_path)?;
             let attrs = index.get_file_attributions(file)?;
@@ -153,12 +165,17 @@ fn handle_tool_call_inner(
             for (_blob, a) in &attrs {
                 out.push_str(&format!(
                     "  L{}-{} {:?} {} conf={:.0}% [{:?}]\n",
-                    a.start_line, a.end_line, a.origin, a.agent_id, a.confidence * 100.0, a.state
+                    a.start_line,
+                    a.end_line,
+                    a.origin,
+                    a.agent_id,
+                    a.confidence * 100.0,
+                    a.state
                 ));
             }
             Ok(text_response(out))
         }
-        "tracegit_sessions" => {
+        "tellur_sessions" => {
             let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as u32;
             let index = TraceIndex::open(&storage.index_path)?;
             let sessions = index.list_sessions(limit)?;
@@ -169,14 +186,16 @@ fn handle_tool_call_inner(
             for s in &sessions {
                 out.push_str(&format!(
                     "{} — agent={} model={} status={} events={}\n",
-                    s.id, s.agent_name,
+                    s.id,
+                    s.agent_name,
                     s.model_name.clone().unwrap_or_else(|| "n/a".to_string()),
-                    s.status, s.event_count,
+                    s.status,
+                    s.event_count,
                 ));
             }
             Ok(text_response(out))
         }
-        "tracegit_policy_check" => {
+        "tellur_policy_check" => {
             let policy_path = storage.policies_dir.join("default.yml");
             if !policy_path.exists() {
                 return Ok(text_response("No policy file found.".to_string()));
@@ -191,19 +210,27 @@ fn handle_tool_call_inner(
             }
             Ok(text_response(out))
         }
-        "tracegit_pr_report" => {
+        "tellur_pr_report" => {
             let base = args.get("base").and_then(|v| v.as_str()).unwrap_or("main");
             let head = args.get("head").and_then(|v| v.as_str()).unwrap_or("HEAD");
             let report = crate::report::build_repo_pr_report(&storage, base, head)?;
-            Ok(text_response(crate::report::PRReportGenerator::to_markdown(&report)))
+            Ok(text_response(
+                crate::report::PRReportGenerator::to_markdown(&report),
+            ))
         }
-        "tracegit_verify" => {
+        "tellur_verify" => {
             let events = crate::storage::read_events(&storage.traces_dir)?;
             let result = crate::storage::event_log::verify_chain(&events);
             Ok(text_response(format!(
                 "Verified {} events: {} valid, {} broken — chain {}",
-                events.len(), result.valid, result.broken,
-                if result.broken == 0 { "intact" } else { "BROKEN" },
+                events.len(),
+                result.valid,
+                result.broken,
+                if result.broken == 0 {
+                    "intact"
+                } else {
+                    "BROKEN"
+                },
             )))
         }
         other => Ok(text_response(format!("Unknown tool: {}", other))),
@@ -213,7 +240,7 @@ fn handle_tool_call_inner(
 // ─── stdio JSON-RPC transport ────────────────────────────────────────────────
 
 /// Run the MCP server over stdio (newline-delimited JSON-RPC 2.0), serving the
-/// TraceGit tools backed by data in `repo_root`. Blocks until stdin closes.
+/// Tellur tools backed by data in `repo_root`. Blocks until stdin closes.
 pub fn serve_stdio(repo_root: &Path) -> anyhow::Result<()> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -238,12 +265,15 @@ pub fn serve_stdio(repo_root: &Path) -> anyhow::Result<()> {
             "initialize" => Some(serde_json::json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "tracegit", "version": env!("CARGO_PKG_VERSION") }
+                "serverInfo": { "name": "tellur", "version": env!("CARGO_PKG_VERSION") }
             })),
             "tools/list" => Some(serde_json::json!({ "tools": list_tools() })),
             "tools/call" => {
                 let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                let arguments = params.get("arguments").cloned().unwrap_or(serde_json::json!({}));
+                let arguments = params
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or(serde_json::json!({}));
                 let result = handle_tool_call(repo_root, name, &arguments);
                 Some(serde_json::json!({
                     "content": result.content,
@@ -271,8 +301,8 @@ mod tests {
     fn test_list_tools() {
         let tools = list_tools();
         assert!(tools.len() >= 5);
-        assert!(tools.iter().any(|t| t.name == "tracegit_explain"));
-        assert!(tools.iter().any(|t| t.name == "tracegit_blame"));
+        assert!(tools.iter().any(|t| t.name == "tellur_explain"));
+        assert!(tools.iter().any(|t| t.name == "tellur_blame"));
     }
 
     #[test]

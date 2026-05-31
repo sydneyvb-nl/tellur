@@ -1,24 +1,24 @@
 // Command registration
 
 import * as vscode from 'vscode';
-import { TraceGitClient } from './client';
+import { TellurClient } from './client';
 import { SessionProvider } from './providers/sessions';
 import { AttributionProvider } from './providers/attribution';
 import { InlineDecorationManager } from './decorations';
 
 export function registerCommands(
     context: vscode.ExtensionContext,
-    client: TraceGitClient,
+    client: TellurClient,
     sessionProvider: SessionProvider,
     attributionProvider: AttributionProvider,
     decorationManager: InlineDecorationManager | undefined,
 ) {
     // Init
     context.subscriptions.push(
-        vscode.commands.registerCommand('tracegit.init', async () => {
+        vscode.commands.registerCommand('tellur.init', async () => {
             try {
                 const output = await client.init();
-                vscode.window.showInformationMessage(`TraceGit initialized: ${output.trim()}`);
+                vscode.window.showInformationMessage(`Tellur initialized: ${output.trim()}`);
             } catch (e: any) {
                 vscode.window.showErrorMessage(`Init failed: ${e.message}`);
             }
@@ -27,7 +27,7 @@ export function registerCommands(
 
     // Explain current line
     context.subscriptions.push(
-        vscode.commands.registerCommand('tracegit.explain', async () => {
+        vscode.commands.registerCommand('tellur.explain', async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) return;
 
@@ -55,7 +55,7 @@ export function registerCommands(
 
     // Blame (file attribution)
     context.subscriptions.push(
-        vscode.commands.registerCommand('tracegit.blame', async () => {
+        vscode.commands.registerCommand('tellur.blame', async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) return;
 
@@ -71,7 +71,7 @@ export function registerCommands(
 
     // PR Report
     context.subscriptions.push(
-        vscode.commands.registerCommand('tracegit.prReport', async () => {
+        vscode.commands.registerCommand('tellur.prReport', async () => {
             const base = await vscode.window.showInputBox({ prompt: 'Base ref', value: 'main' });
             if (!base) return;
             const head = await vscode.window.showInputBox({ prompt: 'Head ref', value: 'HEAD' });
@@ -92,15 +92,15 @@ export function registerCommands(
 
     // Sessions
     context.subscriptions.push(
-        vscode.commands.registerCommand('tracegit.sessions', () => {
+        vscode.commands.registerCommand('tellur.sessions', () => {
             sessionProvider.refresh();
-            vscode.commands.executeCommand('tracegit.sessions.focus');
+            vscode.commands.executeCommand('tellur.sessions.focus');
         })
     );
 
     // Policy check
     context.subscriptions.push(
-        vscode.commands.registerCommand('tracegit.policyCheck', async () => {
+        vscode.commands.registerCommand('tellur.policyCheck', async () => {
             try {
                 const output = await client.policyCheck();
                 const doc = await vscode.workspace.openTextDocument({
@@ -116,23 +116,23 @@ export function registerCommands(
 
     // Start watch
     context.subscriptions.push(
-        vscode.commands.registerCommand('tracegit.startWatch', () => {
+        vscode.commands.registerCommand('tellur.startWatch', () => {
             client.startWatch();
-            vscode.window.showInformationMessage('TraceGit: Watching started');
+            vscode.window.showInformationMessage('Tellur: Watching started');
         })
     );
 
     // Stop watch
     context.subscriptions.push(
-        vscode.commands.registerCommand('tracegit.stopWatch', () => {
+        vscode.commands.registerCommand('tellur.stopWatch', () => {
             client.stopWatch();
-            vscode.window.showInformationMessage('TraceGit: Watching stopped');
+            vscode.window.showInformationMessage('Tellur: Watching stopped');
         })
     );
 
     // Goto line (internal)
     context.subscriptions.push(
-        vscode.commands.registerCommand('tracegit.gotoLine', async (filePath: string, line: number) => {
+        vscode.commands.registerCommand('tellur.gotoLine', async (filePath: string, line: number) => {
             const doc = await vscode.workspace.openTextDocument(filePath);
             const editor = await vscode.window.showTextDocument(doc);
             const position = new vscode.Position(line - 1, 0);

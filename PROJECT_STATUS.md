@@ -1,11 +1,25 @@
-# TraceGit — Project Status & Agent Guide
+# Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-05-31 (full code review + remediation pass, Claude Opus 4.8)
+**Last updated:** 2026-05-31 (Codex + Copilot adapter pass, Codex)
 **Maintained by:** agents — alle agents mogen dit updaten
-**Repo:** github.com/sydneyvb-nl/TraceGit
+**Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0
 
+> **2026-05-31 — Codex + Copilot adapters.** Added `tellur import codex`
+> for Codex CLI JSONL event streams/session transcripts and
+> `tellur import copilot` for GitHub Copilot metadata exports. Both adapters
+> normalize prompts, command events, file writes, and raw metadata into
+> Tellur events and are covered by adapter unit tests plus CLI integration
+> tests.
+>
+> **2026-05-31 — Dashboard live data.** The local daemon now backs the session
+> replay dashboard with real indexed data: `GET /sessions` returns session rows
+> with attribution stats, and `GET /sessions/{id}/events` returns timeline events
+> for the selected session. The static dashboard client now understands canonical
+> Tellur event wire types (`file.write`, `command.post_execute`, etc.) and
+> escapes live event body text before rendering.
+>
 > **2026-05-31 — Code review & remediation.** A full review found that many
 > modules previously marked ✅ were stubs or not wired together (watch, MCP,
 > daemon, Claude Code hooks, gc, redact, Homebrew, npm) and that the core
@@ -20,9 +34,9 @@
 
 ---
 
-## Wat is TraceGit
+## Wat is Tellur
 
-AI code provenance platform. Git vertelt je *wat* er veranderde. TraceGit vertelt je *hoe AI participeerde*.
+AI code provenance platform. Git vertelt je *wat* er veranderde. Tellur vertelt je *hoe AI participeerde*.
 
 Open-source, lokaal-first, geen cloud dependency. Rust core + CLI, TypeScript editor extension.
 
@@ -49,21 +63,21 @@ De PRD bevindt zich op een locatie die Sydney bepaalt. Als je de PRD niet hebt, 
 
 ```bash
 source "$HOME/.cargo/env"  # Rust toolchain
-cd /Users/sydneyassistent/.openclaw/workspace/TraceGit
+cd /Users/sydneyassistent/.openclaw/workspace/Tellur
 cargo build          # Alle crates compileren
 cargo test           # Alle tests draaien (35 tests)
-cargo run -p tracegit-cli -- init  # CLI testen
+cargo run -p tellur-cli -- init  # CLI testen
 ```
 
 ### Structuur
 
 ```
-TraceGit/
+Tellur/
 ├── PROJECT_STATUS.md        ← DIT BESTAND
 ├── Cargo.toml               ← Rust workspace root
 ├── crates/
 │   ├── core/                ← Core library (schemas, attribution, storage, policy, redaction, export)
-│   ├── cli/                 ← CLI binary (tracegit command)
+│   ├── cli/                 ← CLI binary (tellur command)
 │   └── adapters/            ← AI tool adapters
 ├── schemas/                 ← JSON Schema definities
 ├── .github/workflows/       ← GitHub Actions
@@ -84,7 +98,7 @@ TraceGit/
 | 4 | JSON Schema definities | 4-6 | ✅ Done | `schemas/*.json` |
 | 5 | EventWriter (JSONL + SHA-256 hash chain) | 7 | ✅ Done | `crates/core/src/storage/event_log.rs` |
 | 6 | TraceIndex (SQLite) | 7.3 | ✅ Done | `crates/core/src/storage/index.rs` |
-| 7 | RepoStorage (.tracegit directory) | 7.1 | ✅ Done | `crates/core/src/storage/repo.rs` |
+| 7 | RepoStorage (.tellur directory) | 7.1 | ✅ Done | `crates/core/src/storage/repo.rs` |
 | 8 | File change capture (git diff + blob SHA) | 8.3 | ✅ Done | `crates/core/src/storage/file_watcher.rs` |
 
 ### Phase 2: Core Intelligence (PRD secties 8-14)
@@ -95,30 +109,32 @@ TraceGit/
 | 10 | RedactionEngine (regex secret detection) | 14 | ✅ Done | `crates/core/src/redaction/mod.rs` |
 | 11 | PolicyEngine (YAML rules, sensitive paths) | 13 | ✅ Done | `crates/core/src/policy/mod.rs` |
 | 12 | AgentAdapter trait (async_trait) | 8.3 | ✅ Done | `crates/core/src/adapter/mod.rs` |
-| 13 | Built-in adapters (Claude Code, Aider, Cursor, Generic) | 8.3 | ✅ Done | `crates/core/src/adapter/builtin.rs` |
-| 14 | Claude Code adapter implementation | 8.1 | ✅ Done | Real Claude Code hook schema (PostToolUse/SessionStart), `tracegit hooks install`, stdin payload handler `tracegit hooks claude` wired to capture pipeline, transcript parse |
+| 13 | Built-in adapters (Claude Code, Aider, Cursor, Generic, Codex, Copilot) | 8.3 | ✅ Done | `crates/core/src/adapter/builtin.rs` + `crates/adapters/src/*` |
+| 14 | Claude Code adapter implementation | 8.1 | ✅ Done | Real Claude Code hook schema (PostToolUse/SessionStart), `tellur hooks install`, stdin payload handler `tellur hooks claude` wired to capture pipeline, transcript parse |
 | 15 | Aider adapter implementation | 8.2 | ✅ Done | Git log parser, Aider pattern detection, 2 tests |
 | 16 | Cursor adapter implementation | 8.2 | ✅ Done | JSON/JSONL trace parsing, workspace detection, 3 tests |
+| 16a | Codex CLI adapter implementation | 8.2 | ✅ Done | JSONL event stream/session transcript import via `tellur import codex <file>`, command/prompt/file-write normalization |
+| 16b | GitHub Copilot adapter implementation | 8.2 | ✅ Done | Metadata JSON/JSONL import via `tellur import copilot <file>`, accepted suggestion + prompt metadata normalization |
 
 ### Phase 3: CLI (PRD sectie 8.1)
 
 | # | Module | PRD Sectie | Status | Details |
 |---|--------|-----------|--------|---------|
-| 17 | `tracegit init` | 8.1 | ✅ Done | CLI main.rs |
-| 18 | `tracegit doctor` | 8.1 | ✅ Done | Detecteert AI tools |
-| 19 | `tracegit status` | 8.1 | ✅ Done | Sessions overview |
-| 20 | `tracegit explain <file:line>` | 8.1 | ✅ Done | Line attribution lookup |
-| 21 | `tracegit blame <file>` | 8.1 | ✅ Done | File-wide attribution |
-| 22 | `tracegit pr-report` | 12 | ✅ Done | Risk report + markdown |
-| 23 | `tracegit policy check` | 13 | ✅ Done | Policy evaluation |
-| 24 | `tracegit watch` | 8.1 | ✅ Done | Real `notify` filesystem watcher with debounce → git-diff capture → attribution → index (incl. untracked/new files) |
-| 25 | `tracegit event` | 8.1 | ✅ Done | Single event emission |
-| 26 | `tracegit export` | 15 | ✅ Done | Provenance bundle export |
-| 27 | `tracegit import` | 8.1 | ✅ Done | JSONL import |
-| 28 | `tracegit verify` | 11 | ✅ Done | Hash chain verification |
-| 29 | `tracegit sessions` | 8.1 | ✅ Done | Session listing |
-| 30 | `tracegit gc` | 8.1 | ✅ Done | Real retention-based deletion (keep_days from config), rewrites logs + rebuilds index; `--dry-run` is truly dry |
-| 31 | `tracegit redact` | 14 | ✅ Done | Rewrites stored payloads in place, records RedactionInfo, re-seals hash chain so `verify` stays intact |
+| 17 | `tellur init` | 8.1 | ✅ Done | CLI main.rs |
+| 18 | `tellur doctor` | 8.1 | ✅ Done | Detecteert AI tools |
+| 19 | `tellur status` | 8.1 | ✅ Done | Sessions overview |
+| 20 | `tellur explain <file:line>` | 8.1 | ✅ Done | Line attribution lookup |
+| 21 | `tellur blame <file>` | 8.1 | ✅ Done | File-wide attribution |
+| 22 | `tellur pr-report` | 12 | ✅ Done | Risk report + markdown |
+| 23 | `tellur policy check` | 13 | ✅ Done | Policy evaluation |
+| 24 | `tellur watch` | 8.1 | ✅ Done | Real `notify` filesystem watcher with debounce → git-diff capture → attribution → index (incl. untracked/new files) |
+| 25 | `tellur event` | 8.1 | ✅ Done | Single event emission |
+| 26 | `tellur export` | 15 | ✅ Done | Provenance bundle export |
+| 27 | `tellur import` | 8.1 | ✅ Done | JSONL import |
+| 28 | `tellur verify` | 11 | ✅ Done | Hash chain verification |
+| 29 | `tellur sessions` | 8.1 | ✅ Done | Session listing |
+| 30 | `tellur gc` | 8.1 | ✅ Done | Real retention-based deletion (keep_days from config), rewrites logs + rebuilds index; `--dry-run` is truly dry |
+| 31 | `tellur redact` | 14 | ✅ Done | Rewrites stored payloads in place, records RedactionInfo, re-seals hash chain so `verify` stays intact |
 
 ### Phase 4: Reports & Export (PRD secties 12, 15, 20)
 
@@ -127,7 +143,7 @@ TraceGit/
 | 32 | PRReportGenerator | 12 | ✅ Done | `crates/core/src/report/pr_report.rs` |
 | 33 | Markdown report output | 12.3 | ✅ Done | `PRReportGenerator::to_markdown()` |
 | 34 | Provenance export (6 profiles) | 15, 20 | ✅ Done | `crates/core/src/storage/export.rs` |
-| 35 | GitHub Action (PR check) | 12.4 | ✅ Done | `.github/workflows/tracelens.yml` |
+| 35 | GitHub Action (PR check) | 12.4 | ✅ Done | `.github/workflows/tellur.yml` |
 
 ### Phase 5: Editor Extension (PRD sectie 10)
 
@@ -143,11 +159,11 @@ TraceGit/
 
 | # | Module | PRD Sectie | Status | Details |
 |---|--------|-----------|--------|---------|
-| 41 | Session replay web UI | 16 | ✅ Done | Dark theme timeline, session sidebar, attribution bar, diff viewer, demo mode | Web dashboard |
+| 41 | Session replay web UI | 16 | ✅ Done | Dark theme timeline, session sidebar, attribution bar, diff viewer, demo fallback, live daemon data via `/sessions` + `/sessions/{id}/events` | Web dashboard |
 | 42 | Git remapping | 17 | ✅ Done | SHA remap via git diff-tree, rebase detection, 3 tests | |
 | 43 | SLSA/SPDX export | 20 | ✅ Done | SLSA v1.0 provenance + SPDX 2.3 SBOM with AI metadata, 2 tests | |
-| 44 | HTTP daemon (axum) | 22 | ✅ Done | `tracegit daemon` (loopback-only, token-auth, Host check). Server **recomputes the hash chain** via EventWriter — clients cannot forge provenance. 5 endpoints. |
-| 45 | MCP server | 23 | ✅ Done | `tracegit mcp` — real stdio JSON-RPC 2.0 (initialize/tools/list/tools/call). 6 tools backed by actual index/policy/verify queries. |
+| 44 | HTTP daemon (axum) | 22 | ✅ Done | `tellur daemon` (loopback-only, token-auth, Host check). Server **recomputes the hash chain** via EventWriter — clients cannot forge provenance. 6 endpoints. |
+| 45 | MCP server | 23 | ✅ Done | `tellur mcp` — real stdio JSON-RPC 2.0 (initialize/tools/list/tools/call). 6 tools backed by actual index/policy/verify queries. |
 | 46 | Team/server mode | 24 | ❌ Not started | |
 | 47 | Plugin SDK | 25 | ❌ Not started | |
 
@@ -156,7 +172,7 @@ TraceGit/
 | # | Module | PRD Sectie | Status | Details |
 |---|--------|-----------|--------|---------|
 | 48 | Cross-compilation | 32.3 | ✅ Done | mac arm64/x64 + linux x64 (musl), 3.7-4.4MB binaries | |
-| 49 | Homebrew formula | 32.3 | ✅ Done | `dist/tracegit.rb` (build-from-source; `sha256` placeholder to fill at release tag) |
+| 49 | Homebrew formula | 32.3 | ✅ Done | `dist/tellur.rb` (build-from-source; `sha256` placeholder to fill at release tag) |
 | 50 | npm package (CLI wrapper) | 32.3 | ✅ Done | JS API wrapper + CLI runner + post-install downloader that **verifies SHA-256** against the release `.sha256` sidecar before installing |
 | 51 | GitHub Release automation | 32.3 | ✅ Done | 5-target matrix build on tag push | |
 
@@ -171,24 +187,24 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 3. **SOC 2 compliance** (PRD sectie 26) — far future
 4. **Plugin SDK** (PRD sectie 25) — API stabiliteit eerst nodig
 5. **Release signing** (PRD sectie 20) — na v1.0 (SLSA/SPDX *export* is wel klaar)
-6. **Session replay web dashboard met live data** — statische UI bestaat; live data-koppeling nog te doen
-7. **GitHub Copilot / Codex CLI adapters** — gepland
+6. ~~**Session replay web dashboard met live data**~~ — ✅ Done via local daemon endpoints
+7. ~~**GitHub Copilot / Codex CLI adapters**~~ — ✅ Done as import adapters
 
 ---
 
 ## Huidige Test Status
 
 ```
-73 tests, 0 failures, 0 clippy warnings
-- core:     57 tests (schema/event-type round-trip, glob matcher, storage,
+80 tests, 0 failures, 0 clippy warnings
+- core:     60 tests (schema/event-type round-trip, glob matcher, storage,
             hash-chain verify + reseal, index session/attribution round-trip,
             capture pipeline end-to-end, block_ai_read, attribution, redaction,
-            policy, export, PR report)
-- adapters:  8 tests (Claude Code, Aider, Cursor)
-- cli:       8 integration tests (version/help/init/doctor/status/sessions/verify)
+            policy, export, PR report, dashboard daemon endpoints)
+- adapters:  12 tests (Claude Code, Aider, Cursor, Codex, Copilot)
+- cli:       10 integration tests (version/help/init/doctor/status/sessions/verify/import codex/import copilot)
 ```
 
-Run: `cargo build && cargo test && cargo clippy --workspace`.
+Run: `cargo build && cargo test && cargo clippy --workspace -- -D warnings`.
 
 ---
 
@@ -230,11 +246,10 @@ Run: `cargo build && cargo test && cargo clippy --workspace`.
 1. ~~**Claude Code hook installer**~~ — ✅ Done
 2. ~~**Aider commit parser**~~ — ✅ Done  
 3. ~~**VS Code extension scaffold**~~ — ✅ Done
-4. **CLI integration tests** — robuustheid testen
-5. **Cross-compilation** — linux/mac/windows builds
-6. **HTTP daemon (axum/warp)** — PRD 22, local event API
-7. **Session replay web UI** — PRD 16
-8. **Git remapping** — PRD 17, rebase/squash resilience
+4. ~~**Codex CLI adapter**~~ — ✅ Done
+5. ~~**GitHub Copilot adapter**~~ — ✅ Done
+6. **Team/server mode** — decide architecture after local dashboard settles
+7. **Plugin SDK** — requires stable adapter/event API
 
 ---
 
@@ -260,13 +275,13 @@ Directe concurrenten die hetzelfde probleem oplossen:
 ### 3. Entire CLI
 - Captureert AI session transcripts in git commits
 - Line-level AI vs human attributie
-- **+/−**: Focus op session capture, minder breed dan TraceGit
+- **+/−**: Focus op session capture, minder breed dan Tellur
 
 ### 4. AI Footprint
 - Git-native AI code tracking
 - **+/−**: Vroeg stadium, vergelijkbare aanpak
 
-### TraceGit differentiators
+### Tellur differentiators
 1. **Policy engine** — YAML-based rules voor sensitive paths, required reviews, test evidence
 2. **Secret redaction** — regex-based detection van API keys, tokens, passwords
 3. **6 export profiles** — developer, OSS, corporate, audit, release, CI
@@ -278,7 +293,7 @@ Directe concurrenten die hetzelfde probleem oplossen:
 
 ### Actiepunten uit concurrentie
 - Git Notes integratie overwegen (git-ai gebruikt dit als open standaard)
-- Dashboard metrics (tool/model breakdown) toevoegen aan `tracegit stats`
+- Dashboard metrics (tool/model breakdown) toevoegen aan `tellur stats`
 - `/ask` feature (chat met AI die code schreef) — uniek, overwegen voor later
 
 ---

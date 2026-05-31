@@ -9,15 +9,15 @@ coverage/
 *.log
 
 # Build output of the VS Code extension (TypeScript)
-editor/tracegit-vscode/out/
-editor/tracegit-vscode/*.vsix
+editor/tellur-vscode/out/
+editor/tellur-vscode/*.vsix
 
 # Rust
 target/
 **/*.rs.bk
 # Cargo.lock IS committed for the CLI binary (reproducible, auditable builds).
 
-# TraceGit local data (logs + index are machine-local; config/policies are committed)
-.tracegit/traces/
-.tracegit/index/
-.tracegit/daemon.token
+# Tellur local data (logs + index are machine-local; config/policies are committed)
+.tellur/traces/
+.tellur/index/
+.tellur/daemon.token

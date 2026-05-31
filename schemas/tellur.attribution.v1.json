@@ -1,14 +1,14 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://tracegit.dev/schemas/tracegit.attribution.v1.json",
-  "title": "TraceGit File Attribution",
+  "$id": "https://tellur.dev/schemas/tellur.attribution.v1.json",
+  "title": "Tellur File Attribution",
   "description": "Maps code ranges to AI origin information for a specific file",
   "type": "object",
   "required": ["schema", "filePath", "gitBlobSha", "ranges", "updatedAt"],
   "properties": {
     "schema": {
       "type": "string",
-      "const": "tracegit.attribution.v1"
+      "const": "tellur.attribution.v1"
     },
     "filePath": {
       "type": "string"

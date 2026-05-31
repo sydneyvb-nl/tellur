@@ -1,4 +1,4 @@
-// TraceGit CLI client — bridges VS Code to the tracegit binary
+// Tellur CLI client — bridges VS Code to the tellur binary
 
 import * as vscode from 'vscode';
 import { execFile } from 'child_process';
@@ -44,17 +44,17 @@ export interface ExplainResult {
     risk_level?: string;
 }
 
-export class TraceGitClient {
+export class TellurClient {
     private binaryPath: string;
     private watchProcess: ReturnType<typeof execFile> | null = null;
     private outputChannel: vscode.OutputChannel;
 
     constructor(binaryPath: string) {
         this.binaryPath = binaryPath;
-        this.outputChannel = vscode.window.createOutputChannel('TraceGit');
+        this.outputChannel = vscode.window.createOutputChannel('Tellur');
     }
 
-    /** Execute a tracegit CLI command */
+    /** Execute a tellur CLI command */
     async exec(args: string[], cwd?: string): Promise<string> {
         const workDir = cwd || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         return new Promise((resolve, reject) => {
@@ -62,7 +62,7 @@ export class TraceGitClient {
                 if (err) {
                     this.outputChannel.appendLine(`ERROR: ${this.binaryPath} ${args.join(' ')}`);
                     this.outputChannel.appendLine(stderr || err.message);
-                    reject(new Error(`tracegit ${args[0]} failed: ${stderr || err.message}`));
+                    reject(new Error(`tellur ${args[0]} failed: ${stderr || err.message}`));
                 } else {
                     resolve(stdout);
                 }
@@ -70,7 +70,7 @@ export class TraceGitClient {
         });
     }
 
-    /** Initialize TraceGit in the workspace */
+    /** Initialize Tellur in the workspace */
     async init(): Promise<string> {
         return this.exec(['init']);
     }
@@ -135,7 +135,7 @@ export class TraceGitClient {
         this.watchProcess = null;
     }
 
-    /** Check if tracegit is installed */
+    /** Check if tellur is installed */
     async isInstalled(): Promise<boolean> {
         try {
             await this.exec(['--version']);

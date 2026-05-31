@@ -1,7 +1,7 @@
 // Attribution tree view provider
 
 import * as vscode from 'vscode';
-import { TraceGitClient, FileAttribution, AttributionRange } from '../client';
+import { TellurClient, FileAttribution, AttributionRange } from '../client';
 
 export class AttributionProvider implements vscode.TreeDataProvider<AttributionItem> {
     private _onDidChangeTreeData = new vscode.EventEmitter<AttributionItem | undefined | null>();
@@ -9,7 +9,7 @@ export class AttributionProvider implements vscode.TreeDataProvider<AttributionI
 
     private attribution: FileAttribution | null = null;
 
-    constructor(private client: TraceGitClient) {}
+    constructor(private client: TellurClient) {}
 
     setAttribution(attr: FileAttribution | null): void {
         this.attribution = attr;
@@ -52,7 +52,7 @@ export class AttributionProvider implements vscode.TreeDataProvider<AttributionI
 
                 // Click to navigate to line
                 item.command = {
-                    command: 'tracegit.gotoLine',
+                    command: 'tellur.gotoLine',
                     title: 'Go to Line',
                     arguments: [this.attribution!.file_path, r.start_line],
                 };

@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://tracegit.dev/schemas/tracegit.provenance.v1.json",
-  "title": "TraceGit Provenance Bundle",
+  "$id": "https://tellur.dev/schemas/tellur.provenance.v1.json",
+  "title": "Tellur Provenance Bundle",
   "description": "A portable export of provenance data (sessions, events, attributions, policy results)",
   "type": "object",
   "required": [
@@ -9,7 +9,7 @@
     "sessions", "events", "attributions", "export_profile", "bundle_hash"
   ],
   "properties": {
-    "schema": { "type": "string", "const": "tracegit.provenance.v1" },
+    "schema": { "type": "string", "const": "tellur.provenance.v1" },
     "id": { "type": "string" },
     "created_at": { "type": "string", "format": "date-time" },
     "repo_id": { "type": "string" },

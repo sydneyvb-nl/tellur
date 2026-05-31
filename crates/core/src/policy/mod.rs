@@ -9,7 +9,7 @@ use std::path::Path;
 use crate::glob::glob_match;
 use crate::schema::types::*;
 
-/// Policy engine evaluates rules against TraceGit data
+/// Policy engine evaluates rules against Tellur data
 pub struct PolicyEngine {
     policy: PolicyFile,
 }
@@ -17,10 +17,9 @@ pub struct PolicyEngine {
 impl PolicyEngine {
     /// Load a policy from a YAML file
     pub fn load_from_file(path: &Path) -> Result<Self> {
-        let content = std::fs::read_to_string(path)
-            .context("Failed to read policy file")?;
-        let policy: PolicyFile = serde_yaml::from_str(&content)
-            .context("Failed to parse policy YAML")?;
+        let content = std::fs::read_to_string(path).context("Failed to read policy file")?;
+        let policy: PolicyFile =
+            serde_yaml::from_str(&content).context("Failed to parse policy YAML")?;
         Ok(Self { policy })
     }
 
@@ -48,10 +47,9 @@ impl PolicyEngine {
     pub fn requires_human_review(&self, file_path: &str) -> bool {
         if let Some(ref paths) = self.policy.sensitive_paths {
             for sp in paths {
-                if glob_match(&sp.path, file_path)
-                    && sp.require_human_review.unwrap_or(false) {
-                        return true;
-                    }
+                if glob_match(&sp.path, file_path) && sp.require_human_review.unwrap_or(false) {
+                    return true;
+                }
             }
         }
         false
@@ -61,10 +59,9 @@ impl PolicyEngine {
     pub fn requires_tests(&self, file_path: &str) -> bool {
         if let Some(ref paths) = self.policy.sensitive_paths {
             for sp in paths {
-                if glob_match(&sp.path, file_path)
-                    && sp.require_tests.unwrap_or(false) {
-                        return true;
-                    }
+                if glob_match(&sp.path, file_path) && sp.require_tests.unwrap_or(false) {
+                    return true;
+                }
             }
         }
         false
@@ -84,7 +81,11 @@ impl PolicyEngine {
     }
 
     /// Evaluate an attribution range against all policy rules
-    pub fn evaluate_attribution(&self, attr: &AttributionRange, file_path: &str) -> Vec<PolicyResult> {
+    pub fn evaluate_attribution(
+        &self,
+        attr: &AttributionRange,
+        file_path: &str,
+    ) -> Vec<PolicyResult> {
         let mut results = Vec::new();
 
         // Check sensitive paths
@@ -150,7 +151,10 @@ impl PolicyEngine {
         }
 
         // Check line count threshold
-        if let Some(threshold) = when.get("changed_lines.greater_than").and_then(|v| v.as_u64()) {
+        if let Some(threshold) = when
+            .get("changed_lines.greater_than")
+            .and_then(|v| v.as_u64())
+        {
             let changed_lines = (attr.end_line - attr.start_line + 1) as u64;
             if changed_lines <= threshold {
                 return None;
@@ -162,22 +166,34 @@ impl PolicyEngine {
         let mut evidence = Vec::new();
 
         if let Some(ref require) = rule.require {
-            if require.get("tests_run").and_then(|v| v.as_bool()).unwrap_or(false)
-                && attr.tests_run.is_empty() {
-                    passed = false;
-                    evidence.push("No tests were run".to_string());
-                }
-            if require.get("reviewer_from_codeowners").and_then(|v| v.as_bool()).unwrap_or(false)
-                && attr.reviewer.is_none() {
-                    passed = false;
-                    evidence.push("No code owner review".to_string());
-                }
+            if require
+                .get("tests_run")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+                && attr.tests_run.is_empty()
+            {
+                passed = false;
+                evidence.push("No tests were run".to_string());
+            }
+            if require
+                .get("reviewer_from_codeowners")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+                && attr.reviewer.is_none()
+            {
+                passed = false;
+                evidence.push("No code owner review".to_string());
+            }
         }
 
         Some(PolicyResult {
             rule_id: rule.id.clone(),
             passed,
-            severity: if passed { RiskLevel::Low } else { RiskLevel::Medium },
+            severity: if passed {
+                RiskLevel::Low
+            } else {
+                RiskLevel::Medium
+            },
             message: rule.description.clone(),
             evidence,
         })
@@ -270,7 +286,11 @@ mod tests {
         let engine = PolicyEngine::from_policy(test_policy());
         let range = test_range();
         let results = engine.evaluate_attribution(&range, "src/auth/session.ts");
-        assert!(results.iter().any(|r| !r.passed && r.rule_id == "sensitive-path-review"));
+        assert!(
+            results
+                .iter()
+                .any(|r| !r.passed && r.rule_id == "sensitive-path-review")
+        );
     }
 
     #[test]

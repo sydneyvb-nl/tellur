@@ -1,7 +1,7 @@
 //! File change capture — filesystem watcher and git diff integration
 //!
 //! Watches for file changes in a repository and captures them as
-//! TraceGit events with before/after blob SHAs.
+//! Tellur events with before/after blob SHAs.
 
 use std::path::Path;
 
@@ -82,23 +82,24 @@ pub fn capture_git_diff(repo_root: &Path) -> Result<Vec<FileChange>> {
         .args(["ls-files", "--others", "--exclude-standard"])
         .current_dir(repo_root)
         .output()
-        && out.status.success() {
-            let listing = String::from_utf8_lossy(&out.stdout);
-            for path in listing.lines().map(str::trim).filter(|p| !p.is_empty()) {
-                let abs = repo_root.join(path);
-                let line_count = std::fs::read_to_string(&abs)
-                    .map(|c| c.lines().count().max(1))
-                    .unwrap_or(1);
-                changes.push(FileChange {
-                    path: path.to_string(),
-                    change_type: FileChangeType::Created,
-                    blob_sha_before: None,
-                    blob_sha_after: get_working_blob_sha(repo_root, path),
-                    diff: Some(format!("@@ -0,0 +1,{} @@\n", line_count)),
-                    timestamp: chrono::Utc::now().to_rfc3339(),
-                });
-            }
+        && out.status.success()
+    {
+        let listing = String::from_utf8_lossy(&out.stdout);
+        for path in listing.lines().map(str::trim).filter(|p| !p.is_empty()) {
+            let abs = repo_root.join(path);
+            let line_count = std::fs::read_to_string(&abs)
+                .map(|c| c.lines().count().max(1))
+                .unwrap_or(1);
+            changes.push(FileChange {
+                path: path.to_string(),
+                change_type: FileChangeType::Created,
+                blob_sha_before: None,
+                blob_sha_after: get_working_blob_sha(repo_root, path),
+                diff: Some(format!("@@ -0,0 +1,{} @@\n", line_count)),
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            });
         }
+    }
 
     Ok(changes)
 }
@@ -148,8 +149,8 @@ pub fn get_working_blob_sha(repo_root: &Path, file_path: &str) -> Option<String>
 
 /// Check if a path should be ignored (gitignore-aware)
 pub fn should_track(path: &Path, repo_root: &Path) -> bool {
-    // Skip .tracegit directory
-    if path.starts_with(repo_root.join(".tracegit")) {
+    // Skip .tellur directory
+    if path.starts_with(repo_root.join(".tellur")) {
         return false;
     }
     // Skip .git directory
@@ -173,7 +174,7 @@ mod tests {
     fn test_should_track() {
         let repo = PathBuf::from("/tmp/testrepo");
         assert!(should_track(&repo.join("src/main.rs"), &repo));
-        assert!(!should_track(&repo.join(".tracegit/config.yml"), &repo));
+        assert!(!should_track(&repo.join(".tellur/config.yml"), &repo));
         assert!(!should_track(&repo.join(".git/HEAD"), &repo));
         assert!(!should_track(&repo.join("node_modules/foo/bar.js"), &repo));
     }

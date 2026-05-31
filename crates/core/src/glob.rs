@@ -1,6 +1,6 @@
 //! Shared glob matching for policy paths and redaction paths.
 //!
-//! Supports the common subset used in `.tracegit` config and policies:
+//! Supports the common subset used in `.tellur` config and policies:
 //! - `*`  — matches any run of characters within a path segment (not `/`)
 //! - `**` — matches any run of characters including `/` (spanning segments)
 //! - `?`  — matches a single character that is not `/`
@@ -53,9 +53,7 @@ fn matches(pat: &[u8], text: &[u8]) -> bool {
                 }
             }
         }
-        b'?' => {
-            !text.is_empty() && text[0] != b'/' && matches(&pat[1..], &text[1..])
-        }
+        b'?' => !text.is_empty() && text[0] != b'/' && matches(&pat[1..], &text[1..]),
         c => !text.is_empty() && text[0] == c && matches(&pat[1..], &text[1..]),
     }
 }

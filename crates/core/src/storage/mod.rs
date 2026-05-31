@@ -7,7 +7,7 @@ pub mod index;
 pub mod repo;
 
 pub use event_log::{EventWriter, read_events};
-pub use export::{export_provenance_bundle, ExportProfile};
-pub use file_watcher::{capture_git_diff, FileChange, FileChangeType};
+pub use export::{ExportProfile, export_provenance_bundle};
+pub use file_watcher::{FileChange, FileChangeType, capture_git_diff};
 pub use index::{SessionSummary, TraceIndex};
 pub use repo::RepoStorage;

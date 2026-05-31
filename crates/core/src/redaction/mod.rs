@@ -76,7 +76,10 @@ impl RedactionEngine {
             .iter()
             .filter_map(|p| Regex::new(p).ok())
             .collect();
-        Self { config, compiled_patterns }
+        Self {
+            config,
+            compiled_patterns,
+        }
     }
 
     pub fn default_engine() -> Self {
@@ -120,7 +123,11 @@ impl RedactionEngine {
             Some(content.to_string())
         };
 
-        RedactionResult { has_secrets, findings, redacted_content: redacted }
+        RedactionResult {
+            has_secrets,
+            findings,
+            redacted_content: redacted,
+        }
     }
 
     pub fn is_sensitive_path(&self, file_path: &str) -> bool {
@@ -131,7 +138,10 @@ impl RedactionEngine {
         }
         // Also check well-known sensitive file extensions.
         let sensitive_extensions = [".pem", ".key", ".p12", ".pfx", ".jks"];
-        if sensitive_extensions.iter().any(|ext| file_path.ends_with(ext)) {
+        if sensitive_extensions
+            .iter()
+            .any(|ext| file_path.ends_with(ext))
+        {
             return true;
         }
         false

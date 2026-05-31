@@ -1,7 +1,7 @@
 // Inline decoration manager — color-code AI vs human lines
 
 import * as vscode from 'vscode';
-import { TraceGitClient, FileAttribution } from './client';
+import { TellurClient, FileAttribution } from './client';
 
 export class InlineDecorationManager implements vscode.Disposable {
     private aiDecorationType: vscode.TextEditorDecorationType;
@@ -9,8 +9,8 @@ export class InlineDecorationManager implements vscode.Disposable {
     private unknownDecorationType: vscode.TextEditorDecorationType;
     private disposables: vscode.Disposable[] = [];
 
-    constructor(private client: TraceGitClient) {
-        const config = vscode.workspace.getConfiguration('tracegit');
+    constructor(private client: TellurClient) {
+        const config = vscode.workspace.getConfiguration('tellur');
 
         this.aiDecorationType = vscode.window.createTextEditorDecorationType({
             backgroundColor: config.get('aiColor', 'rgba(138, 43, 226, 0.15)'),

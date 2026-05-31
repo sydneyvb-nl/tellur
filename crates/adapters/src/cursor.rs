@@ -1,14 +1,14 @@
 //! Cursor adapter — Agent Trace import parser
 //!
-//! Parses Cursor's Agent Trace JSON format into TraceGit events.
+//! Parses Cursor's Agent Trace JSON format into Tellur events.
 //! Cursor stores traces in .cursor/trace/ or exports them as JSON.
 
 use std::path::Path;
 
 use anyhow::Result;
 
-use tracegit_core::adapter::{AgentAdapter, AdapterInfo, AdapterCapabilities};
-use tracegit_core::schema::types::*;
+use tellur_core::adapter::{AdapterCapabilities, AdapterInfo, AgentAdapter};
+use tellur_core::schema::types::*;
 
 /// Cursor Agent Trace entry
 #[derive(Debug, serde::Deserialize)]
@@ -51,21 +51,16 @@ impl CursorAdapter {
     }
 
     /// Parse a Cursor Agent Trace file
-    pub fn parse_trace_file(
-        &self,
-        trace_path: &Path,
-        session_id: &str,
-    ) -> Result<Vec<TraceEvent>> {
+    pub fn parse_trace_file(&self, trace_path: &Path, session_id: &str) -> Result<Vec<TraceEvent>> {
         let content = std::fs::read_to_string(trace_path)?;
-        let entries: Vec<CursorTraceEntry> = serde_json::from_str(&content)
-            .unwrap_or_else(|_| {
-                // Try JSONL format
-                content
-                    .lines()
-                    .filter(|l| !l.trim().is_empty())
-                    .filter_map(|l| serde_json::from_str(l).ok())
-                    .collect()
-            });
+        let entries: Vec<CursorTraceEntry> = serde_json::from_str(&content).unwrap_or_else(|_| {
+            // Try JSONL format
+            content
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .filter_map(|l| serde_json::from_str(l).ok())
+                .collect()
+        });
 
         let mut events = Vec::new();
 
@@ -83,10 +78,14 @@ impl CursorAdapter {
             let model = entry.model.unwrap_or("cursor".to_string());
 
             events.push(TraceEvent {
-                schema: "tracegit.event.v1".to_string(),
-                id: entry.id.unwrap_or_else(tracegit_core::schema::ids::generate_event_id),
+                schema: "tellur.event.v1".to_string(),
+                id: entry
+                    .id
+                    .unwrap_or_else(tellur_core::schema::ids::generate_event_id),
                 session_id: session_id.to_string(),
-                timestamp: entry.timestamp.unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+                timestamp: entry
+                    .timestamp
+                    .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
                 event_type,
                 actor: EventActor::Agent,
                 payload: serde_json::json!({
@@ -139,7 +138,6 @@ impl AgentAdapter for CursorAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[test]
     fn test_adapter_info() {
@@ -151,7 +149,7 @@ mod tests {
     #[test]
     fn test_parse_trace_json() {
         let adapter = CursorAdapter::new();
-        let dir = std::env::temp_dir().join("tracegit_test_cursor");
+        let dir = std::env::temp_dir().join("tellur_test_cursor");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("trace.json");
 
@@ -184,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_detect_workspace() {
-        let dir = std::env::temp_dir().join("tracegit_test_detect");
+        let dir = std::env::temp_dir().join("tellur_test_detect");
         let _ = std::fs::create_dir_all(dir.join(".cursor"));
         assert!(CursorAdapter::detect_workspace(&dir));
     }

@@ -1265,6 +1265,61 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
 
 [[package]]
+name = "tellur-adapters"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "regex",
+ "serde",
+ "serde_json",
+ "tellur-core",
+ "tokio",
+]
+
+[[package]]
+name = "tellur-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "ctrlc",
+ "notify",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tellur-adapters",
+ "tellur-core",
+ "tokio",
+]
+
+[[package]]
+name = "tellur-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "chrono",
+ "dirs",
+ "glob",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1393,61 +1448,6 @@ name = "tower-service"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
-
-[[package]]
-name = "tracegit-adapters"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "regex",
- "serde",
- "serde_json",
- "tokio",
- "tracegit-core",
-]
-
-[[package]]
-name = "tracegit-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "ctrlc",
- "notify",
- "serde",
- "serde_json",
- "serde_yaml",
- "tokio",
- "tracegit-adapters",
- "tracegit-core",
-]
-
-[[package]]
-name = "tracegit-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "chrono",
- "dirs",
- "glob",
- "regex",
- "rusqlite",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "tempfile",
- "thiserror",
- "tokio",
- "toml",
- "uuid",
- "walkdir",
-]
 
 [[package]]
 name = "tracing"

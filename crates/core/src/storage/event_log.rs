@@ -8,13 +8,13 @@ use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
 
 /// Cross-process advisory lock for the event log directory.
 ///
 /// Held only for the duration of a single append so that concurrent writers
-/// (e.g. `tracegit watch` and editor/CLI `tracegit event` calls fired by hooks)
+/// (e.g. `tellur watch` and editor/CLI `tellur event` calls fired by hooks)
 /// cannot fork or corrupt the hash chain.
 struct LockGuard {
     path: PathBuf,
@@ -35,11 +35,14 @@ fn acquire_lock(dir: &Path) -> Result<LockGuard> {
             Err(e) if e.kind() == ErrorKind::AlreadyExists => {
                 // Reclaim a stale lock left behind by a crashed process.
                 if let Ok(meta) = fs::metadata(&path)
-                    && let Ok(age) = meta.modified().and_then(|m| m.elapsed().map_err(|_| std::io::Error::other("clock")))
-                        && age > Duration::from_secs(30) {
-                            let _ = fs::remove_file(&path);
-                            continue;
-                        }
+                    && let Ok(age) = meta
+                        .modified()
+                        .and_then(|m| m.elapsed().map_err(|_| std::io::Error::other("clock")))
+                    && age > Duration::from_secs(30)
+                {
+                    let _ = fs::remove_file(&path);
+                    continue;
+                }
                 if start.elapsed() > Duration::from_secs(10) {
                     return Err(anyhow!("Timed out acquiring event log lock at {:?}", path));
                 }
@@ -50,8 +53,8 @@ fn acquire_lock(dir: &Path) -> Result<LockGuard> {
     }
 }
 
-use crate::schema::types::TraceEvent;
 use crate::schema::ids::{self, hash_event};
+use crate::schema::types::TraceEvent;
 
 /// Append-only JSONL event writer with hash chain
 pub struct EventWriter {
@@ -72,8 +75,7 @@ impl EventWriter {
 
     /// Open the writer, creating the directory if needed
     pub fn open(&mut self) -> Result<()> {
-        fs::create_dir_all(&self.log_dir)
-            .context("Failed to create event log directory")?;
+        fs::create_dir_all(&self.log_dir).context("Failed to create event log directory")?;
 
         // Find the last hash from existing logs for chain continuity
         self.last_hash = self.find_last_hash()?;
@@ -138,7 +140,7 @@ impl EventWriter {
         );
 
         let event = TraceEvent {
-            schema: "tracegit.event.v1".to_string(),
+            schema: "tellur.event.v1".to_string(),
             id: event_id,
             session_id: session_id.to_string(),
             timestamp,
@@ -196,7 +198,9 @@ impl EventWriter {
                 let mut last_good_hash = None;
                 for line in reader.lines() {
                     let line = line?;
-                    if line.trim().is_empty() { continue; }
+                    if line.trim().is_empty() {
+                        continue;
+                    }
                     if let Ok(event) = serde_json::from_str::<TraceEvent>(&line) {
                         last_good_hash = event.event_hash;
                     }
@@ -212,7 +216,7 @@ impl EventWriter {
 ///
 /// Reads every event in order, recomputes `prev_hash`/`event_hash`, and rewrites
 /// the date-partitioned log files. Used after a legitimate, in-place mutation
-/// such as `tracegit redact`: the original chain necessarily breaks when content
+/// such as `tellur redact`: the original chain necessarily breaks when content
 /// changes (that's the point of tamper-evidence), so re-sealing produces a clean
 /// chain that attests the post-redaction state. Returns the number of events.
 pub fn reseal_chain(log_dir: &Path) -> Result<usize> {
@@ -272,8 +276,8 @@ pub struct ChainVerification {
 }
 
 /// Verify a sequence of events: each event's hash recomputes correctly and the
-/// `prev_hash` links form an unbroken chain. Shared by `tracegit verify` and
-/// the MCP `tracegit_verify` tool.
+/// `prev_hash` links form an unbroken chain. Shared by `tellur verify` and
+/// the MCP `tellur_verify` tool.
 pub fn verify_chain(events: &[TraceEvent]) -> ChainVerification {
     let mut result = ChainVerification::default();
     let mut prev_hash: Option<&str> = None;
@@ -296,15 +300,20 @@ pub fn verify_chain(events: &[TraceEvent]) -> ChainVerification {
             );
             if recomputed != stored_hash {
                 ok = false;
-                result.problems.push(format!("Hash mismatch at event {} (tampered?)", event.id));
+                result
+                    .problems
+                    .push(format!("Hash mismatch at event {} (tampered?)", event.id));
             }
         }
 
         if let Some(prev) = prev_hash
-            && event.prev_hash.as_deref() != Some(prev) {
-                ok = false;
-                result.problems.push(format!("Chain broken at event {}", event.id));
-            }
+            && event.prev_hash.as_deref() != Some(prev)
+        {
+            ok = false;
+            result
+                .problems
+                .push(format!("Chain broken at event {}", event.id));
+        }
 
         if ok {
             result.valid += 1;
@@ -420,7 +429,13 @@ mod tests {
         let mut writer = EventWriter::new(&log_dir);
         writer.open().unwrap();
         let event1 = writer
-            .write_event("sess_1", "session.start", "agent", serde_json::json!({}), None)
+            .write_event(
+                "sess_1",
+                "session.start",
+                "agent",
+                serde_json::json!({}),
+                None,
+            )
             .unwrap();
         writer.close();
 
@@ -428,7 +443,13 @@ mod tests {
         let mut writer2 = EventWriter::new(&log_dir);
         writer2.open().unwrap();
         let event2 = writer2
-            .write_event("sess_2", "session.start", "agent", serde_json::json!({}), None)
+            .write_event(
+                "sess_2",
+                "session.start",
+                "agent",
+                serde_json::json!({}),
+                None,
+            )
             .unwrap();
 
         assert_eq!(event2.prev_hash, event1.event_hash);
@@ -451,7 +472,13 @@ mod tests {
             .write_event("s", "session.start", "agent", serde_json::json!({}), None)
             .unwrap();
         writer
-            .write_event("s", "file.write", "agent", serde_json::json!({"file": "a"}), None)
+            .write_event(
+                "s",
+                "file.write",
+                "agent",
+                serde_json::json!({"file": "a"}),
+                None,
+            )
             .unwrap();
         writer.close();
 

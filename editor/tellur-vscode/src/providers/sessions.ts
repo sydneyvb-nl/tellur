@@ -1,7 +1,7 @@
 // Session tree view provider
 
 import * as vscode from 'vscode';
-import { TraceGitClient, Session } from '../client';
+import { TellurClient, Session } from '../client';
 
 export class SessionProvider implements vscode.TreeDataProvider<SessionItem> {
     private _onDidChangeTreeData = new vscode.EventEmitter<SessionItem | undefined | null>();
@@ -9,7 +9,7 @@ export class SessionProvider implements vscode.TreeDataProvider<SessionItem> {
 
     private sessions: Session[] = [];
 
-    constructor(private client: TraceGitClient) {}
+    constructor(private client: TellurClient) {}
 
     refresh(): void {
         this.client.sessions().then(sessions => {

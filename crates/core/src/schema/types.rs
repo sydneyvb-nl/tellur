@@ -1,7 +1,7 @@
-//! Core type definitions for TraceGit v1 schemas.
+//! Core type definitions for Tellur v1 schemas.
 //!
 //! Every event, session, attribution, and provenance record conforms to these types.
-//! Schema version: tracegit.v1
+//! Schema version: tellur.v1
 
 use serde::{Deserialize, Serialize};
 
@@ -85,7 +85,7 @@ pub enum EventActor {
 
 // ─── Event Types ────────────────────────────────────────────────────────────
 
-/// All possible event types in the TraceGit event stream.
+/// All possible event types in the Tellur event stream.
 ///
 /// Serialised as a flat wire string (e.g. `"file.write"`). Any unrecognised
 /// string round-trips through [`EventType::Custom`] rather than being silently
@@ -316,7 +316,7 @@ pub struct Session {
 impl Session {
     pub fn new(repo_id: String, human_actor: Actor, agent: AgentInfo) -> Self {
         Self {
-            schema: "tracegit.session.v1".to_string(),
+            schema: "tellur.session.v1".to_string(),
             id: crate::schema::ids::generate_session_id(),
             repo_id,
             workspace_id: crate::schema::ids::generate_id("ws"),
@@ -559,7 +559,10 @@ mod event_type_tests {
             assert_eq!(et, back);
         }
         // Serialises as a flat string, not an object.
-        assert_eq!(serde_json::to_string(&EventType::FileWrite).unwrap(), "\"file.write\"");
+        assert_eq!(
+            serde_json::to_string(&EventType::FileWrite).unwrap(),
+            "\"file.write\""
+        );
         assert_eq!(
             serde_json::to_string(&EventType::CommandPostExecute).unwrap(),
             "\"command.post_execute\""
@@ -571,7 +574,10 @@ mod event_type_tests {
         // The bug this guards against: unknown types were silently coerced to
         // file.write and could not round-trip.
         let parsed = EventType::from_wire("vendor.special_event");
-        assert_eq!(parsed, EventType::Custom("vendor.special_event".to_string()));
+        assert_eq!(
+            parsed,
+            EventType::Custom("vendor.special_event".to_string())
+        );
         let json = serde_json::to_string(&parsed).unwrap();
         assert_eq!(json, "\"vendor.special_event\"");
         let back: EventType = serde_json::from_str(&json).unwrap();

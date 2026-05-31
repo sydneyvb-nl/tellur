@@ -1,6 +1,6 @@
 //! Built-in adapter definitions
 //!
-//! Static info about the adapters that ship with TraceGit.
+//! Static info about the adapters that ship with Tellur.
 
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +35,18 @@ pub const BUILTIN_ADAPTERS: &[BuiltinAdapter] = &[
         id: "generic",
         name: "Generic",
         description: "CLI and HTTP event ingestion for any tool",
+        supports_hooks: false,
+    },
+    BuiltinAdapter {
+        id: "codex",
+        name: "Codex CLI",
+        description: "OpenAI Codex CLI JSONL event stream import",
+        supports_hooks: false,
+    },
+    BuiltinAdapter {
+        id: "copilot",
+        name: "GitHub Copilot",
+        description: "GitHub Copilot metadata import",
         supports_hooks: false,
     },
 ];

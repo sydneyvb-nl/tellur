@@ -1,6 +1,6 @@
 //! SLSA/SPDX export — supply chain provenance formats
 //!
-//! Generates SLSA provenance and SPDX SBOM documents from TraceGit data
+//! Generates SLSA provenance and SPDX SBOM documents from Tellur data
 //! for compliance and supply chain security.
 
 use serde::{Deserialize, Serialize};
@@ -99,7 +99,7 @@ pub struct SpdxRelationship {
     pub related_spdx_element: String,
 }
 
-/// Generate a SLSA provenance document from TraceGit data
+/// Generate a SLSA provenance document from Tellur data
 pub fn generate_slsa_provenance(
     repo_url: &str,
     commit_sha: &str,
@@ -109,9 +109,10 @@ pub fn generate_slsa_provenance(
     let mut materials = Vec::new();
 
     for attr in attributions {
-        let ai_info: Option<&AttributionRange> = attr.ranges.iter().find(|r|
-            matches!(r.origin, Origin::Ai | Origin::Mixed)
-        );
+        let ai_info: Option<&AttributionRange> = attr
+            .ranges
+            .iter()
+            .find(|r| matches!(r.origin, Origin::Ai | Origin::Mixed));
 
         materials.push(SlsaMaterial {
             uri: format!("git+{}#{}", repo_url, commit_sha),
@@ -137,14 +138,14 @@ pub fn generate_slsa_provenance(
             builder: SlsaBuilder {
                 id: builder_id.to_string(),
             },
-            build_type: "https://tracegit.dev/build/v1".to_string(),
+            build_type: "https://tellur.dev/build/v1".to_string(),
             invocation: SlsaInvocation {
                 config_source: SlsaConfigSource {
                     uri: format!("git+{}", repo_url),
                     digest: SlsaDigest {
                         sha256: commit_sha.to_string(),
                     },
-                    entry_point: "tracegit".to_string(),
+                    entry_point: "tellur".to_string(),
                 },
                 parameters: serde_json::json!({}),
             },
@@ -164,17 +165,24 @@ pub fn generate_spdx_sbom(
     let mut relationships = Vec::new();
 
     for (i, attr) in attributions.iter().enumerate() {
-        let ai_lines: Vec<&AttributionRange> = attr.ranges.iter()
+        let ai_lines: Vec<&AttributionRange> = attr
+            .ranges
+            .iter()
             .filter(|r| matches!(r.origin, Origin::Ai | Origin::Mixed))
             .collect();
 
-        let human_lines: Vec<&AttributionRange> = attr.ranges.iter()
+        let human_lines: Vec<&AttributionRange> = attr
+            .ranges
+            .iter()
             .filter(|r| matches!(r.origin, Origin::Human))
             .collect();
 
         let mut attribution_texts = Vec::new();
         if !ai_lines.is_empty() {
-            let total_ai: u64 = ai_lines.iter().map(|r| (r.end_line - r.start_line + 1) as u64).sum();
+            let total_ai: u64 = ai_lines
+                .iter()
+                .map(|r| (r.end_line - r.start_line + 1) as u64)
+                .sum();
             attribution_texts.push(format!("AI-generated: {} lines", total_ai));
             for r in &ai_lines {
                 if let Some(ref model) = r.model_id {
@@ -184,7 +192,10 @@ pub fn generate_spdx_sbom(
             }
         }
         if !human_lines.is_empty() {
-            let total_human: u64 = human_lines.iter().map(|r| (r.end_line - r.start_line + 1) as u64).sum();
+            let total_human: u64 = human_lines
+                .iter()
+                .map(|r| (r.end_line - r.start_line + 1) as u64)
+                .sum();
             attribution_texts.push(format!("Human-written: {} lines", total_human));
         }
 
@@ -210,13 +221,13 @@ pub fn generate_spdx_sbom(
         spdx_version: "SPDX-2.3".to_string(),
         data_license: "CC0-1.0".to_string(),
         spdx_id: "SPDXRef-DOCUMENT".to_string(),
-        name: format!("{}-tracegit-sbom", repo_name),
-        document_namespace: format!("https://tracegit.dev/sbom/{}/{}", repo_name, commit_sha),
+        name: format!("{}-tellur-sbom", repo_name),
+        document_namespace: format!("https://tellur.dev/sbom/{}/{}", repo_name, commit_sha),
         creation_info: SpdxCreationInfo {
             created: chrono::Utc::now().to_rfc3339(),
             creators: vec![
-                "Tool: TraceGit".to_string(),
-                "Organization: TraceGit".to_string(),
+                "Tool: Tellur".to_string(),
+                "Organization: Tellur".to_string(),
             ],
         },
         packages,
@@ -230,33 +241,31 @@ mod tests {
 
     fn sample_attribution() -> FileAttribution {
         FileAttribution {
-            schema: "tracegit.attribution.v1".to_string(),
+            schema: "tellur.attribution.v1".to_string(),
             file_path: "src/auth.rs".to_string(),
             git_blob_sha: "abc123".to_string(),
-            ranges: vec![
-                AttributionRange {
-                    range_id: "rng_1".to_string(),
-                    start_line: 1,
-                    end_line: 50,
-                    origin: Origin::Ai,
-                    evidence_strength: EvidenceStrength::Recorded,
-                    confidence: 0.92,
-                    state: AttributionState::Exact,
-                    session_id: "sess_1".to_string(),
-                    event_ids: vec![],
-                    agent_id: "claude-code".to_string(),
-                    model_id: Some("anthropic:claude-opus-4.7".to_string()),
-                    prompt_hash: None,
-                    context_set_id: None,
-                    policy_tags: vec![],
-                    risk_tags: vec![],
-                    risk_level: None,
-                    tests_run: vec![],
-                    tests_passed: false,
-                    reviewer: None,
-                    reviewed_at: None,
-                },
-            ],
+            ranges: vec![AttributionRange {
+                range_id: "rng_1".to_string(),
+                start_line: 1,
+                end_line: 50,
+                origin: Origin::Ai,
+                evidence_strength: EvidenceStrength::Recorded,
+                confidence: 0.92,
+                state: AttributionState::Exact,
+                session_id: "sess_1".to_string(),
+                event_ids: vec![],
+                agent_id: "claude-code".to_string(),
+                model_id: Some("anthropic:claude-opus-4.7".to_string()),
+                prompt_hash: None,
+                context_set_id: None,
+                policy_tags: vec![],
+                risk_tags: vec![],
+                risk_level: None,
+                tests_run: vec![],
+                tests_passed: false,
+                reviewer: None,
+                reviewed_at: None,
+            }],
             updated_at: chrono::Utc::now().to_rfc3339(),
         }
     }
@@ -268,7 +277,7 @@ mod tests {
             "https://github.com/example/repo",
             "sha256abc",
             &[attr],
-            "https://tracegit.dev/builder/v1",
+            "https://tellur.dev/builder/v1",
         );
 
         assert_eq!(slsa.doc_type, "https://in-toto.io/Statement/v1");
@@ -293,8 +302,18 @@ mod tests {
 
         assert_eq!(spdx.spdx_version, "SPDX-2.3");
         assert_eq!(spdx.packages.len(), 1);
-        assert!(spdx.packages[0].attribution_texts.iter().any(|t| t.contains("AI-generated")));
-        assert!(spdx.packages[0].attribution_texts.iter().any(|t| t.contains("claude-opus")));
+        assert!(
+            spdx.packages[0]
+                .attribution_texts
+                .iter()
+                .any(|t| t.contains("AI-generated"))
+        );
+        assert!(
+            spdx.packages[0]
+                .attribution_texts
+                .iter()
+                .any(|t| t.contains("claude-opus"))
+        );
 
         let json = serde_json::to_string(&spdx).unwrap();
         assert!(json.contains("SPDX-2.3"));

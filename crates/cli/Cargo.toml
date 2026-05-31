@@ -1,17 +1,17 @@
 [package]
-name = "tracegit-cli"
+name = "tellur-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "TraceGit CLI — AI code provenance from the terminal"
+description = "Tellur CLI — AI code provenance from the terminal"
 
 [[bin]]
-name = "tracegit"
+name = "tellur"
 path = "src/main.rs"
 
 [dependencies]
-tracegit-core = { path = "../core" }
-tracegit-adapters = { path = "../adapters" }
+tellur-core = { path = "../core" }
+tellur-adapters = { path = "../adapters" }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_yaml = "0.9"

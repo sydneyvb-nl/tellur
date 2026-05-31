@@ -1,7 +1,7 @@
-//! TraceGit Core — AI Code Provenance Engine
+//! Tellur Core — AI Code Provenance Engine
 //!
 //! This crate provides the foundational types, schemas, storage, attribution engine,
-//! redaction, and policy evaluation for TraceGit.
+//! redaction, and policy evaluation for Tellur.
 
 pub mod adapter;
 pub mod attribution;

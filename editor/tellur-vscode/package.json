@@ -1,13 +1,13 @@
 {
-  "name": "tracegit-vscode",
-  "displayName": "TraceGit — AI Code Provenance",
+  "name": "tellur-vscode",
+  "displayName": "Tellur — AI Code Provenance",
   "description": "See who changed what: AI or human. Line-level attribution, session replay, and PR risk reports.",
   "version": "0.1.0",
-  "publisher": "tracegit",
+  "publisher": "tellur",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sydneyvb-nl/TraceGit"
+    "url": "https://github.com/sydneyvb-nl/tellur"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -31,83 +31,83 @@
   "contributes": {
     "commands": [
       {
-        "command": "tracegit.init",
-        "title": "TraceGit: Initialize"
+        "command": "tellur.init",
+        "title": "Tellur: Initialize"
       },
       {
-        "command": "tracegit.explain",
-        "title": "TraceGit: Explain Current Line"
+        "command": "tellur.explain",
+        "title": "Tellur: Explain Current Line"
       },
       {
-        "command": "tracegit.blame",
-        "title": "TraceGit: Show File Attribution"
+        "command": "tellur.blame",
+        "title": "Tellur: Show File Attribution"
       },
       {
-        "command": "tracegit.prReport",
-        "title": "TraceGit: Generate PR Report"
+        "command": "tellur.prReport",
+        "title": "Tellur: Generate PR Report"
       },
       {
-        "command": "tracegit.sessions",
-        "title": "TraceGit: Show Sessions"
+        "command": "tellur.sessions",
+        "title": "Tellur: Show Sessions"
       },
       {
-        "command": "tracegit.policyCheck",
-        "title": "TraceGit: Check Policy"
+        "command": "tellur.policyCheck",
+        "title": "Tellur: Check Policy"
       },
       {
-        "command": "tracegit.startWatch",
-        "title": "TraceGit: Start Watching"
+        "command": "tellur.startWatch",
+        "title": "Tellur: Start Watching"
       },
       {
-        "command": "tracegit.stopWatch",
-        "title": "TraceGit: Stop Watching"
+        "command": "tellur.stopWatch",
+        "title": "Tellur: Stop Watching"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "tracegit",
-          "title": "TraceGit",
+          "id": "tellur",
+          "title": "Tellur",
           "icon": "images/icon.svg"
         }
       ]
     },
     "views": {
-      "tracegit": [
+      "tellur": [
         {
-          "id": "tracegit.sessions",
+          "id": "tellur.sessions",
           "name": "Sessions"
         },
         {
-          "id": "tracegit.attributions",
+          "id": "tellur.attributions",
           "name": "Attributions"
         }
       ]
     },
     "configuration": {
-      "title": "TraceGit",
+      "title": "Tellur",
       "properties": {
-        "tracegit.tracegitPath": {
+        "tellur.tellurPath": {
           "type": "string",
-          "default": "tracegit",
-          "description": "Path to the tracegit CLI binary"
+          "default": "tellur",
+          "description": "Path to the tellur CLI binary"
         },
-        "tracegit.showInlineDecorations": {
+        "tellur.showInlineDecorations": {
           "type": "boolean",
           "default": true,
           "description": "Show inline attribution decorations in the editor"
         },
-        "tracegit.aiColor": {
+        "tellur.aiColor": {
           "type": "string",
           "default": "rgba(138, 43, 226, 0.15)",
           "description": "Background color for AI-generated lines"
         },
-        "tracegit.humanColor": {
+        "tellur.humanColor": {
           "type": "string",
           "default": "rgba(34, 139, 34, 0.15)",
           "description": "Background color for human-written lines"
         },
-        "tracegit.autoWatch": {
+        "tellur.autoWatch": {
           "type": "boolean",
           "default": false,
           "description": "Automatically start watching when opening a workspace"

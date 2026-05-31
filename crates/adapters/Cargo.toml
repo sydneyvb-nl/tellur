@@ -1,11 +1,11 @@
 [package]
-name = "tracegit-adapters"
+name = "tellur-adapters"
 version = "0.1.0"
 edition = "2024"
-description = "TraceGit AI tool adapters"
+description = "Tellur AI tool adapters"
 
 [dependencies]
-tracegit-core = { path = "../core" }
+tellur-core = { path = "../core" }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

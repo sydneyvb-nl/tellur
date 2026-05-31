@@ -1,11 +1,11 @@
-// TraceGit JS API wrapper
+// Tellur JS API wrapper
 const { execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
 function getBinary() {
-  const name = os.platform() === 'win32' ? 'tracegit.exe' : 'tracegit';
+  const name = os.platform() === 'win32' ? 'tellur.exe' : 'tellur';
   // Downloaded by install.js into ./bin
   const installed = path.resolve(__dirname, 'bin', name);
   if (fs.existsSync(installed)) return installed;
@@ -22,7 +22,7 @@ function run(args) {
 }
 
 module.exports = {
-  /** Initialize TraceGit in a repository */
+  /** Initialize Tellur in a repository */
   init() { return run(['init']); },
 
   /** Explain who changed a line */

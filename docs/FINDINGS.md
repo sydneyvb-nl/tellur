@@ -1,4 +1,4 @@
-# TraceGit — Code Review & Findings
+# Tellur — Code Review & Findings
 
 **Date:** 2026-05-31
 **Reviewer:** Claude (Opus 4.8) — full code review + security review
@@ -24,7 +24,7 @@ CLI path ever wrote attribution data. Several modules marked "Done" were stubs o
 
 | ID | Severity | Location | Issue | Status |
 |----|----------|----------|-------|--------|
-| SEC-1 | High | `.github/workflows/tracelens.yml` | Command injection via `github.head_ref`/`base_ref` interpolated into a `run:` shell step. Branch names allow shell metacharacters → arbitrary code execution on the CI runner from a fork PR. | FIXED |
+| SEC-1 | High | `.github/workflows/tellur.yml` | Command injection via `github.head_ref`/`base_ref` interpolated into a `run:` shell step. Branch names allow shell metacharacters → arbitrary code execution on the CI runner from a fork PR. | FIXED |
 | SEC-2 | Medium | `crates/core/src/daemon/mod.rs` | HTTP daemon had no authentication, no Origin/Host check (CSRF/DNS-rebind), and wrote client-supplied `prev_hash`/`event_hash` to disk without recomputing — provenance forgery, defeats the tamper-evident claim. | FIXED |
 | SEC-3 | Low | `dist/npm/install.js` | (Future) binary downloader had no checksum/signature verification. | FIXED (sha256 verification added) |
 
@@ -36,12 +36,12 @@ CLI path ever wrote attribution data. Several modules marked "Done" were stubs o
 |----|----------|-------|--------|
 | P0-1 | `crates/cli/src/main.rs` | Attribution was **never written**: `AttributionEngine::attribute_patch` + `TraceIndex::index_attribution` were only called in tests. `explain`/`blame`/`pr-report` therefore always returned empty. | FIXED |
 | P0-2 | `cmd_watch` | `watch` watched nothing — wrote one `session.start` event and printed "coming soon". | FIXED (real `notify`-based watcher + git-diff capture + attribution) |
-| P0-3 | `crates/core/src/mcp/mod.rs` | MCP server returned placeholder strings; no transport; no `tracegit mcp` command. | FIXED (real stdio JSON-RPC server wired to core queries) |
-| P0-4 | `crates/core/src/daemon/mod.rs` | Daemon was dead code (no `tracegit daemon` command). | FIXED (command added; hash chain enforced server-side) |
-| P0-5 | `crates/adapters/src/claude_code.rs` | Hook installer used a fabricated settings schema, was never invoked, and `$TRACEGIT_SESSION` was never set. | FIXED (real Claude Code hook format + `tracegit hooks` command) |
+| P0-3 | `crates/core/src/mcp/mod.rs` | MCP server returned placeholder strings; no transport; no `tellur mcp` command. | FIXED (real stdio JSON-RPC server wired to core queries) |
+| P0-4 | `crates/core/src/daemon/mod.rs` | Daemon was dead code (no `tellur daemon` command). | FIXED (command added; hash chain enforced server-side) |
+| P0-5 | `crates/adapters/src/claude_code.rs` | Hook installer used a fabricated settings schema, was never invoked, and `$TELLUR_SESSION` was never set. | FIXED (real Claude Code hook format + `tellur hooks` command) |
 | P0-6 | `cmd_redact` | `redact` only scanned and printed; never rewrote stored events. | FIXED (rewrites JSONL + reindexes) |
 | P0-7 | `cmd_gc` | `gc` only printed counts; retention config ignored; `--dry-run` did nothing different. | FIXED (real retention-based deletion) |
-| P0-8 | `dist/`, `PROJECT_STATUS.md` | `dist/tracegit.rb` (Homebrew) did not exist; npm `install.js` downloaded nothing. | FIXED (formula added; downloader implemented) |
+| P0-8 | `dist/`, `PROJECT_STATUS.md` | `dist/tellur.rb` (Homebrew) did not exist; npm `install.js` downloaded nothing. | FIXED (formula added; downloader implemented) |
 | P0-9 | `crates/core/src/storage/export.rs` | "corporate/audit/release" export profiles were identical to developer (no redaction/signing). | FIXED (profiles now differ meaningfully) |
 
 ---
@@ -68,12 +68,12 @@ CLI path ever wrote attribution data. Several modules marked "Done" were stubs o
 |----|----------|-------|--------|
 | P2-1 | `cli/main.rs:210` | `cmd_doctor` used `panic!` on missing dirs. | FIXED |
 | P2-2 | `export/mod.rs:195`, `aider.rs:108` | `commit_sha[..8]` panics on short SHAs. | FIXED |
-| P2-3 | `.github/workflows/tracelens.yml` | CI downloaded a raw `arm64` binary on an x64 runner from a `.tar.gz` release asset → never worked. | FIXED |
+| P2-3 | `.github/workflows/tellur.yml` | CI downloaded a raw `arm64` binary on an x64 runner from a `.tar.gz` release asset → never worked. | FIXED |
 | P2-4 | `.github/workflows/release.yml` | Windows asset named `…​.exe.zip`; npm map expected `…​.zip`. | FIXED |
 | P2-5 | `.gitignore` | `Cargo.lock` and `dist/` ignored yet committed (contradictory). For a binary, `Cargo.lock` should be committed. | FIXED |
 | P2-6 | `export/mod.rs` | `bundle_hash` computed over a bundle containing the empty `bundle_hash` field, with no verifier resetting it. | FIXED (documented + verify helper) |
 | P2-7 | `aider.rs:15` | `(?i)aider` matched anywhere → false positives; regexes recompiled per call. | FIXED (lazy compiled, tighter patterns) |
-| P2-8 | `schemas/` | README referenced `tracegit.pr-report.v1` / `tracegit.provenance.v1` schemas that did not exist. | FIXED (schemas added) |
+| P2-8 | `schemas/` | README referenced `tellur.pr-report.v1` / `tellur.provenance.v1` schemas that did not exist. | FIXED (schemas added) |
 | P2-9 | `CONTRIBUTING.md` | Described a TypeScript/npm project (`packages/`, `npm install`) — wrong stack entirely. | FIXED (Rust) |
 | P2-10 | editor extension | `client.ts` called `explain/blame/sessions --json` flags that did not exist, with JSON shapes the CLI never emitted → extension non-functional. | FIXED (`--json` added to CLI; shapes aligned) |
 | P2-11 | adapters | `EventType::Custom` from Cursor/Claude adapters collapsed to `file.write` on import. | FIXED (via P1-1) |

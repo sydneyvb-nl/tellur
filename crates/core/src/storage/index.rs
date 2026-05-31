@@ -3,13 +3,13 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use serde::{Deserialize, Serialize};
 
 use crate::schema::types::TraceEvent;
 
-/// Summary row for a session, used by `tracegit sessions --json`, the MCP
+/// Summary row for a session, used by `tellur sessions --json`, the MCP
 /// server, and the editor extension.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionSummary {
@@ -23,6 +23,21 @@ pub struct SessionSummary {
     pub event_count: u64,
 }
 
+/// Session summary shaped for the local replay dashboard.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DashboardSessionSummary {
+    pub id: String,
+    pub agent_id: String,
+    pub agent_name: String,
+    pub model_id: Option<String>,
+    pub started_at: String,
+    pub status: String,
+    pub event_count: u64,
+    pub files_changed: u64,
+    pub lines_added: u64,
+    pub ai_percentage: u64,
+}
+
 /// Serialize a serde enum to its string value
 fn enum_to_str<T: serde::Serialize>(val: &T) -> String {
     serde_json::to_value(val)
@@ -31,7 +46,7 @@ fn enum_to_str<T: serde::Serialize>(val: &T) -> String {
         .unwrap_or_default()
 }
 
-/// SQLite-backed index for TraceGit data
+/// SQLite-backed index for Tellur data
 pub struct TraceIndex {
     conn: Connection,
 }
@@ -42,8 +57,7 @@ impl TraceIndex {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = Connection::open(path)
-            .context("Failed to open SQLite index")?;
+        let conn = Connection::open(path).context("Failed to open SQLite index")?;
 
         let index = Self { conn };
         index.init_tables()?;
@@ -120,7 +134,7 @@ impl TraceIndex {
             CREATE INDEX IF NOT EXISTS idx_attributions_file ON attributions(file_path);
             CREATE INDEX IF NOT EXISTS idx_attributions_session ON attributions(session_id);
             CREATE INDEX IF NOT EXISTS idx_attributions_origin ON attributions(origin);
-            "
+            ",
         )?;
         Ok(())
     }
@@ -171,11 +185,9 @@ impl TraceIndex {
 
     /// Index (insert or update) a full session record with agent/model metadata.
     pub fn index_session(&self, session: &crate::schema::types::Session) -> Result<()> {
-        let model_name = session.model.as_ref().map(|m| {
-            match &m.version {
-                Some(v) => format!("{}:{} ({})", m.provider, m.name, v),
-                None => format!("{}:{}", m.provider, m.name),
-            }
+        let model_name = session.model.as_ref().map(|m| match &m.version {
+            Some(v) => format!("{}:{} ({})", m.provider, m.name, v),
+            None => format!("{}:{}", m.provider, m.name),
         });
         self.conn.execute(
             "INSERT INTO sessions (id, repo_id, started_at, ended_at, agent_id, agent_name, model_name, status, event_count)
@@ -206,7 +218,7 @@ impl TraceIndex {
     pub fn get_session_events(&self, session_id: &str) -> Result<Vec<TraceEvent>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, session_id, timestamp, type, actor, payload, prev_hash, event_hash
-             FROM events WHERE session_id = ?1 ORDER BY timestamp"
+             FROM events WHERE session_id = ?1 ORDER BY timestamp",
         )?;
 
         let events = stmt.query_map(params![session_id], |row| {
@@ -215,7 +227,7 @@ impl TraceIndex {
             let payload_str: String = row.get(5)?;
 
             Ok(TraceEvent {
-                schema: "tracegit.event.v1".to_string(),
+                schema: "tellur.event.v1".to_string(),
                 id: row.get(0)?,
                 session_id: row.get(1)?,
                 timestamp: row.get(2)?,
@@ -235,11 +247,9 @@ impl TraceIndex {
 
     /// Count total events
     pub fn event_count(&self) -> Result<u64> {
-        let count: u64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM events",
-            [],
-            |row| row.get(0),
-        )?;
+        let count: u64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))?;
         Ok(count)
     }
 
@@ -264,18 +274,68 @@ impl TraceIndex {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// List sessions with aggregate attribution stats for the replay dashboard.
+    pub fn list_dashboard_sessions(&self, limit: u32) -> Result<Vec<DashboardSessionSummary>> {
+        let mut stmt = self.conn.prepare(
+            "
+            SELECT
+                s.id,
+                s.agent_id,
+                s.agent_name,
+                s.model_name,
+                s.started_at,
+                s.status,
+                s.event_count,
+                COUNT(DISTINCT a.file_path) AS files_changed,
+                COALESCE(SUM(a.end_line - a.start_line + 1), 0) AS lines_added,
+                COALESCE(SUM(CASE WHEN a.origin = 'ai' THEN a.end_line - a.start_line + 1 ELSE 0 END), 0) AS ai_lines
+            FROM sessions s
+            LEFT JOIN attributions a ON a.session_id = s.id
+            GROUP BY s.id
+            ORDER BY s.started_at DESC
+            LIMIT ?1
+            ",
+        )?;
+        let rows = stmt.query_map(params![limit], |row| {
+            let lines_added = row.get::<_, i64>(8)?.max(0) as u64;
+            let ai_lines = row.get::<_, i64>(9)?.max(0) as u64;
+            let ai_percentage = if lines_added == 0 {
+                0
+            } else {
+                ((ai_lines as f64 / lines_added as f64) * 100.0).round() as u64
+            };
+            Ok(DashboardSessionSummary {
+                id: row.get(0)?,
+                agent_id: row.get(1)?,
+                agent_name: row.get(2)?,
+                model_id: row.get(3)?,
+                started_at: row.get(4)?,
+                status: row.get(5)?,
+                event_count: row.get::<_, i64>(6)? as u64,
+                files_changed: row.get::<_, i64>(7)?.max(0) as u64,
+                lines_added,
+                ai_percentage,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// Count sessions
     pub fn session_count(&self) -> Result<u64> {
-        let count: u64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM sessions",
-            [],
-            |row| row.get(0),
-        )?;
+        let count: u64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))?;
         Ok(count)
     }
 
     /// Index an attribution range
-    pub fn index_attribution(&self, attr: &crate::schema::types::AttributionRange, file_path: &str, blob_sha: &str, updated_at: &str) -> Result<()> {
+    pub fn index_attribution(
+        &self,
+        attr: &crate::schema::types::AttributionRange,
+        file_path: &str,
+        blob_sha: &str,
+        updated_at: &str,
+    ) -> Result<()> {
         let policy_tags = serde_json::to_string(&attr.policy_tags)?;
         let risk_tags = serde_json::to_string(&attr.risk_tags)?;
 
@@ -327,13 +387,16 @@ impl TraceIndex {
     }
 
     /// Get attribution for a specific file
-    pub fn get_file_attributions(&self, file_path: &str) -> Result<Vec<(String, crate::schema::types::AttributionRange)>> {
+    pub fn get_file_attributions(
+        &self,
+        file_path: &str,
+    ) -> Result<Vec<(String, crate::schema::types::AttributionRange)>> {
         let mut stmt = self.conn.prepare(
             "SELECT git_blob_sha, range_id, start_line, end_line, origin, evidence_strength,
                     confidence, state, session_id, agent_id, model_id, policy_tags, risk_tags,
                     risk_level, tests_run, tests_passed, reviewer, reviewed_at, event_ids,
                     prompt_hash, context_set_id
-             FROM attributions WHERE file_path = ?1 ORDER BY start_line"
+             FROM attributions WHERE file_path = ?1 ORDER BY start_line",
         )?;
 
         let results = stmt.query_map(params![file_path], |row| {
@@ -352,10 +415,15 @@ impl TraceIndex {
                     range_id: row.get(1)?,
                     start_line: row.get(2)?,
                     end_line: row.get(3)?,
-                    origin: serde_json::from_value(serde_json::Value::String(origin_str)).unwrap_or(crate::schema::types::Origin::Unknown),
-                    evidence_strength: serde_json::from_value(serde_json::Value::String(evidence_str)).unwrap_or(crate::schema::types::EvidenceStrength::Unknown),
+                    origin: serde_json::from_value(serde_json::Value::String(origin_str))
+                        .unwrap_or(crate::schema::types::Origin::Unknown),
+                    evidence_strength: serde_json::from_value(serde_json::Value::String(
+                        evidence_str,
+                    ))
+                    .unwrap_or(crate::schema::types::EvidenceStrength::Unknown),
                     confidence: row.get(6)?,
-                    state: serde_json::from_value(serde_json::Value::String(state_str)).unwrap_or(crate::schema::types::AttributionState::Uncertain),
+                    state: serde_json::from_value(serde_json::Value::String(state_str))
+                        .unwrap_or(crate::schema::types::AttributionState::Uncertain),
                     session_id: row.get(8)?,
                     event_ids: serde_json::from_str(&event_ids_str).unwrap_or_default(),
                     agent_id: row.get(9)?,
@@ -364,7 +432,8 @@ impl TraceIndex {
                     context_set_id: row.get(20)?,
                     policy_tags: serde_json::from_str(&policy_tags_str).unwrap_or_default(),
                     risk_tags: serde_json::from_str(&risk_tags_str).unwrap_or_default(),
-                    risk_level: risk_level_str.and_then(|s| serde_json::from_value(serde_json::Value::String(s)).ok()),
+                    risk_level: risk_level_str
+                        .and_then(|s| serde_json::from_value(serde_json::Value::String(s)).ok()),
                     tests_run: serde_json::from_str(&tests_run_str).unwrap_or_default(),
                     tests_passed: row.get(15)?,
                     reviewer: row.get(16)?,
@@ -387,7 +456,7 @@ mod tests {
         let index = TraceIndex::open_in_memory().unwrap();
 
         let event = TraceEvent {
-            schema: "tracegit.event.v1".to_string(),
+            schema: "tellur.event.v1".to_string(),
             id: "evt_test_001".to_string(),
             session_id: "sess_test".to_string(),
             timestamp: "2026-05-31T14:00:00Z".to_string(),
@@ -418,8 +487,17 @@ mod tests {
         let index = TraceIndex::open_in_memory().unwrap();
         let mut session = Session::new(
             "repo1".to_string(),
-            Actor { name: "dev".to_string(), email: None, email_hash: None, actor_type: EventActor::Human },
-            AgentInfo { id: "claude-code".to_string(), name: "Claude Code".to_string(), version: None },
+            Actor {
+                name: "dev".to_string(),
+                email: None,
+                email_hash: None,
+                actor_type: EventActor::Human,
+            },
+            AgentInfo {
+                id: "claude-code".to_string(),
+                name: "Claude Code".to_string(),
+                version: None,
+            },
         );
         session.model = Some(ModelInfo {
             provider: "anthropic".to_string(),
@@ -432,7 +510,10 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].agent_name, "Claude Code");
         // The bug this guards: model_name used to always be NULL.
-        assert_eq!(sessions[0].model_name.as_deref(), Some("anthropic:claude-opus (4.8)"));
+        assert_eq!(
+            sessions[0].model_name.as_deref(),
+            Some("anthropic:claude-opus (4.8)")
+        );
     }
 
     #[test]
@@ -461,11 +542,123 @@ mod tests {
             reviewer: None,
             reviewed_at: None,
         };
-        index.index_attribution(&range, "src/a.rs", "blob1", "2026-05-31T00:00:00Z").unwrap();
+        index
+            .index_attribution(&range, "src/a.rs", "blob1", "2026-05-31T00:00:00Z")
+            .unwrap();
         let got = index.get_file_attributions("src/a.rs").unwrap();
         assert_eq!(got.len(), 1);
         // The bug this guards: prompt_hash/event_ids were dropped on read.
         assert_eq!(got[0].1.prompt_hash.as_deref(), Some("sha256:deadbeef"));
         assert_eq!(got[0].1.event_ids, vec!["evt1".to_string()]);
+    }
+
+    #[test]
+    fn test_dashboard_sessions_include_real_stats() {
+        use crate::schema::types::*;
+        let index = TraceIndex::open_in_memory().unwrap();
+        let mut session = Session::new(
+            "repo1".to_string(),
+            Actor {
+                name: "dev".to_string(),
+                email: None,
+                email_hash: None,
+                actor_type: EventActor::Human,
+            },
+            AgentInfo {
+                id: "claude-code".to_string(),
+                name: "Claude Code".to_string(),
+                version: None,
+            },
+        );
+        session.id = "sess_dashboard".to_string();
+        session.started_at = "2026-05-31T10:00:00Z".to_string();
+        session.model = Some(ModelInfo {
+            provider: "anthropic".to_string(),
+            name: "claude-opus".to_string(),
+            version: None,
+        });
+        index.index_session(&session).unwrap();
+
+        index
+            .index_event(&TraceEvent {
+                schema: "tellur.event.v1".to_string(),
+                id: "evt_dashboard".to_string(),
+                session_id: "sess_dashboard".to_string(),
+                timestamp: "2026-05-31T10:01:00Z".to_string(),
+                event_type: EventType::FileWrite,
+                actor: EventActor::Agent,
+                payload: serde_json::json!({"file_path": "src/lib.rs"}),
+                redaction: None,
+                prev_hash: None,
+                event_hash: Some("hash".to_string()),
+            })
+            .unwrap();
+
+        index
+            .index_attribution(
+                &AttributionRange {
+                    range_id: "rng_dashboard_ai".to_string(),
+                    start_line: 1,
+                    end_line: 10,
+                    origin: Origin::Ai,
+                    evidence_strength: EvidenceStrength::Recorded,
+                    confidence: 1.0,
+                    state: AttributionState::Exact,
+                    session_id: "sess_dashboard".to_string(),
+                    event_ids: vec!["evt_dashboard".to_string()],
+                    agent_id: "claude-code".to_string(),
+                    model_id: Some("anthropic:claude-opus".to_string()),
+                    prompt_hash: None,
+                    context_set_id: None,
+                    policy_tags: vec![],
+                    risk_tags: vec![],
+                    risk_level: None,
+                    tests_run: vec![],
+                    tests_passed: false,
+                    reviewer: None,
+                    reviewed_at: None,
+                },
+                "src/lib.rs",
+                "blob",
+                "2026-05-31T10:01:00Z",
+            )
+            .unwrap();
+        index
+            .index_attribution(
+                &AttributionRange {
+                    range_id: "rng_dashboard_human".to_string(),
+                    start_line: 11,
+                    end_line: 15,
+                    origin: Origin::Human,
+                    evidence_strength: EvidenceStrength::Recorded,
+                    confidence: 1.0,
+                    state: AttributionState::Exact,
+                    session_id: "sess_dashboard".to_string(),
+                    event_ids: vec![],
+                    agent_id: "human".to_string(),
+                    model_id: None,
+                    prompt_hash: None,
+                    context_set_id: None,
+                    policy_tags: vec![],
+                    risk_tags: vec![],
+                    risk_level: None,
+                    tests_run: vec![],
+                    tests_passed: false,
+                    reviewer: None,
+                    reviewed_at: None,
+                },
+                "src/lib.rs",
+                "blob",
+                "2026-05-31T10:02:00Z",
+            )
+            .unwrap();
+
+        let sessions = index.list_dashboard_sessions(10).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "sess_dashboard");
+        assert_eq!(sessions[0].event_count, 1);
+        assert_eq!(sessions[0].files_changed, 1);
+        assert_eq!(sessions[0].lines_added, 15);
+        assert_eq!(sessions[0].ai_percentage, 67);
     }
 }

@@ -31,10 +31,13 @@ pub fn export_provenance_bundle(
     git_ref: &str,
     git_commit_sha: &str,
 ) -> Result<ProvenanceBundle> {
-    let repo_id = sessions.first().map(|s| s.repo_id.clone()).unwrap_or_default();
+    let repo_id = sessions
+        .first()
+        .map(|s| s.repo_id.clone())
+        .unwrap_or_default();
 
     let bundle = ProvenanceBundle {
-        schema: "tracegit.provenance.v1".to_string(),
+        schema: "tellur.provenance.v1".to_string(),
         id: crate::schema::ids::generate_bundle_id(),
         created_at: chrono::Utc::now().to_rfc3339(),
         repo_id,
@@ -53,7 +56,10 @@ pub fn export_provenance_bundle(
     let canonical = serde_json::to_string(&bundle)?;
     let hash = crate::schema::ids::hash_content(&canonical);
 
-    Ok(ProvenanceBundle { bundle_hash: hash, ..bundle })
+    Ok(ProvenanceBundle {
+        bundle_hash: hash,
+        ..bundle
+    })
 }
 
 fn filter_sessions(profile: &ExportProfile, sessions: Vec<Session>) -> Vec<Session> {
@@ -103,7 +109,9 @@ fn filter_events(profile: &ExportProfile, events: Vec<TraceEvent>) -> Vec<TraceE
             .into_iter()
             .map(|mut e| {
                 if let Some(obj) = e.payload.as_object_mut() {
-                    for key in ["command", "prompt", "input", "output", "content", "stdout", "stderr"] {
+                    for key in [
+                        "command", "prompt", "input", "output", "content", "stdout", "stderr",
+                    ] {
                         obj.remove(key);
                     }
                 }
@@ -130,7 +138,10 @@ fn filter_events(profile: &ExportProfile, events: Vec<TraceEvent>) -> Vec<TraceE
     }
 }
 
-fn filter_attributions(_profile: &ExportProfile, attributions: Vec<FileAttribution>) -> Vec<FileAttribution> {
+fn filter_attributions(
+    _profile: &ExportProfile,
+    attributions: Vec<FileAttribution>,
+) -> Vec<FileAttribution> {
     // Attributions are generally safe to export
     attributions
 }
@@ -149,9 +160,10 @@ mod tests {
             vec![],
             "main",
             "abc123",
-        ).unwrap();
+        )
+        .unwrap();
 
-        assert_eq!(bundle.schema, "tracegit.provenance.v1");
+        assert_eq!(bundle.schema, "tellur.provenance.v1");
         assert!(!bundle.bundle_hash.is_empty());
         assert_eq!(bundle.git_ref, "main");
     }
@@ -159,7 +171,7 @@ mod tests {
     #[test]
     fn test_export_opensource_strips_payloads() {
         let events = vec![TraceEvent {
-            schema: "tracegit.event.v1".to_string(),
+            schema: "tellur.event.v1".to_string(),
             id: "evt_1".to_string(),
             session_id: "sess_1".to_string(),
             timestamp: chrono::Utc::now().to_rfc3339(),
@@ -179,7 +191,8 @@ mod tests {
             vec![],
             "main",
             "abc",
-        ).unwrap();
+        )
+        .unwrap();
 
         // Payload should be stripped
         assert_eq!(bundle.events[0].payload, serde_json::json!({}));

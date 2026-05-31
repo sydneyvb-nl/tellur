@@ -18,15 +18,16 @@ impl GenericAdapter {
         Self
     }
 
-    /// Parse a JSONL event file into TraceGit events
-    pub fn import_jsonl(&self, path: &Path) -> Result<Vec<tracegit_core::schema::types::TraceEvent>> {
+    /// Parse a JSONL event file into Tellur events
+    pub fn import_jsonl(&self, path: &Path) -> Result<Vec<tellur_core::schema::types::TraceEvent>> {
         let content = std::fs::read_to_string(path)?;
         let mut events = Vec::new();
         for line in content.lines() {
             if line.trim().is_empty() {
                 continue;
             }
-            if let Ok(event) = serde_json::from_str::<tracegit_core::schema::types::TraceEvent>(line) {
+            if let Ok(event) = serde_json::from_str::<tellur_core::schema::types::TraceEvent>(line)
+            {
                 events.push(event);
             }
         }

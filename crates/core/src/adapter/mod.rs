@@ -1,7 +1,7 @@
 //! Adapter interface for AI tool integrations
 //!
 //! Every AI tool adapter (Claude Code, Cursor, Aider, etc.) implements
-//! the AgentAdapter trait to normalize events into TraceGit format.
+//! the AgentAdapter trait to normalize events into Tellur format.
 
 use std::path::Path;
 
@@ -73,5 +73,5 @@ pub trait AgentAdapter: Send + Sync {
     async fn capture_event(&self, event: &TraceEvent) -> anyhow::Result<()>;
 }
 
-/// Built-in adapters that ship with TraceGit
+/// Built-in adapters that ship with Tellur
 pub mod builtin;

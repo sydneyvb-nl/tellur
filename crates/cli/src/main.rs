@@ -1,33 +1,38 @@
-//! TraceGit CLI — AI Code Provenance from the terminal
+//! Tellur CLI — AI Code Provenance from the terminal
 //!
 //! Commands:
-//!   tracegit init       — Initialize TraceGit in a repository
-//!   tracegit doctor     — Check setup and detect AI tools
-//!   tracegit status     — Show current status
-//!   tracegit explain    — Explain who/what changed a line
-//!   tracegit blame      — Show AI attribution for a file
-//!   tracegit pr-report  — Generate a PR risk report
-//!   tracegit policy     — Check policy compliance
-//!   tracegit export     — Export provenance data
-//!   tracegit watch      — Start capturing AI development activity
-//!   tracegit event      — Emit a single event (generic adapter)
-//!   tracegit gc         — Garbage collect expired data
-//!   tracegit verify     — Verify provenance integrity
+//!   tellur init       — Initialize Tellur in a repository
+//!   tellur doctor     — Check setup and detect AI tools
+//!   tellur status     — Show current status
+//!   tellur explain    — Explain who/what changed a line
+//!   tellur blame      — Show AI attribution for a file
+//!   tellur pr-report  — Generate a PR risk report
+//!   tellur policy     — Check policy compliance
+//!   tellur export     — Export provenance data
+//!   tellur watch      — Start capturing AI development activity
+//!   tellur event      — Emit a single event (generic adapter)
+//!   tellur gc         — Garbage collect expired data
+//!   tellur verify     — Verify provenance integrity
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-use tracegit_core::capture::{capture_working_changes, CaptureContext};
-use tracegit_core::policy::PolicyEngine;
-use tracegit_core::schema::types::{Actor, AgentInfo, EventActor, Session};
-use tracegit_core::storage::{EventWriter, RepoStorage, TraceIndex};
+use tellur_core::capture::{CaptureContext, capture_working_changes};
+use tellur_core::policy::PolicyEngine;
+use tellur_core::schema::types::{Actor, AgentInfo, EventActor, Session};
+use tellur_core::storage::{EventWriter, RepoStorage, TraceIndex};
 
 #[derive(Parser)]
-#[command(name = "tracegit")]
-#[command(version, about = "AI Code Provenance — line-level attribution, session replay, PR risk reports")]
-#[command(long_about = "TraceGit records, attributes, and reports on AI-assisted development.\n\n\
-Git tells you what changed. TraceGit tells you how AI participated.")]
+#[command(name = "tellur")]
+#[command(
+    version,
+    about = "AI Code Provenance — line-level attribution, session replay, PR risk reports"
+)]
+#[command(
+    long_about = "Tellur records, attributes, and reports on AI-assisted development.\n\n\
+Git tells you what changed. Tellur tells you how AI participated."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -35,17 +40,17 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Initialize TraceGit in the current repository
+    /// Initialize Tellur in the current repository
     Init {
         /// Setup profile: default | team | oss-maintainer
         #[arg(long, default_value = "default")]
         profile: String,
     },
 
-    /// Check TraceGit setup and detect AI tools
+    /// Check Tellur setup and detect AI tools
     Doctor,
 
-    /// Show current TraceGit status
+    /// Show current Tellur status
     Status,
 
     /// Explain who/what changed a specific line
@@ -94,7 +99,7 @@ enum Commands {
 
     /// Import events from an external source
     Import {
-        /// Adapter to import from: claude-code | aider | cursor | generic
+        /// Adapter to import from: claude-code | aider | cursor | generic | codex | copilot
         adapter: String,
         /// Source path
         source: PathBuf,
@@ -166,7 +171,7 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum HookActions {
-    /// Install TraceGit hooks into Claude Code settings (.claude/settings.json)
+    /// Install Tellur hooks into Claude Code settings (.claude/settings.json)
     Install {
         /// Which tool's hooks to install
         #[arg(default_value = "claude-code")]
@@ -206,9 +211,19 @@ async fn main() -> Result<()> {
         Commands::Export { format, output } => cmd_export(&format, output.as_deref()),
         Commands::Import { adapter, source } => cmd_import(&adapter, &source).await,
         Commands::Watch => cmd_watch().await,
-        Commands::Event { event_type, session, file, command, exit_code } => {
-            cmd_event(&event_type, &session, file.as_deref(), command.as_deref(), exit_code)
-        }
+        Commands::Event {
+            event_type,
+            session,
+            file,
+            command,
+            exit_code,
+        } => cmd_event(
+            &event_type,
+            &session,
+            file.as_deref(),
+            command.as_deref(),
+            exit_code,
+        ),
         Commands::Gc { dry_run } => cmd_gc(dry_run),
         Commands::Verify => cmd_verify(),
         Commands::Redact => cmd_redact(),
@@ -246,24 +261,24 @@ fn load_policy(storage: &RepoStorage) -> Option<PolicyEngine> {
 async fn cmd_init(profile: &str) -> Result<()> {
     let storage = RepoStorage::discover()?;
     if storage.is_initialized() {
-        println!("TraceGit already initialized. Run `tracegit doctor` to check setup.");
+        println!("Tellur already initialized. Run `tellur doctor` to check setup.");
         return Ok(());
     }
 
     storage.init()?;
-    println!("✓ TraceGit initialized (profile: {})", profile);
+    println!("✓ Tellur initialized (profile: {})", profile);
     println!("  Config: {}", storage.config_path.display());
     println!("  Policies: {}", storage.policies_dir.display());
     println!("  Traces: {}", storage.traces_dir.display());
     println!();
-    println!("Next: run `tracegit doctor` to verify setup");
+    println!("Next: run `tellur doctor` to verify setup");
     Ok(())
 }
 
 async fn cmd_doctor() -> Result<()> {
     let storage = RepoStorage::discover()?;
 
-    println!("TraceGit Doctor");
+    println!("Tellur Doctor");
     println!("═══════════════");
     println!();
 
@@ -271,7 +286,7 @@ async fn cmd_doctor() -> Result<()> {
     if storage.is_initialized() {
         println!("✓ Config found");
     } else {
-        println!("✗ Config not found — run `tracegit init` first");
+        println!("✗ Config not found — run `tellur init` first");
     }
 
     // Check policies
@@ -282,9 +297,16 @@ async fn cmd_doctor() -> Result<()> {
             .collect(),
         Err(_) => Vec::new(),
     };
-    println!("✓ {} polic{} found", policies.len(), if policies.len() == 1 { "y" } else { "ies" });
+    println!(
+        "✓ {} polic{} found",
+        policies.len(),
+        if policies.len() == 1 { "y" } else { "ies" }
+    );
     for p in &policies {
-        println!("  - {}", p.path().file_name().unwrap_or_default().to_string_lossy());
+        println!(
+            "  - {}",
+            p.path().file_name().unwrap_or_default().to_string_lossy()
+        );
     }
 
     // Check index
@@ -315,7 +337,10 @@ async fn cmd_doctor() -> Result<()> {
     let mut detected = 0;
 
     // Check for Claude Code
-    if std::path::Path::new(&std::env::var("HOME").unwrap_or_default()).join(".claude").exists() {
+    if std::path::Path::new(&std::env::var("HOME").unwrap_or_default())
+        .join(".claude")
+        .exists()
+    {
         detected += 1;
         println!("  ✓ Claude Code (~/.claude found)");
     }
@@ -327,9 +352,39 @@ async fn cmd_doctor() -> Result<()> {
     }
 
     // Check for Aider
-    if std::process::Command::new("which").arg("aider").output().map(|o| o.status.success()).unwrap_or(false) {
+    if std::process::Command::new("which")
+        .arg("aider")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
         detected += 1;
         println!("  ✓ Aider (installed)");
+    }
+
+    // Check for Codex CLI
+    if std::path::Path::new(&std::env::var("HOME").unwrap_or_default())
+        .join(".codex")
+        .exists()
+        || std::process::Command::new("which")
+            .arg("codex")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    {
+        detected += 1;
+        println!("  ✓ Codex CLI (~/.codex or codex binary found)");
+    }
+
+    // Check for common Copilot workspace config
+    if storage
+        .root
+        .join(".github")
+        .join("copilot-instructions.md")
+        .exists()
+    {
+        detected += 1;
+        println!("  ✓ GitHub Copilot instructions (.github/copilot-instructions.md found)");
     }
 
     if detected == 0 {
@@ -338,7 +393,7 @@ async fn cmd_doctor() -> Result<()> {
 
     println!();
     if storage.is_initialized() {
-        println!("Setup looks good. Run `tracegit watch` to start capturing.");
+        println!("Setup looks good. Run `tellur watch` to start capturing.");
     }
 
     Ok(())
@@ -347,7 +402,7 @@ async fn cmd_doctor() -> Result<()> {
 fn cmd_status() -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
-        println!("TraceGit not initialized. Run `tracegit init` first.");
+        println!("Tellur not initialized. Run `tellur init` first.");
         return Ok(());
     }
 
@@ -360,7 +415,7 @@ fn cmd_status() -> Result<()> {
 
     if events == 0 {
         println!();
-        println!("No events recorded yet. Run `tracegit watch` to start capturing.");
+        println!("No events recorded yet. Run `tellur watch` to start capturing.");
     }
 
     Ok(())
@@ -372,12 +427,12 @@ fn cmd_explain(target: &str, json: bool) -> Result<()> {
         let line_num: u32 = l.parse().context("Invalid line number")?;
         (f, line_num)
     } else {
-        anyhow::bail!("Usage: tracegit explain <file>:<line>");
+        anyhow::bail!("Usage: tellur explain <file>:<line>");
     };
 
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
-        println!("TraceGit not initialized. Run `tracegit init` first.");
+        println!("Tellur not initialized. Run `tellur init` first.");
         return Ok(());
     }
 
@@ -414,7 +469,7 @@ fn cmd_explain(target: &str, json: bool) -> Result<()> {
     let Some((_, attr)) = found else {
         if attributions.is_empty() {
             println!("No attribution data for {}", file);
-            println!("Run `tracegit watch` (or install hooks) to start capturing AI activity.");
+            println!("Run `tellur watch` (or install hooks) to start capturing AI activity.");
         } else {
             println!("Line {} in {} — no AI attribution recorded", line, file);
         }
@@ -451,7 +506,7 @@ fn cmd_explain(target: &str, json: bool) -> Result<()> {
 fn cmd_blame(file: &str, json: bool) -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
-        println!("TraceGit not initialized. Run `tracegit init` first.");
+        println!("Tellur not initialized. Run `tellur init` first.");
         return Ok(());
     }
 
@@ -490,19 +545,22 @@ fn cmd_blame(file: &str, json: bool) -> Result<()> {
 fn cmd_pr_report(base: &str, head: &str) -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
-        println!("TraceGit not initialized. Run `tracegit init` first.");
+        println!("Tellur not initialized. Run `tellur init` first.");
         return Ok(());
     }
 
-    let report = tracegit_core::report::build_repo_pr_report(&storage, base, head)?;
-    println!("{}", tracegit_core::report::PRReportGenerator::to_markdown(&report));
+    let report = tellur_core::report::build_repo_pr_report(&storage, base, head)?;
+    println!(
+        "{}",
+        tellur_core::report::PRReportGenerator::to_markdown(&report)
+    );
     Ok(())
 }
 
 fn cmd_policy_check() -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
-        println!("TraceGit not initialized. Run `tracegit init` first.");
+        println!("Tellur not initialized. Run `tellur init` first.");
         return Ok(());
     }
 
@@ -512,7 +570,7 @@ fn cmd_policy_check() -> Result<()> {
         return Ok(());
     }
 
-    let engine = tracegit_core::policy::PolicyEngine::load_from_file(&policy_path)?;
+    let engine = tellur_core::policy::PolicyEngine::load_from_file(&policy_path)?;
     let policy = engine.policy();
 
     println!("Policy Check");
@@ -548,7 +606,7 @@ fn cmd_policy_explain(rule_id: Option<&str>) -> Result<()> {
         return Ok(());
     }
 
-    let engine = tracegit_core::policy::PolicyEngine::load_from_file(&policy_path)?;
+    let engine = tellur_core::policy::PolicyEngine::load_from_file(&policy_path)?;
     let policy = engine.policy();
 
     if let Some(id) = rule_id {
@@ -583,11 +641,11 @@ fn cmd_policy_explain(rule_id: Option<&str>) -> Result<()> {
 fn cmd_export(format: &str, output: Option<&std::path::Path>) -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
-        println!("TraceGit not initialized. Run `tracegit init` first.");
+        println!("Tellur not initialized. Run `tellur init` first.");
         return Ok(());
     }
 
-    let events = tracegit_core::storage::read_events(&storage.traces_dir)?;
+    let events = tellur_core::storage::read_events(&storage.traces_dir)?;
     if events.is_empty() {
         println!("No events to export.");
         return Ok(());
@@ -595,12 +653,13 @@ fn cmd_export(format: &str, output: Option<&std::path::Path>) -> Result<()> {
 
     let result = match format {
         "json" => serde_json::to_string_pretty(&events)?,
-        "jsonl" => events.iter()
+        "jsonl" => events
+            .iter()
             .map(|e| serde_json::to_string(e).unwrap_or_default())
             .collect::<Vec<_>>()
             .join("\n"),
         "markdown" | "md" => {
-            let mut md = String::from("# TraceGit Export\n\n");
+            let mut md = String::from("# Tellur Export\n\n");
             for e in &events {
                 md.push_str(&format!("## Event {}\n", e.id));
                 md.push_str(&format!("- **Session:** {}\n", e.session_id));
@@ -631,32 +690,43 @@ fn cmd_export(format: &str, output: Option<&std::path::Path>) -> Result<()> {
 async fn cmd_import(adapter: &str, source: &std::path::Path) -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
-        println!("TraceGit not initialized. Run `tracegit init` first.");
+        println!("Tellur not initialized. Run `tellur init` first.");
         return Ok(());
     }
 
     println!("Importing from {} adapter: {}", adapter, source.display());
 
-    let events: Vec<tracegit_core::schema::types::TraceEvent> = match adapter {
+    let events: Vec<tellur_core::schema::types::TraceEvent> = match adapter {
         "claude-code" | "claude" => {
-            let a = tracegit_adapters::ClaudeCodeAdapter::new();
+            let a = tellur_adapters::ClaudeCodeAdapter::new();
             a.parse_transcript(source, "imported")?
         }
         "aider" => {
-            let a = tracegit_adapters::AiderAdapter::new();
+            let a = tellur_adapters::AiderAdapter::new();
             let repo_root = std::env::current_dir()?;
             a.parse_git_log(&repo_root, "2020-01-01")?
         }
         "cursor" => {
-            let a = tracegit_adapters::CursorAdapter::new();
+            let a = tellur_adapters::CursorAdapter::new();
             a.parse_trace_file(source, "imported")?
         }
         "generic" => {
-            let a = tracegit_adapters::GenericAdapter::new();
+            let a = tellur_adapters::GenericAdapter::new();
             a.import_jsonl(source)?
         }
+        "codex" | "codex-cli" => {
+            let a = tellur_adapters::CodexAdapter::new();
+            a.parse_jsonl(source, "imported")?
+        }
+        "copilot" | "github-copilot" => {
+            let a = tellur_adapters::CopilotAdapter::new();
+            a.parse_metadata_file(source, "imported")?
+        }
         _ => {
-            println!("Unknown adapter: {}. Supported: claude-code, aider, cursor, generic", adapter);
+            println!(
+                "Unknown adapter: {}. Supported: claude-code, aider, cursor, generic, codex, copilot",
+                adapter
+            );
             return Ok(());
         }
     };
@@ -695,31 +765,31 @@ async fn cmd_import(adapter: &str, source: &std::path::Path) -> Result<()> {
 
 async fn cmd_watch() -> Result<()> {
     use notify::{RecursiveMode, Watcher};
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::mpsc::{channel, RecvTimeoutError};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::{RecvTimeoutError, channel};
     use std::time::Duration;
 
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
-        println!("TraceGit not initialized. Run `tracegit init` first.");
+        println!("Tellur not initialized. Run `tellur init` first.");
         return Ok(());
     }
 
-    println!("TraceGit Watch");
+    println!("Tellur Watch");
     println!("══════════════");
     println!("Watching {} for changes...", storage.root.display());
     println!("Press Ctrl+C to stop.");
     println!();
 
     // Create and index a watch session.
-    let repo_id = tracegit_core::schema::ids::hash_content(&storage.root.to_string_lossy());
+    let repo_id = tellur_core::schema::ids::hash_content(&storage.root.to_string_lossy());
     let session = Session::new(
         repo_id,
         current_actor(),
         AgentInfo {
             id: "watch".to_string(),
-            name: "TraceGit Watch".to_string(),
+            name: "Tellur Watch".to_string(),
             version: Some(env!("CARGO_PKG_VERSION").to_string()),
         },
     );
@@ -735,7 +805,7 @@ async fn cmd_watch() -> Result<()> {
         &session_id,
         "session.start",
         "agent",
-        serde_json::json!({"mode": "watch", "tool": "tracegit-cli"}),
+        serde_json::json!({"mode": "watch", "tool": "tellur-cli"}),
         None,
     )?;
 
@@ -765,9 +835,10 @@ async fn cmd_watch() -> Result<()> {
         match rx.recv_timeout(Duration::from_millis(400)) {
             Ok(event) => {
                 // Ignore our own metadata and noisy build/vendor dirs.
-                let relevant = event.paths.iter().any(|p| {
-                    tracegit_core::storage::file_watcher::should_track(p, &storage.root)
-                });
+                let relevant = event
+                    .paths
+                    .iter()
+                    .any(|p| tellur_core::storage::file_watcher::should_track(p, &storage.root));
                 if relevant {
                     dirty = true;
                 }
@@ -830,7 +901,7 @@ fn cmd_event(
 ) -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
-        println!("TraceGit not initialized. Run `tracegit init` first.");
+        println!("Tellur not initialized. Run `tellur init` first.");
         return Ok(());
     }
 
@@ -866,15 +937,22 @@ fn cmd_event(
 fn cmd_gc(dry_run: bool) -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
-        println!("TraceGit not initialized. Run `tracegit init` first.");
+        println!("Tellur not initialized. Run `tellur init` first.");
         return Ok(());
     }
-    println!("Garbage collection{}", if dry_run { " (dry run)" } else { "" });
+    println!(
+        "Garbage collection{}",
+        if dry_run { " (dry run)" } else { "" }
+    );
 
     // Retention window from config (default 90 days).
     let keep_days = read_retention_days(&storage).unwrap_or(90);
     let cutoff = chrono::Utc::now() - chrono::Duration::days(keep_days as i64);
-    println!("  Keeping events newer than {} ({} days)", cutoff.to_rfc3339(), keep_days);
+    println!(
+        "  Keeping events newer than {} ({} days)",
+        cutoff.to_rfc3339(),
+        keep_days
+    );
 
     // Rewrite each JSONL log, dropping events older than the cutoff.
     let mut removed = 0u64;
@@ -895,7 +973,7 @@ fn cmd_gc(dry_run: bool) -> Result<()> {
             if line.trim().is_empty() {
                 continue;
             }
-            let keep = serde_json::from_str::<tracegit_core::schema::types::TraceEvent>(line)
+            let keep = serde_json::from_str::<tellur_core::schema::types::TraceEvent>(line)
                 .ok()
                 .and_then(|e| chrono::DateTime::parse_from_rfc3339(&e.timestamp).ok())
                 .map(|ts| ts.with_timezone(&chrono::Utc) >= cutoff)
@@ -909,12 +987,23 @@ fn cmd_gc(dry_run: bool) -> Result<()> {
             }
         }
         if !dry_run && removed > 0 {
-            std::fs::write(path, surviving.join("\n") + if surviving.is_empty() { "" } else { "\n" })?;
+            std::fs::write(
+                path,
+                surviving.join("\n") + if surviving.is_empty() { "" } else { "\n" },
+            )?;
         }
     }
 
-    println!("  {} event(s) kept, {} event(s) {}",
-        kept, removed, if dry_run { "would be removed" } else { "removed" });
+    println!(
+        "  {} event(s) kept, {} event(s) {}",
+        kept,
+        removed,
+        if dry_run {
+            "would be removed"
+        } else {
+            "removed"
+        }
+    );
 
     if !dry_run && removed > 0 {
         // Rebuild the index from the surviving logs so it stays consistent.
@@ -925,7 +1014,7 @@ fn cmd_gc(dry_run: bool) -> Result<()> {
     Ok(())
 }
 
-/// Read `retention.keep_days` from `.tracegit/config.yml`.
+/// Read `retention.keep_days` from `.tellur/config.yml`.
 fn read_retention_days(storage: &RepoStorage) -> Option<u32> {
     let content = std::fs::read_to_string(&storage.config_path).ok()?;
     let value: serde_yaml::Value = serde_yaml::from_str(&content).ok()?;
@@ -943,7 +1032,7 @@ fn rebuild_index(storage: &RepoStorage) -> Result<()> {
         std::fs::remove_file(&storage.index_path)?;
     }
     let index = TraceIndex::open(&storage.index_path)?;
-    let events = tracegit_core::storage::read_events(&storage.traces_dir)?;
+    let events = tellur_core::storage::read_events(&storage.traces_dir)?;
     for event in &events {
         index.index_event(event)?;
     }
@@ -953,11 +1042,11 @@ fn rebuild_index(storage: &RepoStorage) -> Result<()> {
 fn cmd_verify() -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
-        println!("TraceGit not initialized. Run `tracegit init` first.");
+        println!("Tellur not initialized. Run `tellur init` first.");
         return Ok(());
     }
 
-    let events = tracegit_core::storage::read_events(&storage.traces_dir)?;
+    let events = tellur_core::storage::read_events(&storage.traces_dir)?;
     if events.is_empty() {
         println!("No events to verify.");
         return Ok(());
@@ -965,7 +1054,7 @@ fn cmd_verify() -> Result<()> {
 
     println!("Verifying {} events...", events.len());
 
-    let result = tracegit_core::storage::event_log::verify_chain(&events);
+    let result = tellur_core::storage::event_log::verify_chain(&events);
     for problem in &result.problems {
         println!("✗ {}", problem);
     }
@@ -984,18 +1073,18 @@ fn cmd_verify() -> Result<()> {
 fn cmd_redact() -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
-        println!("TraceGit not initialized. Run `tracegit init` first.");
+        println!("Tellur not initialized. Run `tellur init` first.");
         return Ok(());
     }
 
-    let events = tracegit_core::storage::read_events(&storage.traces_dir)?;
+    let events = tellur_core::storage::read_events(&storage.traces_dir)?;
     if events.is_empty() {
         println!("No events to redact.");
         return Ok(());
     }
 
-    let engine = tracegit_core::redaction::RedactionEngine::new(
-        tracegit_core::redaction::RedactionConfig::default(),
+    let engine = tellur_core::redaction::RedactionEngine::new(
+        tellur_core::redaction::RedactionConfig::default(),
     );
 
     // Rewrite each log file in place, redacting secrets found in payloads.
@@ -1017,20 +1106,25 @@ fn cmd_redact() -> Result<()> {
             if line.trim().is_empty() {
                 continue;
             }
-            match serde_json::from_str::<tracegit_core::schema::types::TraceEvent>(line) {
+            match serde_json::from_str::<tellur_core::schema::types::TraceEvent>(line) {
                 Ok(mut event) => {
                     let payload_str = serde_json::to_string(&event.payload)?;
                     let result = engine.scan_and_redact(&payload_str);
                     if result.has_secrets {
                         if let Some(red) = result.redacted_content
-                            && let Ok(new_payload) = serde_json::from_str(&red) {
-                                event.payload = new_payload;
-                            }
-                        event.redaction = Some(tracegit_core::schema::types::RedactionInfo {
+                            && let Ok(new_payload) = serde_json::from_str(&red)
+                        {
+                            event.payload = new_payload;
+                        }
+                        event.redaction = Some(tellur_core::schema::types::RedactionInfo {
                             applied: true,
-                            mode: tracegit_core::schema::types::RedactionMode::Automatic,
+                            mode: tellur_core::schema::types::RedactionMode::Automatic,
                             rules_applied: Some(
-                                result.findings.iter().map(|f| f.pattern_name.clone()).collect(),
+                                result
+                                    .findings
+                                    .iter()
+                                    .map(|f| f.pattern_name.clone())
+                                    .collect(),
                             ),
                         });
                         redacted_events += 1;
@@ -1052,10 +1146,17 @@ fn cmd_redact() -> Result<()> {
         // Redaction changes payloads, which necessarily invalidates the original
         // hash chain. Re-seal it so `verify` reflects the post-redaction state,
         // then rebuild the index from the re-sealed logs.
-        let resealed = tracegit_core::storage::event_log::reseal_chain(&storage.traces_dir)?;
+        let resealed = tellur_core::storage::event_log::reseal_chain(&storage.traces_dir)?;
         rebuild_index(&storage)?;
-        println!("Redacted secrets in {} of {} events.", redacted_events, events.len());
-        println!("Re-sealed hash chain over {} events; run `tracegit verify` to confirm.", resealed);
+        println!(
+            "Redacted secrets in {} of {} events.",
+            redacted_events,
+            events.len()
+        );
+        println!(
+            "Re-sealed hash chain over {} events; run `tellur verify` to confirm.",
+            resealed
+        );
     }
 
     Ok(())
@@ -1064,7 +1165,7 @@ fn cmd_redact() -> Result<()> {
 fn cmd_sessions(session_id: Option<&str>, json: bool) -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
-        println!("TraceGit not initialized. Run `tracegit init` first.");
+        println!("Tellur not initialized. Run `tellur init` first.");
         return Ok(());
     }
 
@@ -1123,37 +1224,42 @@ fn cmd_sessions(session_id: Option<&str>, json: bool) -> Result<()> {
 async fn cmd_daemon(host: &str, port: u16) -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
-        println!("TraceGit not initialized. Run `tracegit init` first.");
+        println!("Tellur not initialized. Run `tellur init` first.");
         return Ok(());
     }
-    let config = tracegit_core::daemon::DaemonConfig {
+    let config = tellur_core::daemon::DaemonConfig {
         host: host.to_string(),
         port,
         repo_root: storage.root.clone(),
     };
-    tracegit_core::daemon::run_daemon(config).await
+    tellur_core::daemon::run_daemon(config).await
 }
 
 fn cmd_mcp() -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
-        eprintln!("TraceGit not initialized. Run `tracegit init` first.");
+        eprintln!("Tellur not initialized. Run `tellur init` first.");
         return Ok(());
     }
-    tracegit_core::mcp::serve_stdio(&storage.root)
+    tellur_core::mcp::serve_stdio(&storage.root)
 }
 
 fn cmd_hooks_install(tool: &str) -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
-        println!("TraceGit not initialized. Run `tracegit init` first.");
+        println!("Tellur not initialized. Run `tellur init` first.");
         return Ok(());
     }
     match tool {
         "claude-code" | "claude" => {
-            tracegit_adapters::ClaudeCodeAdapter::install_hooks(&storage.root)?;
-            println!("✓ Installed Claude Code hooks into {}/.claude/settings.json", storage.root.display());
-            println!("  PostToolUse (Write|Edit|MultiEdit) and SessionStart now record provenance.");
+            tellur_adapters::ClaudeCodeAdapter::install_hooks(&storage.root)?;
+            println!(
+                "✓ Installed Claude Code hooks into {}/.claude/settings.json",
+                storage.root.display()
+            );
+            println!(
+                "  PostToolUse (Write|Edit|MultiEdit) and SessionStart now record provenance."
+            );
         }
         other => {
             println!("Unknown tool: {}. Supported: claude-code", other);
@@ -1168,22 +1274,22 @@ fn cmd_hooks_claude() -> Result<()> {
     use std::io::Read;
     let storage = match RepoStorage::discover() {
         Ok(s) if s.is_initialized() => s,
-        // Never fail a hook — just no-op if TraceGit isn't set up here.
+        // Never fail a hook — just no-op if Tellur isn't set up here.
         _ => return Ok(()),
     };
 
     let mut input = String::new();
     let _ = std::io::stdin().read_to_string(&mut input);
-    let payload = tracegit_adapters::claude_code::HookPayload::parse(&input)?;
+    let payload = tellur_adapters::claude_code::HookPayload::parse(&input)?;
     let session_id = payload
         .session_id
         .clone()
-        .unwrap_or_else(tracegit_core::schema::ids::generate_session_id);
+        .unwrap_or_else(tellur_core::schema::ids::generate_session_id);
 
     let index = TraceIndex::open(&storage.index_path)?;
 
     // Ensure the session is recorded with the Claude Code agent.
-    let repo_id = tracegit_core::schema::ids::hash_content(&storage.root.to_string_lossy());
+    let repo_id = tellur_core::schema::ids::hash_content(&storage.root.to_string_lossy());
     let mut session = Session::new(
         repo_id,
         current_actor(),

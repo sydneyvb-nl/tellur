@@ -1,15 +1,15 @@
-# Contributing to TraceGit
+# Contributing to Tellur
 
-Thanks for your interest in contributing! TraceGit is an open-source AI code provenance platform and we welcome contributions of all kinds.
+Thanks for your interest in contributing! Tellur is an open-source AI code provenance platform and we welcome contributions of all kinds.
 
 ## Development Setup
 
-TraceGit's core and CLI are written in **Rust**; the editor extension is TypeScript.
+Tellur's core and CLI are written in **Rust**; the editor extension is TypeScript.
 
 ```bash
 # Clone the repo
-git clone https://github.com/sydneyvb-nl/TraceGit.git
-cd TraceGit
+git clone https://github.com/sydneyvb-nl/tellur.git
+cd Tellur
 
 # Build all crates
 cargo build
@@ -18,8 +18,8 @@ cargo build
 cargo test
 
 # Run the CLI
-cargo run -p tracegit-cli -- init
-cargo run -p tracegit-cli -- doctor
+cargo run -p tellur-cli -- init
+cargo run -p tellur-cli -- doctor
 ```
 
 Rust toolchain: stable (edition 2024). Install via [rustup](https://rustup.rs).
@@ -27,11 +27,11 @@ Rust toolchain: stable (edition 2024). Install via [rustup](https://rustup.rs).
 ## Project Structure
 
 ```
-TraceGit/
+Tellur/
 ├── crates/
 │   ├── core/          # Schemas, attribution engine, storage, policy, redaction,
 │   │                  #   capture pipeline, export, daemon, MCP server
-│   ├── cli/           # CLI binary (the `tracegit` command)
+│   ├── cli/           # CLI binary (the `tellur` command)
 │   └── adapters/      # AI tool adapters (Claude Code, Aider, Cursor, Generic)
 ├── schemas/           # JSON Schema definitions
 ├── editor/            # VS Code extension (TypeScript)
@@ -42,12 +42,12 @@ TraceGit/
 ## Editor Extension
 
 ```bash
-cd editor/tracegit-vscode
+cd editor/tellur-vscode
 npm install
 npm run compile
 ```
 
-The extension shells out to the `tracegit` binary and consumes its `--json`
+The extension shells out to the `tellur` binary and consumes its `--json`
 output (`explain --json`, `blame --json`, `sessions --json`).
 
 ## Code Style
@@ -79,7 +79,7 @@ chore: update dependencies
 
 - Use GitHub Issues.
 - Include steps to reproduce.
-- Include the TraceGit version (`tracegit --version`).
+- Include the Tellur version (`tellur --version`).
 - Include your OS and Rust toolchain (`rustc --version`).
 
 ## License

@@ -1,35 +1,38 @@
-//! CLI integration tests — test the tracegit binary end-to-end
+//! CLI integration tests — test the tellur binary end-to-end
 
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-fn tracegit_binary() -> PathBuf {
+fn tellur_binary() -> PathBuf {
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_tellur") {
+        return PathBuf::from(path);
+    }
     let root = workspace_root();
     // Try release first, then debug
-    let release = root.join("target/release/tracegit");
-    let debug = root.join("target/debug/tracegit");
+    let release = root.join("target/release/tellur");
+    let debug = root.join("target/debug/tellur");
     if release.exists() { release } else { debug }
 }
 
 fn require_binary() -> Command {
-    let binary = tracegit_binary();
+    let binary = tellur_binary();
     if !binary.exists() {
-        eprintln!("Building tracegit binary for integration tests...");
+        eprintln!("Building tellur binary for integration tests...");
         let root = workspace_root();
         let status = Command::new("cargo")
-            .args(["build", "--bin", "tracegit"])
+            .args(["build", "--bin", "tellur"])
             .current_dir(&root)
             .status()
             .expect("Failed to run cargo build");
         if !status.success() {
-            panic!("Failed to build tracegit binary for tests");
+            panic!("Failed to build tellur binary for tests");
         }
     }
     Command::new(binary)
 }
 
-fn tracegit() -> Command {
+fn tellur() -> Command {
     require_binary()
 }
 
@@ -58,14 +61,18 @@ fn temp_repo() -> PathBuf {
         COUNTER.fetch_add(1, Ordering::SeqCst),
         nanos
     );
-    let dir = std::env::temp_dir().join(format!("tracegit-test-{}", unique));
+    let dir = std::env::temp_dir().join(format!("tellur-test-{}", unique));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
 
     // Init git repo
-    Command::new("git").args(["init"]).current_dir(&dir).output().unwrap();
     Command::new("git")
-        .args(["config", "user.email", "test@tracegit.dev"])
+        .args(["init"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.email", "test@tellur.dev"])
         .current_dir(&dir)
         .output()
         .unwrap();
@@ -80,15 +87,15 @@ fn temp_repo() -> PathBuf {
 
 #[test]
 fn test_version() {
-    let output = tracegit().arg("--version").output().unwrap();
+    let output = tellur().arg("--version").output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("tracegit"));
+    assert!(stdout.contains("tellur"));
 }
 
 #[test]
 fn test_help() {
-    let output = tracegit().arg("--help").output().unwrap();
+    let output = tellur().arg("--help").output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("init"));
@@ -100,7 +107,7 @@ fn test_help() {
 #[test]
 fn test_init() {
     let dir = temp_repo();
-    let release_bin = tracegit_binary();
+    let release_bin = tellur_binary();
     let output = Command::new(&release_bin)
         .arg("init")
         .current_dir(&dir)
@@ -110,8 +117,13 @@ fn test_init() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // Should create .tracegit directory
-    assert!(dir.join(".tracegit").exists() || stdout.contains("tracegit") || stderr.contains("tracegit") || output.status.success());
+    // Should create .tellur directory
+    assert!(
+        dir.join(".tellur").exists()
+            || stdout.contains("tellur")
+            || stderr.contains("tellur")
+            || output.status.success()
+    );
 
     // Cleanup
     let _ = fs::remove_dir_all(&dir);
@@ -127,10 +139,14 @@ fn test_init_creates_structure() {
         .unwrap();
 
     // Check that expected directories/files exist
-    let tracegit_dir = dir.join(".tracegit");
-    if tracegit_dir.exists() {
+    let tellur_dir = dir.join(".tellur");
+    if tellur_dir.exists() {
         // Config should exist
-        assert!(tracegit_dir.join("config.yml").exists() || tracegit_dir.join("config.yaml").exists() || tracegit_dir.exists());
+        assert!(
+            tellur_dir.join("config.yml").exists()
+                || tellur_dir.join("config.yaml").exists()
+                || tellur_dir.exists()
+        );
     }
 
     let _ = fs::remove_dir_all(&dir);
@@ -146,11 +162,18 @@ fn test_status_without_init() {
         .unwrap();
 
     // Should either succeed with "not initialized" or fail gracefully
-    let combined = format!("{}{}", 
+    let combined = format!(
+        "{}{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(combined.contains("not") || combined.contains("No") || combined.contains("tracegit") || !output.status.success() || !combined.is_empty());
+    assert!(
+        combined.contains("not")
+            || combined.contains("No")
+            || combined.contains("tellur")
+            || !output.status.success()
+            || !combined.is_empty()
+    );
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -164,11 +187,7 @@ fn test_doctor() {
         .output()
         .unwrap();
 
-    let output = match require_binary()
-        .arg("doctor")
-        .current_dir(&dir)
-        .output()
-    {
+    let output = match require_binary().arg("doctor").current_dir(&dir).output() {
         Ok(o) => o,
         Err(_) => return, // Binary not available in this test environment
     };
@@ -221,6 +240,78 @@ fn test_verify_empty() {
 
     // Should not crash
     let _ = String::from_utf8_lossy(&output.stdout);
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_import_codex_jsonl() {
+    let dir = temp_repo();
+    require_binary()
+        .arg("init")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let events = dir.join("codex.jsonl");
+    fs::write(
+        &events,
+        serde_json::json!({
+            "timestamp": "2026-05-31T12:00:00Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "exec_command_begin",
+                "command": "cargo test"
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let output = require_binary()
+        .args(["import", "codex"])
+        .arg(&events)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Imported 1 events from codex"));
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_import_copilot_jsonl() {
+    let dir = temp_repo();
+    require_binary()
+        .arg("init")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let events = dir.join("copilot.jsonl");
+    fs::write(
+        &events,
+        serde_json::json!({
+            "timestamp": "2026-05-31T12:00:00Z",
+            "type": "suggestion.accepted",
+            "file": "src/main.ts",
+            "completion_id": "cmp_1"
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let output = require_binary()
+        .args(["import", "copilot"])
+        .arg(&events)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Imported 1 events from copilot"));
 
     let _ = fs::remove_dir_all(&dir);
 }

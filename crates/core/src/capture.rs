@@ -1,11 +1,11 @@
 //! Capture pipeline — turns working-tree changes into events + attribution.
 //!
-//! This is the glue that makes `tracegit watch`, `tracegit event --file`, and
+//! This is the glue that makes `tellur watch`, `tellur event --file`, and
 //! adapter imports actually populate the index so that `explain`, `blame`, and
 //! `pr-report` have data to work with.
 //!
 //! Flow for each changed file:
-//! 1. skip ignored paths (`.git`, `.tracegit`, `node_modules`, build dirs);
+//! 1. skip ignored paths (`.git`, `.tellur`, `node_modules`, build dirs);
 //! 2. if policy marks the path `block_ai_read` (e.g. secrets), skip it entirely
 //!    — its contents are never read or stored;
 //! 3. write a `file.write`/`file.delete` event (metadata only — never the diff
@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use crate::attribution::engine::AttributionEngine;
 use crate::policy::PolicyEngine;
 use crate::schema::types::{EvidenceStrength, Origin};
-use crate::storage::file_watcher::{capture_git_diff, should_track, FileChangeType};
+use crate::storage::file_watcher::{FileChangeType, capture_git_diff, should_track};
 use crate::storage::{EventWriter, RepoStorage, TraceIndex};
 
 /// How captured changes should be attributed.
@@ -96,10 +96,11 @@ pub fn capture_working_changes(
 
         // Never read or store contents of paths the policy forbids AI to read.
         if let Some(p) = policy
-            && p.blocks_ai_read(&change.path) {
-                summary.skipped_blocked.push(change.path.clone());
-                continue;
-            }
+            && p.blocks_ai_read(&change.path)
+        {
+            summary.skipped_blocked.push(change.path.clone());
+            continue;
+        }
 
         let event_type = match change.change_type {
             FileChangeType::Deleted => "file.delete",
@@ -129,7 +130,9 @@ pub fn capture_working_changes(
         if change.change_type == FileChangeType::Deleted {
             continue;
         }
-        let Some(diff) = change.diff.as_deref() else { continue };
+        let Some(diff) = change.diff.as_deref() else {
+            continue;
+        };
         if diff.trim().is_empty() {
             continue;
         }
@@ -181,7 +184,11 @@ mod tests {
     use std::process::Command;
 
     fn git(repo: &std::path::Path, args: &[&str]) {
-        Command::new("git").args(args).current_dir(repo).output().unwrap();
+        Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .unwrap();
     }
 
     #[test]
@@ -200,7 +207,11 @@ mod tests {
         git(root, &["commit", "-m", "init"]);
 
         // Modify the file (the "AI" edit).
-        std::fs::write(root.join("app.rs"), "fn main() {\n    let x = 1;\n    let y = 2;\n}\n").unwrap();
+        std::fs::write(
+            root.join("app.rs"),
+            "fn main() {\n    let x = 1;\n    let y = 2;\n}\n",
+        )
+        .unwrap();
 
         let storage = RepoStorage::from_git_root(root).unwrap();
         storage.init().unwrap();
@@ -234,7 +245,11 @@ mod tests {
         std::fs::write(root.join("a.txt"), "x\n").unwrap();
         git(root, &["add", "a.txt"]);
         git(root, &["commit", "-m", "init"]);
-        std::fs::write(root.join("creds.secret"), "API_KEY=sk-abcdefghij1234567890\n").unwrap();
+        std::fs::write(
+            root.join("creds.secret"),
+            "API_KEY=sk-abcdefghij1234567890\n",
+        )
+        .unwrap();
 
         let storage = RepoStorage::from_git_root(root).unwrap();
         storage.init().unwrap();
@@ -258,7 +273,17 @@ mod tests {
             capture_working_changes(&storage, &mut writer, &index, Some(&policy), &ctx).unwrap();
         writer.close();
 
-        assert!(summary.skipped_blocked.iter().any(|p| p.ends_with("creds.secret")));
-        assert!(index.get_file_attributions("creds.secret").unwrap().is_empty());
+        assert!(
+            summary
+                .skipped_blocked
+                .iter()
+                .any(|p| p.ends_with("creds.secret"))
+        );
+        assert!(
+            index
+                .get_file_attributions("creds.secret")
+                .unwrap()
+                .is_empty()
+        );
     }
 }

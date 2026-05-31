@@ -1,9 +1,9 @@
 [package]
-name = "tracegit-core"
+name = "tellur-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Core library for TraceGit — AI code provenance engine"
+description = "Core library for Tellur — AI code provenance engine"
 
 [dependencies]
 serde = { workspace = true }

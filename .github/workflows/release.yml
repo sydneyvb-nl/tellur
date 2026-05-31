@@ -15,19 +15,19 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             os: macos-latest
-            name: tracegit-mac-arm64
+            name: tellur-mac-arm64
           - target: x86_64-apple-darwin
             os: macos-latest
-            name: tracegit-mac-x64
+            name: tellur-mac-x64
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-            name: tracegit-linux-x64
+            name: tellur-linux-x64
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
-            name: tracegit-linux-arm64
+            name: tellur-linux-arm64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            name: tracegit-windows-x64
+            name: tellur-windows-x64
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -52,18 +52,18 @@ jobs:
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
-          # Archive contains a canonical `tracegit` binary so the installer
+          # Archive contains a canonical `tellur` binary so the installer
           # doesn't need per-platform inner names.
-          cp target/${{ matrix.target }}/release/tracegit tracegit
-          chmod +x tracegit
-          tar czf ${{ matrix.name }}.tar.gz tracegit
+          cp target/${{ matrix.target }}/release/tellur tellur
+          chmod +x tellur
+          tar czf ${{ matrix.name }}.tar.gz tellur
           shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         run: |
-          cp target/${{ matrix.target }}/release/tracegit.exe tracegit.exe
-          7z a ${{ matrix.name }}.zip tracegit.exe
+          cp target/${{ matrix.target }}/release/tellur.exe tellur.exe
+          7z a ${{ matrix.name }}.zip tellur.exe
           (Get-FileHash -Algorithm SHA256 "${{ matrix.name }}.zip").Hash.ToLower() | Out-File -Encoding ascii "${{ matrix.name }}.zip.sha256"
 
       - name: Upload artifact

@@ -1,15 +1,15 @@
 //! Aider adapter — git commit attribution parser
 //!
 //! Aider writes attribution in git commit messages.
-//! This adapter parses those messages to create TraceGit events.
+//! This adapter parses those messages to create Tellur events.
 
 use std::path::Path;
 
 use anyhow::Result;
 use regex::Regex;
 
-use tracegit_core::adapter::{AgentAdapter, AdapterInfo, AdapterCapabilities};
-use tracegit_core::schema::types::*;
+use tellur_core::adapter::{AdapterCapabilities, AdapterInfo, AgentAdapter};
+use tellur_core::schema::types::*;
 
 /// Aider commit message patterns. Deliberately anchored to Aider's own commit
 /// conventions to avoid matching any commit that merely mentions the word
@@ -48,17 +48,16 @@ impl AiderAdapter {
         use std::sync::OnceLock;
         static COMPILED: OnceLock<Vec<Regex>> = OnceLock::new();
         let patterns = COMPILED.get_or_init(|| {
-            AIDER_PATTERNS.iter().filter_map(|p| Regex::new(p).ok()).collect()
+            AIDER_PATTERNS
+                .iter()
+                .filter_map(|p| Regex::new(p).ok())
+                .collect()
         });
         patterns.iter().any(|re| re.is_match(message))
     }
 
     /// Parse git log output for Aider commits
-    pub fn parse_git_log(
-        &self,
-        repo_root: &Path,
-        since: &str,
-    ) -> Result<Vec<TraceEvent>> {
+    pub fn parse_git_log(&self, repo_root: &Path, since: &str) -> Result<Vec<TraceEvent>> {
         let output = std::process::Command::new("git")
             .args([
                 "log",
@@ -109,8 +108,8 @@ impl AiderAdapter {
                 };
 
                 events.push(TraceEvent {
-                    schema: "tracegit.event.v1".to_string(),
-                    id: tracegit_core::schema::ids::generate_event_id(),
+                    schema: "tellur.event.v1".to_string(),
+                    id: tellur_core::schema::ids::generate_event_id(),
                     session_id: format!("aider-{}", short_sha),
                     timestamp: chrono::Utc::now().to_rfc3339(),
                     event_type,
@@ -176,9 +175,15 @@ mod tests {
 
     #[test]
     fn test_is_aider_commit() {
-        assert!(AiderAdapter::is_aider_commit("feat: add auth module\n\n#Aider"));
-        assert!(AiderAdapter::is_aider_commit("AI-generated code for login flow"));
-        assert!(AiderAdapter::is_aider_commit("fix: typo\n\nCo-authored-by: Aider <aider@aider.chat>"));
+        assert!(AiderAdapter::is_aider_commit(
+            "feat: add auth module\n\n#Aider"
+        ));
+        assert!(AiderAdapter::is_aider_commit(
+            "AI-generated code for login flow"
+        ));
+        assert!(AiderAdapter::is_aider_commit(
+            "fix: typo\n\nCo-authored-by: Aider <aider@aider.chat>"
+        ));
         assert!(!AiderAdapter::is_aider_commit("fix: typo in readme"));
     }
 }

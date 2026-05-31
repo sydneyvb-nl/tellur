@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TraceGit — Session Replay</title>
+  <title>Tellur — Session Replay</title>
   <style>
     :root {
       --bg: #0d1117;
@@ -257,7 +257,7 @@
 <body>
 
 <div class="header">
-  <h1>🔍 TraceGit</h1>
+  <h1>🔍 Tellur</h1>
   <span class="badge">Session Replay</span>
 </div>
 
@@ -278,14 +278,14 @@
   <div class="main" id="main-content">
     <div class="empty-state">
       <div class="icon">🔍</div>
-      <h2>TraceGit Session Replay</h2>
-      <p>Select a session from the sidebar to view the event timeline, or start the daemon with <code>tracegit daemon</code></p>
+      <h2>Tellur Session Replay</h2>
+      <p>Select a session from the sidebar to view the event timeline, or start the daemon with <code>tellur daemon</code></p>
     </div>
   </div>
 </div>
 
 <script>
-// TraceGit Session Replay — Client
+// Tellur Session Replay — Client
 const API_BASE = window.location.origin;
 
 // --- State ---
@@ -368,7 +368,7 @@ function getDemoEvents(sessionId) {
       { id: 'e3', event_type: 'file_write', timestamp: '2026-05-31T14:15:10Z', body: 'Modified <code>crates/core/src/attribution/engine.rs</code>', diff: '+ pub fn batch_attributions(\n+     &self,\n+     files: &[PathBuf],\n+ ) -> Result<Vec<FileAttribution>> {\n+     files.iter()\n+         .map(|f| self.attribute_file(f))\n+         .collect()\n+ }' },
     ],
     sess_demo_3: [
-      { id: 'e1', event_type: 'file_write', timestamp: '2026-05-31T12:00:00Z', body: 'Modified <code>README.md</code>', diff: '+ ## TraceGit\n+ \n+ AI Code Provenance — track who changed what: AI or human.' },
+      { id: 'e1', event_type: 'file_write', timestamp: '2026-05-31T12:00:00Z', body: 'Modified <code>README.md</code>', diff: '+ ## Tellur\n+ \n+ AI Code Provenance — track who changed what: AI or human.' },
     ],
   };
   return events[sessionId] || [];
@@ -412,16 +412,28 @@ function formatTime(ts) {
 }
 
 function getEventClass(type) {
+  const normalized = normalizeEventType(type);
   const map = { 'file_write': 'file-write', 'file_read': 'file-read', 'command': 'command', 'user_prompt': 'user-prompt' };
-  return map[type] || '';
+  return map[normalized] || '';
 }
 
 function getTypeLabel(type) {
+  const normalized = normalizeEventType(type);
   const map = {
     'file_write': 'File Write', 'file_read': 'File Read', 'command': 'Command',
     'user_prompt': 'User Prompt', 'ai_response': 'AI Response', 'code_search': 'Code Search'
   };
-  return map[type] || type;
+  return map[normalized] || type;
+}
+
+function normalizeEventType(type) {
+  if (!type) return '';
+  if (type.startsWith('file.write') || type.startsWith('file.patch')) return 'file_write';
+  if (type.startsWith('file.read')) return 'file_read';
+  if (type.startsWith('command.')) return 'command';
+  if (type.startsWith('prompt.') || type === 'user.prompt') return 'user_prompt';
+  if (type === 'code.search') return 'code_search';
+  return type.replaceAll('.', '_');
 }
 
 function renderDiff(diff) {
@@ -490,7 +502,7 @@ async function selectSession(id) {
             <span class="event-type ${getEventClass(e.event_type)}">${getTypeLabel(e.event_type)}</span>
             <span class="event-time">${formatTime(e.timestamp)}</span>
           </div>
-          <div class="event-body">${e.body || ''}</div>
+          <div class="event-body">${escapeHtml(e.body || '')}</div>
           ${e.diff ? renderDiff(e.diff) : ''}
         </div>
       `).join('')}

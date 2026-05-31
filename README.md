@@ -1,18 +1,18 @@
-# TraceGit
+# Tellur
 
 **AI Code Provenance for Teams**
 
 > Who changed that function? Which model generated it? What prompt and context produced that change? Did tests pass? Who reviewed it?
 
-TraceGit is an open-source AI code provenance platform that records, attributes, and reports on AI-assisted development. It gives teams line-level AI blame, session replay, PR risk reports, and policy-as-code — without uploading your code anywhere.
+Tellur is an open-source AI code provenance platform that records, attributes, and reports on AI-assisted development. It gives teams line-level AI blame, session replay, PR risk reports, and policy-as-code — without uploading your code anywhere.
 
-Git tells you *what* changed. TraceGit tells you *how AI participated*.
+Git tells you *what* changed. Tellur tells you *how AI participated*.
 
 ## Status
 
 **Beta.** The full local pipeline is functional end-to-end: capture (watch + Claude Code hooks) → line attribution → SQLite index → `explain`/`blame`/`pr-report`/`verify`, plus policy-as-code, secret redaction, provenance export, a token-authenticated local daemon, an MCP server, and a VS Code extension. Team/server mode and additional adapters (Copilot, Codex) are planned.
 
-## Why TraceGit?
+## Why Tellur?
 
 AI coding tools (Cursor, Claude Code, Aider, Copilot, Codex, Windsurf, Gemini CLI) write production code every day. But teams have no visibility into:
 
@@ -25,10 +25,10 @@ AI coding tools (Cursor, Claude Code, Aider, Copilot, Codex, Windsurf, Gemini CL
 ## Architecture
 
 ```
-TraceGit/
+Tellur/
 ├── crates/
 │   ├── core/          # Core library — schemas, attribution, storage, policy, redaction, export
-│   ├── cli/           # CLI binary (tracegit command)
+│   ├── cli/           # CLI binary (tellur command)
 │   └── adapters/      # AI tool adapters (Claude Code, Aider, Cursor, Generic)
 ├── schemas/           # JSON Schema definitions
 └── .github/           # GitHub Action for PR checks
@@ -56,49 +56,49 @@ TraceGit/
 cargo install --path crates/cli
 
 # Initialize in a repository
-tracegit init
+tellur init
 
 # Check setup and detect AI tools
-tracegit doctor
+tellur doctor
 
 # Start capturing AI development activity
-tracegit watch
+tellur watch
 
 # Explain who/what changed a specific line
-tracegit explain src/auth/session.ts:84
+tellur explain src/auth/session.ts:84
 
 # Show AI attribution for a file
-tracegit blame src/auth/session.ts
+tellur blame src/auth/session.ts
 
 # Generate a PR risk report
-tracegit pr-report --base main --head feature/auth
+tellur pr-report --base main --head feature/auth
 
 # Check policy compliance
-tracegit policy check
+tellur policy check
 
 # Emit a single event (generic adapter / CI)
-tracegit event --event-type file.write --session $SESSION --file src/api.ts
+tellur event --event-type file.write --session $SESSION --file src/api.ts
 
 # Verify provenance integrity (hash chain)
-tracegit verify
+tellur verify
 
 # Export provenance data
-tracegit export --format json
+tellur export --format json
 
 # Install AI-tool hooks (Claude Code) for automatic capture
-tracegit hooks install
+tellur hooks install
 
 # Run the local event-ingestion daemon (loopback only, token-authenticated)
-tracegit daemon
+tellur daemon
 
 # Run the MCP server over stdio (for AI agents)
-tracegit mcp
+tellur mcp
 
 # Garbage-collect events past the retention window
-tracegit gc --dry-run
+tellur gc --dry-run
 
 # Redact secrets from stored events
-tracegit redact
+tellur redact
 ```
 
 `explain`, `blame`, and `sessions` accept `--json` for machine-readable output
@@ -106,10 +106,10 @@ tracegit redact
 
 ## Data Model
 
-TraceGit stores data in `.tracegit/` within your repository:
+Tellur stores data in `.tellur/` within your repository:
 
 ```
-.tracegit/
+.tellur/
 ├── config.yml           # Configuration (committed)
 ├── policies/
 │   └── default.yml      # Policy rules (committed)
@@ -118,7 +118,7 @@ TraceGit stores data in `.tracegit/` within your repository:
 │       └── 2026/05/
 │           └── events-2026-05-31.jsonl
 ├── index/
-│   └── tracegit.db      # SQLite index (gitignored)
+│   └── tellur.db      # SQLite index (gitignored)
 └── exports/             # Generated provenance bundles
 ```
 
@@ -128,11 +128,11 @@ All data conforms to versioned schemas:
 
 | Schema | Description |
 |--------|-------------|
-| `tracegit.session.v1` | A bounded AI-assisted development interaction |
-| `tracegit.event.v1` | A timestamped action within a session |
-| `tracegit.attribution.v1` | Line-level origin mapping for a file |
-| `tracegit.pr-report.v1` | PR risk report with AI involvement stats |
-| `tracegit.provenance.v1` | Portable export bundle |
+| `tellur.session.v1` | A bounded AI-assisted development interaction |
+| `tellur.event.v1` | A timestamped action within a session |
+| `tellur.attribution.v1` | Line-level origin mapping for a file |
+| `tellur.pr-report.v1` | PR risk report with AI involvement stats |
+| `tellur.provenance.v1` | Portable export bundle |
 
 JSON Schema definitions are in [`schemas/`](./schemas/).
 
@@ -140,17 +140,17 @@ JSON Schema definitions are in [`schemas/`](./schemas/).
 
 | Tool | Adapter | Status |
 |------|---------|--------|
-| Claude Code | Hooks + transcript | Working (`tracegit hooks install`) |
-| Cursor | Agent Trace import | Working (`tracegit import cursor <file>`) |
-| Aider | Git commit attribution | Working (`tracegit import aider <repo>`) |
+| Claude Code | Hooks + transcript | Working (`tellur hooks install`) |
+| Cursor | Agent Trace import | Working (`tellur import cursor <file>`) |
+| Aider | Git commit attribution | Working (`tellur import aider <repo>`) |
 | Generic | CLI + JSONL + HTTP daemon | Working |
-| GitHub Copilot | Metadata capture | Planned |
-| Codex CLI | Event stream | Planned |
+| Codex CLI | JSONL event stream import | Working (`tellur import codex <file>`) |
+| GitHub Copilot | Metadata import | Working (`tellur import copilot <file>`) |
 
 ## Policy Example
 
 ```yaml
-# .tracegit/policies/default.yml
+# .tellur/policies/default.yml
 version: 1
 
 sensitive_paths:
@@ -184,8 +184,8 @@ cargo build
 cargo test
 
 # Run CLI
-cargo run -p tracegit-cli -- init
-cargo run -p tracegit-cli -- doctor
+cargo run -p tellur-cli -- init
+cargo run -p tellur-cli -- doctor
 ```
 
 ## Roadmap
@@ -199,9 +199,9 @@ cargo run -p tracegit-cli -- doctor
 - [x] Git remapping across rebases
 - [x] SLSA/SPDX export integration
 - [x] Homebrew formula
-- [ ] Session replay web dashboard (static UI shipped; live data pending)
+- [x] Session replay web dashboard (static UI + local daemon live data)
 - [ ] Team/server mode
-- [ ] GitHub Copilot / Codex CLI adapters
+- [x] GitHub Copilot / Codex CLI adapters
 
 ## Contributing
 

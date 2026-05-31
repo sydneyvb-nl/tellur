@@ -1,14 +1,14 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://tracegit.dev/schemas/tracegit.event.v1.json",
-  "title": "TraceGit Event",
+  "$id": "https://tellur.dev/schemas/tellur.event.v1.json",
+  "title": "Tellur Event",
   "description": "A timestamped action within an AI development session",
   "type": "object",
   "required": ["schema", "id", "session_id", "timestamp", "type", "actor", "payload"],
   "properties": {
     "schema": {
       "type": "string",
-      "const": "tracegit.event.v1"
+      "const": "tellur.event.v1"
     },
     "id": {
       "type": "string",

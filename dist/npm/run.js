@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// TraceGit CLI wrapper — downloads and runs the native binary
+// Tellur CLI wrapper — downloads and runs the native binary
 
 const { execFileSync } = require('child_process');
 const path = require('path');
@@ -10,7 +10,7 @@ function getBinaryPath() {
   const platform = os.platform();
   const arch = os.arch();
 
-  let name = 'tracegit';
+  let name = 'tellur';
   if (platform === 'win32') name += '.exe';
 
   // Check for locally built binary first
@@ -38,6 +38,6 @@ try {
   if (e.status) {
     process.exit(e.status);
   }
-  console.error('TraceGit binary not found. Install with: tracegit init');
+  console.error('Tellur binary not found. Install with: tellur init');
   process.exit(1);
 }

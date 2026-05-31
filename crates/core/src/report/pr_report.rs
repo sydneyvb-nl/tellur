@@ -3,7 +3,6 @@
 //! Generates a risk report for a pull request based on AI attribution data,
 //! policy violations, sensitive file access, and test evidence.
 
-
 use crate::schema::types::*;
 
 /// PR Risk Report Generator
@@ -39,7 +38,11 @@ impl PRReportGenerator {
 
                 // Collect risk tags
                 if !range.risk_tags.is_empty() {
-                    sensitive_files.push(format!("{}: {}", attr.file_path, range.risk_tags.join(", ")));
+                    sensitive_files.push(format!(
+                        "{}: {}",
+                        attr.file_path,
+                        range.risk_tags.join(", ")
+                    ));
                 }
             }
 
@@ -49,7 +52,11 @@ impl PRReportGenerator {
         }
 
         let total = ai_lines + human_lines + unknown_lines;
-        let ai_percentage = if total > 0 { (ai_lines as f64 / total as f64) * 100.0 } else { 0.0 };
+        let ai_percentage = if total > 0 {
+            (ai_lines as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        };
 
         // Generate reviewer checklist items
         if ai_percentage > 50.0 {
@@ -72,7 +79,7 @@ impl PRReportGenerator {
         let summary = Self::generate_summary(ai_percentage, total, &sensitive_files, &violations);
 
         PRReport {
-            schema: "tracegit.pr-report.v1".to_string(),
+            schema: "tellur.pr-report.v1".to_string(),
             generated_at: chrono::Utc::now().to_rfc3339(),
             base_ref: base_ref.to_string(),
             head_ref: head_ref.to_string(),
@@ -147,10 +154,16 @@ impl PRReportGenerator {
     ) -> String {
         let mut parts = Vec::new();
 
-        parts.push(format!("{:.0}% AI-assisted ({} total lines)", ai_percentage, total_lines));
+        parts.push(format!(
+            "{:.0}% AI-assisted ({} total lines)",
+            ai_percentage, total_lines
+        ));
 
         if !sensitive_files.is_empty() {
-            parts.push(format!("{} sensitive file(s) touched", sensitive_files.len()));
+            parts.push(format!(
+                "{} sensitive file(s) touched",
+                sensitive_files.len()
+            ));
         }
 
         let failed = violations.iter().filter(|v| !v.passed).count();
@@ -165,18 +178,29 @@ impl PRReportGenerator {
     pub fn to_markdown(report: &PRReport) -> String {
         let mut md = String::new();
 
-        md.push_str("# TraceLens PR Risk Report\n\n");
+        md.push_str("# Tellur PR Risk Report\n\n");
 
-        md.push_str(&format!("**Risk Level: {:?}** | Base: `{}` → Head: `{}`\n\n",
-            report.overall_risk, report.base_ref, report.head_ref));
+        md.push_str(&format!(
+            "**Risk Level: {:?}** | Base: `{}` → Head: `{}`\n\n",
+            report.overall_risk, report.base_ref, report.head_ref
+        ));
 
         md.push_str(&format!("{}\n\n", report.summary));
 
         // AI Involvement
         md.push_str("## AI Involvement\n\n");
-        md.push_str(&format!("- **AI lines:** {} ({:.0}%)\n", report.ai_involvement.ai_lines, report.ai_involvement.ai_percentage));
-        md.push_str(&format!("- **Human lines:** {}\n", report.ai_involvement.human_lines));
-        md.push_str(&format!("- **Unknown:** {}\n", report.ai_involvement.unknown_lines));
+        md.push_str(&format!(
+            "- **AI lines:** {} ({:.0}%)\n",
+            report.ai_involvement.ai_lines, report.ai_involvement.ai_percentage
+        ));
+        md.push_str(&format!(
+            "- **Human lines:** {}\n",
+            report.ai_involvement.human_lines
+        ));
+        md.push_str(&format!(
+            "- **Unknown:** {}\n",
+            report.ai_involvement.unknown_lines
+        ));
 
         // Sensitive Files
         if !report.sensitive_files.is_empty() {
@@ -190,7 +214,10 @@ impl PRReportGenerator {
         if !report.commands_executed.is_empty() {
             md.push_str("\n## Commands Executed\n\n");
             for cmd in &report.commands_executed {
-                let status = cmd.exit_code.map(|c| if c == 0 { "✓" } else { "✗" }).unwrap_or("?");
+                let status = cmd
+                    .exit_code
+                    .map(|c| if c == 0 { "✓" } else { "✗" })
+                    .unwrap_or("?");
                 md.push_str(&format!("- {} `{}`\n", status, cmd.command));
             }
         }
@@ -200,8 +227,10 @@ impl PRReportGenerator {
             md.push_str("\n## Tests\n\n");
             for test in &report.tests_run {
                 let status = if test.exit_code == 0 { "✓" } else { "✗" };
-                md.push_str(&format!("- {} {} ({} passed, {} failed)\n",
-                    status, test.command, test.passed, test.failed));
+                md.push_str(&format!(
+                    "- {} {} ({} passed, {} failed)\n",
+                    status, test.command, test.passed, test.failed
+                ));
             }
         }
 
@@ -240,7 +269,7 @@ mod tests {
     #[test]
     fn test_generate_ai_heavy_report() {
         let attr = FileAttribution {
-            schema: "tracegit.attribution.v1".to_string(),
+            schema: "tellur.attribution.v1".to_string(),
             file_path: "src/auth/session.ts".to_string(),
             git_blob_sha: "abc".to_string(),
             ranges: vec![AttributionRange {
@@ -268,10 +297,14 @@ mod tests {
             updated_at: chrono::Utc::now().to_rfc3339(),
         };
 
-        let report = PRReportGenerator::generate("main", "feature/auth", &[attr], &[], vec![], vec![]);
+        let report =
+            PRReportGenerator::generate("main", "feature/auth", &[attr], &[], vec![], vec![]);
         assert_eq!(report.ai_involvement.ai_lines, 100);
         assert_eq!(report.ai_involvement.ai_percentage, 100.0);
-        assert!(matches!(report.overall_risk, RiskLevel::High | RiskLevel::Critical));
+        assert!(matches!(
+            report.overall_risk,
+            RiskLevel::High | RiskLevel::Critical
+        ));
         assert!(!report.sensitive_files.is_empty());
         assert!(!report.reviewer_checklist.is_empty());
     }
@@ -280,7 +313,7 @@ mod tests {
     fn test_to_markdown() {
         let report = PRReportGenerator::generate("main", "HEAD", &[], &[], vec![], vec![]);
         let md = PRReportGenerator::to_markdown(&report);
-        assert!(md.contains("# TraceLens PR Risk Report"));
+        assert!(md.contains("# Tellur PR Risk Report"));
         assert!(md.contains("AI Involvement"));
     }
 }

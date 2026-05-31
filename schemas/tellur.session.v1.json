@@ -1,14 +1,14 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://tracegit.dev/schemas/tracegit.session.v1.json",
-  "title": "TraceGit Session",
+  "$id": "https://tellur.dev/schemas/tellur.session.v1.json",
+  "title": "Tellur Session",
   "description": "A bounded AI-assisted development interaction",
   "type": "object",
   "required": ["schema", "id", "repoId", "workspaceId", "startedAt", "humanActor", "agent", "status", "relatedCommits", "relatedBranches", "relatedPRs"],
   "properties": {
     "schema": {
       "type": "string",
-      "const": "tracegit.session.v1"
+      "const": "tellur.session.v1"
     },
     "id": {
       "type": "string",

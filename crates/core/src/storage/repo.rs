@@ -1,18 +1,18 @@
 //! Repository-local storage management
 //!
-//! Manages the `.tracegit/` directory structure within a Git repository.
+//! Manages the `.tellur/` directory structure within a Git repository.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-/// Default directory name for TraceGit metadata
-pub const TRACEGIT_DIR: &str = ".tracegit";
+/// Default directory name for Tellur metadata
+pub const TELLUR_DIR: &str = ".tellur";
 
 /// Repository storage layout
 pub struct RepoStorage {
     pub root: PathBuf,
-    pub tracegit_dir: PathBuf,
+    pub tellur_dir: PathBuf,
     pub traces_dir: PathBuf,
     pub index_path: PathBuf,
     pub config_path: PathBuf,
@@ -21,32 +21,35 @@ pub struct RepoStorage {
 }
 
 impl RepoStorage {
-    /// Discover the TraceGit storage for the current working directory
+    /// Discover the Tellur storage for the current working directory
     pub fn discover() -> Result<Self> {
-        let git_root = find_git_root(std::env::current_dir()?)
-            .context("Not inside a Git repository")?;
+        let git_root =
+            find_git_root(std::env::current_dir()?).context("Not inside a Git repository")?;
         Self::from_git_root(&git_root)
     }
 
     /// Create storage layout from a known Git root
     pub fn from_git_root(git_root: &Path) -> Result<Self> {
-        let tracegit_dir = git_root.join(TRACEGIT_DIR);
+        let tellur_dir = git_root.join(TELLUR_DIR);
         Ok(Self {
             root: git_root.to_path_buf(),
-            traces_dir: tracegit_dir.join("traces"),
-            index_path: tracegit_dir.join("index").join("tracegit.db"),
-            config_path: tracegit_dir.join("config.yml"),
-            policies_dir: tracegit_dir.join("policies"),
-            exports_dir: tracegit_dir.join("exports"),
-            tracegit_dir,
+            traces_dir: tellur_dir.join("traces"),
+            index_path: tellur_dir.join("index").join("tellur.db"),
+            config_path: tellur_dir.join("config.yml"),
+            policies_dir: tellur_dir.join("policies"),
+            exports_dir: tellur_dir.join("exports"),
+            tellur_dir,
         })
     }
 
     /// Initialize the storage directory structure
     pub fn init(&self) -> Result<()> {
-        std::fs::create_dir_all(&self.tracegit_dir)?;
+        std::fs::create_dir_all(&self.tellur_dir)?;
         std::fs::create_dir_all(&self.traces_dir)?;
-        let index_parent = self.index_path.parent().ok_or_else(|| anyhow::anyhow!("Index path has no parent: {:?}", self.index_path))?;
+        let index_parent = self
+            .index_path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("Index path has no parent: {:?}", self.index_path))?;
         std::fs::create_dir_all(index_parent)?;
         std::fs::create_dir_all(&self.policies_dir)?;
         std::fs::create_dir_all(&self.exports_dir)?;
@@ -62,7 +65,7 @@ impl RepoStorage {
         Ok(())
     }
 
-    /// Check if TraceGit is initialized in this repository
+    /// Check if Tellur is initialized in this repository
     pub fn is_initialized(&self) -> bool {
         self.config_path.exists()
     }
@@ -79,7 +82,7 @@ fn find_git_root(start: PathBuf) -> Option<PathBuf> {
     }
 }
 
-const DEFAULT_CONFIG: &str = r#"# TraceGit Configuration
+const DEFAULT_CONFIG: &str = r#"# Tellur Configuration
 version: 1
 
 storage:
@@ -107,7 +110,7 @@ attribution:
   semantic_anchors: true
 "#;
 
-const DEFAULT_POLICY: &str = r#"# TraceGit Default Policy
+const DEFAULT_POLICY: &str = r#"# Tellur Default Policy
 version: 1
 
 sensitive_paths:

@@ -1,15 +1,15 @@
 //! Claude Code adapter — hook installer and transcript parser
 //!
-//! Installs TraceGit hooks into Claude Code's configuration and
-//! parses Claude Code transcripts into TraceGit events.
+//! Installs Tellur hooks into Claude Code's configuration and
+//! parses Claude Code transcripts into Tellur events.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use tracegit_core::adapter::{AgentAdapter, AdapterInfo, AdapterCapabilities};
-use tracegit_core::schema::types::*;
+use tellur_core::adapter::{AdapterCapabilities, AdapterInfo, AgentAdapter};
+use tellur_core::schema::types::*;
 
 /// Claude Code transcript entry
 #[derive(Debug, Deserialize)]
@@ -60,10 +60,10 @@ impl ClaudeCodeAdapter {
         }
     }
 
-    /// Install TraceGit hooks into the repository's Claude Code settings
+    /// Install Tellur hooks into the repository's Claude Code settings
     /// (`.claude/settings.json`), using Claude Code's real hook schema:
     /// `PostToolUse` matchers and `SessionStart`, each invoking
-    /// `tracegit hooks claude`, which reads the hook JSON from stdin.
+    /// `tellur hooks claude`, which reads the hook JSON from stdin.
     pub fn install_hooks(repo_root: &Path) -> Result<()> {
         let settings_path = repo_root.join(".claude").join("settings.json");
         if let Some(parent) = settings_path.parent() {
@@ -78,11 +78,15 @@ impl ClaudeCodeAdapter {
             serde_json::json!({})
         };
 
-        let tracegit = find_tracegit();
-        let command = format!("{} hooks claude", tracegit);
+        let tellur = find_tellur();
+        let command = format!("{} hooks claude", tellur);
 
         // Ensure settings.hooks is an object.
-        if !settings.get("hooks").map(|h| h.is_object()).unwrap_or(false) {
+        if !settings
+            .get("hooks")
+            .map(|h| h.is_object())
+            .unwrap_or(false)
+        {
             settings["hooks"] = serde_json::json!({});
         }
         let hooks = settings["hooks"].as_object_mut().unwrap();
@@ -110,8 +114,8 @@ impl ClaudeCodeAdapter {
         transcript_path: &Path,
         session_id: &str,
     ) -> Result<Vec<TraceEvent>> {
-        let content = std::fs::read_to_string(transcript_path)
-            .context("Failed to read transcript")?;
+        let content =
+            std::fs::read_to_string(transcript_path).context("Failed to read transcript")?;
 
         let entries: Vec<ClaudeTranscriptEntry> = content
             .lines()
@@ -131,17 +135,21 @@ impl ClaudeCodeAdapter {
                     _ => EventType::Custom(tool.name.clone()),
                 };
 
-                let file_path = tool.input.get("file_path")
+                let file_path = tool
+                    .input
+                    .get("file_path")
                     .or_else(|| tool.input.get("path"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
 
                 events.push(TraceEvent {
-                    schema: "tracegit.event.v1".to_string(),
-                    id: tracegit_core::schema::ids::generate_event_id(),
+                    schema: "tellur.event.v1".to_string(),
+                    id: tellur_core::schema::ids::generate_event_id(),
                     session_id: session_id.to_string(),
-                    timestamp: entry.timestamp.unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+                    timestamp: entry
+                        .timestamp
+                        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
                     event_type,
                     actor: EventActor::Agent,
                     payload: serde_json::json!({
@@ -239,9 +247,8 @@ fn merge_hook_array(
                 item.get("hooks")
                     .and_then(|h| h.as_array())
                     .map(|hs| {
-                        hs.iter().any(|h| {
-                            h.get("command").and_then(|c| c.as_str()) == Some(command)
-                        })
+                        hs.iter()
+                            .any(|h| h.get("command").and_then(|c| c.as_str()) == Some(command))
                     })
                     .unwrap_or(false)
             })
@@ -252,15 +259,15 @@ fn merge_hook_array(
     }
 }
 
-/// Find the tracegit binary
-fn find_tracegit() -> String {
+/// Find the tellur binary
+fn find_tellur() -> String {
     std::process::Command::new("which")
-        .arg("tracegit")
+        .arg("tellur")
         .output()
         .ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|| "tracegit".to_string())
+        .unwrap_or_else(|| "tellur".to_string())
 }
 
 #[cfg(test)]
@@ -278,7 +285,7 @@ mod tests {
     #[test]
     fn test_parse_empty_transcript() {
         let adapter = ClaudeCodeAdapter::new();
-        let dir = std::env::temp_dir().join("tracegit_test_transcript");
+        let dir = std::env::temp_dir().join("tellur_test_transcript");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("transcript.jsonl");
         std::fs::write(&path, "").unwrap();
@@ -290,7 +297,7 @@ mod tests {
     #[test]
     fn test_parse_write_event() {
         let adapter = ClaudeCodeAdapter::new();
-        let dir = std::env::temp_dir().join("tracegit_test_write");
+        let dir = std::env::temp_dir().join("tellur_test_write");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("transcript.jsonl");
 

@@ -9,11 +9,11 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use axum::{
-    extract::{Json, State},
+    Router,
+    extract::{Json, Path as AxumPath, State},
     http::{HeaderMap, StatusCode},
     response::Html,
     routing::{get, post},
-    Router,
 };
 use serde::{Deserialize, Serialize};
 
@@ -43,14 +43,14 @@ impl Default for DaemonConfig {
 pub struct DaemonState {
     pub repo_root: PathBuf,
     /// Bearer token required for mutating/exporting endpoints. Generated on
-    /// first run and stored at `.tracegit/daemon.token`.
+    /// first run and stored at `.tellur/daemon.token`.
     pub token: String,
 }
 
-/// Load the daemon token from `.tracegit/daemon.token`, creating a random one
+/// Load the daemon token from `.tellur/daemon.token`, creating a random one
 /// (UUID v4-style via v7 simple form) on first use.
 pub fn load_or_create_token(repo_root: &Path) -> Result<String> {
-    let path = repo_root.join(".tracegit").join("daemon.token");
+    let path = repo_root.join(".tellur").join("daemon.token");
     if let Ok(existing) = std::fs::read_to_string(&path) {
         let trimmed = existing.trim().to_string();
         if !trimmed.is_empty() {
@@ -72,7 +72,10 @@ pub fn load_or_create_token(repo_root: &Path) -> Result<String> {
 /// Reject requests whose Host header is not loopback (defends against
 /// DNS-rebinding from a browser). Returns true if the request is acceptable.
 fn host_is_local(headers: &HeaderMap) -> bool {
-    match headers.get(axum::http::header::HOST).and_then(|v| v.to_str().ok()) {
+    match headers
+        .get(axum::http::header::HOST)
+        .and_then(|v| v.to_str().ok())
+    {
         // No Host header (e.g. HTTP/2 authority handled elsewhere) — allow.
         None => true,
         Some(host) => {
@@ -123,6 +126,7 @@ pub fn build_router(state: DaemonState) -> Router {
         .route("/event", post(submit_event))
         .route("/events", post(submit_events))
         .route("/sessions", get(list_sessions))
+        .route("/sessions/{session_id}/events", get(get_session_events))
         .route("/export", post(export_bundle))
         .with_state(Arc::new(state))
 }
@@ -132,7 +136,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<()> {
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
     if !addr.ip().is_loopback() {
         eprintln!(
-            "⚠ Refusing to bind non-loopback address {}. TraceGit's daemon is local-only.",
+            "⚠ Refusing to bind non-loopback address {}. Tellur's daemon is local-only.",
             addr.ip()
         );
         anyhow::bail!("daemon must bind a loopback address (127.0.0.1 or ::1)");
@@ -145,10 +149,10 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<()> {
     };
     let app = build_router(state);
 
-    println!("TraceGit daemon listening on http://{}", addr);
+    println!("Tellur daemon listening on http://{}", addr);
     println!("Repository: {}", config.repo_root.display());
     println!();
-    println!("Auth token (.tracegit/daemon.token):");
+    println!("Auth token (.tellur/daemon.token):");
     println!("  {}", token);
     println!("  Send as: Authorization: Bearer <token>");
     println!();
@@ -157,6 +161,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<()> {
     println!("  POST /events   — Submit multiple events   (auth required)");
     println!("  GET  /status   — Daemon status");
     println!("  GET  /sessions — List sessions");
+    println!("  GET  /sessions/{{id}}/events — Session event timeline");
     println!("  POST /export   — Generate export bundle   (auth required)");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -242,11 +247,15 @@ async fn submit_events(
 }
 
 async fn list_sessions(State(state): State<Arc<DaemonState>>) -> Json<ApiResponse> {
-    let index_path = state.repo_root.join(".tracegit").join("index").join("tracegit.db");
+    let index_path = state
+        .repo_root
+        .join(".tellur")
+        .join("index")
+        .join("tellur.db");
     match TraceIndex::open(&index_path) {
         Ok(index) => {
-            let sessions = index.session_count().unwrap_or(0);
             let events = index.event_count().unwrap_or(0);
+            let sessions = index.list_dashboard_sessions(100).unwrap_or_default();
             Json(ApiResponse {
                 status: "ok".to_string(),
                 data: Some(serde_json::json!({
@@ -262,6 +271,49 @@ async fn list_sessions(State(state): State<Arc<DaemonState>>) -> Json<ApiRespons
     }
 }
 
+async fn get_session_events(
+    State(state): State<Arc<DaemonState>>,
+    AxumPath(session_id): AxumPath<String>,
+) -> Json<ApiResponse> {
+    let index_path = state
+        .repo_root
+        .join(".tellur")
+        .join("index")
+        .join("tellur.db");
+    match TraceIndex::open(&index_path) {
+        Ok(index) => match index.get_session_events(&session_id) {
+            Ok(events) => {
+                let events: Vec<_> = events
+                    .into_iter()
+                    .map(|event| {
+                        serde_json::json!({
+                            "id": event.id,
+                            "session_id": event.session_id,
+                            "timestamp": event.timestamp,
+                            "event_type": event.event_type.as_wire(),
+                            "actor": event.actor,
+                            "body": format_event_body(&event.event_type, &event.payload),
+                            "payload": event.payload,
+                        })
+                    })
+                    .collect();
+                Json(ApiResponse {
+                    status: "ok".to_string(),
+                    data: Some(serde_json::json!({ "events": events })),
+                })
+            }
+            Err(e) => Json(ApiResponse {
+                status: "error".to_string(),
+                data: Some(serde_json::json!({ "error": e.to_string() })),
+            }),
+        },
+        Err(e) => Json(ApiResponse {
+            status: "error".to_string(),
+            data: Some(serde_json::json!({ "error": e.to_string() })),
+        }),
+    }
+}
+
 async fn export_bundle(
     State(state): State<Arc<DaemonState>>,
     headers: HeaderMap,
@@ -269,7 +321,7 @@ async fn export_bundle(
     if !authorized(&state, &headers) {
         return unauthorized();
     }
-    let traces_dir = state.repo_root.join(".tracegit").join("traces");
+    let traces_dir = state.repo_root.join(".tellur").join("traces");
     match crate::storage::read_events(&traces_dir) {
         Ok(events) => (
             StatusCode::OK,
@@ -299,7 +351,7 @@ fn unauthorized() -> (StatusCode, Json<ApiResponse>) {
         Json(ApiResponse {
             status: "unauthorized".to_string(),
             data: Some(serde_json::json!({
-                "error": "missing or invalid bearer token (see .tracegit/daemon.token)"
+                "error": "missing or invalid bearer token (see .tellur/daemon.token)"
             })),
         }),
     )
@@ -310,7 +362,7 @@ fn unauthorized() -> (StatusCode, Json<ApiResponse>) {
 /// that provenance cannot be forged through the HTTP API. UTC is used for the
 /// log file partition to match `EventWriter`.
 fn write_event_to_disk(repo_root: &Path, event: &TraceEvent) -> Result<String> {
-    let traces_dir = repo_root.join(".tracegit").join("traces");
+    let traces_dir = repo_root.join(".tellur").join("traces");
 
     let mut writer = EventWriter::new(&traces_dir);
     writer.open()?;
@@ -327,11 +379,47 @@ fn write_event_to_disk(repo_root: &Path, event: &TraceEvent) -> Result<String> {
     writer.close();
 
     // Index the re-hashed event.
-    let index_path = repo_root.join(".tracegit").join("index").join("tracegit.db");
+    let index_path = repo_root.join(".tellur").join("index").join("tellur.db");
     let index = TraceIndex::open(&index_path)?;
     index.index_event(&stored)?;
 
     Ok(stored.id)
+}
+
+fn format_event_body(
+    event_type: &crate::schema::types::EventType,
+    payload: &serde_json::Value,
+) -> String {
+    let file_path = payload
+        .get("file_path")
+        .or_else(|| payload.get("file"))
+        .and_then(|v| v.as_str());
+    match event_type {
+        crate::schema::types::EventType::FileWrite | crate::schema::types::EventType::FilePatch => {
+            format!("Modified {}", file_path.unwrap_or("unknown file"))
+        }
+        crate::schema::types::EventType::FileRead => {
+            format!("Read {}", file_path.unwrap_or("unknown file"))
+        }
+        crate::schema::types::EventType::FileDelete => {
+            format!("Deleted {}", file_path.unwrap_or("unknown file"))
+        }
+        crate::schema::types::EventType::CommandPreExecute
+        | crate::schema::types::EventType::CommandPostExecute
+        | crate::schema::types::EventType::CommandExecution => payload
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(|cmd| format!("Executed {}", cmd))
+            .unwrap_or_else(|| "Command event".to_string()),
+        crate::schema::types::EventType::UserPrompt
+        | crate::schema::types::EventType::PromptSubmitted => payload
+            .get("prompt_redacted")
+            .or_else(|| payload.get("prompt"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("Prompt submitted")
+            .to_string(),
+        other => other.as_wire(),
+    }
 }
 
 #[cfg(test)]
@@ -352,5 +440,77 @@ mod tests {
             token: "test-token".to_string(),
         };
         let _router = build_router(state);
+    }
+
+    #[tokio::test]
+    async fn test_list_sessions_returns_dashboard_rows() {
+        use crate::schema::types::*;
+
+        let temp = tempfile::tempdir().unwrap();
+        let repo_root = temp.path();
+        let index_path = repo_root.join(".tellur").join("index").join("tellur.db");
+        let index = TraceIndex::open(&index_path).unwrap();
+        let mut session = Session::new(
+            "repo".to_string(),
+            Actor {
+                name: "dev".to_string(),
+                email: None,
+                email_hash: None,
+                actor_type: EventActor::Human,
+            },
+            AgentInfo {
+                id: "claude-code".to_string(),
+                name: "Claude Code".to_string(),
+                version: None,
+            },
+        );
+        session.id = "sess_daemon".to_string();
+        index.index_session(&session).unwrap();
+
+        let state = Arc::new(DaemonState {
+            repo_root: repo_root.to_path_buf(),
+            token: "test-token".to_string(),
+        });
+        let Json(body) = list_sessions(State(state)).await;
+        let sessions = body.data.unwrap()["sessions"].as_array().unwrap().clone();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0]["id"], "sess_daemon");
+        assert_eq!(sessions[0]["agent_id"], "claude-code");
+    }
+
+    #[tokio::test]
+    async fn test_get_session_events_returns_timeline_events() {
+        use crate::schema::types::{EventActor, EventType, TraceEvent};
+        use axum::extract::Path;
+
+        let temp = tempfile::tempdir().unwrap();
+        let repo_root = temp.path();
+        let index_path = repo_root.join(".tellur").join("index").join("tellur.db");
+        let index = TraceIndex::open(&index_path).unwrap();
+        index
+            .index_event(&TraceEvent {
+                schema: "tellur.event.v1".to_string(),
+                id: "evt_daemon".to_string(),
+                session_id: "sess_daemon".to_string(),
+                timestamp: "2026-05-31T10:01:00Z".to_string(),
+                event_type: EventType::FileWrite,
+                actor: EventActor::Agent,
+                payload: serde_json::json!({"file_path": "src/lib.rs"}),
+                redaction: None,
+                prev_hash: None,
+                event_hash: Some("hash".to_string()),
+            })
+            .unwrap();
+
+        let state = Arc::new(DaemonState {
+            repo_root: repo_root.to_path_buf(),
+            token: "test-token".to_string(),
+        });
+        let Json(body) = get_session_events(State(state), Path("sess_daemon".to_string())).await;
+        let events = body.data.unwrap()["events"].as_array().unwrap().clone();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["id"], "evt_daemon");
+        assert_eq!(events[0]["event_type"], "file.write");
+        assert_eq!(events[0]["body"], "Modified src/lib.rs");
     }
 }
