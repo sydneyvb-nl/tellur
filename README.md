@@ -2,9 +2,15 @@
 
 **AI Code Provenance for Teams**
 
-Who changed that function? Which model generated it? What prompt and context produced that change? Did tests pass? Who reviewed it?
+> Who changed that function? Which model generated it? What prompt and context produced that change? Did tests pass? Who reviewed it?
 
 TraceGit is an open-source AI code provenance platform that records, attributes, and reports on AI-assisted development. It gives teams line-level AI blame, session replay, PR risk reports, and policy-as-code — without uploading your code anywhere.
+
+Git tells you *what* changed. TraceGit tells you *how AI participated*.
+
+## Status
+
+**Early development.** Core engine, CLI, and schemas are functional. Editor extension and full adapter support are in progress.
 
 ## Why TraceGit?
 
@@ -16,83 +22,171 @@ AI coding tools (Cursor, Claude Code, Aider, Copilot, Codex, Windsurf, Gemini CL
 - Whether sensitive files were accessed by agents
 - Whether AI changes were properly reviewed
 
-Git tells you *what* changed. TraceGit tells you *how AI participated*.
+## Architecture
 
-## Features
+```
+TraceGit/
+├── crates/
+│   ├── core/          # Core library — schemas, attribution, storage, policy, redaction, export
+│   ├── cli/           # CLI binary (tracegit command)
+│   └── adapters/      # AI tool adapters (Claude Code, Aider, Cursor, Generic)
+├── schemas/           # JSON Schema definitions
+└── .github/           # GitHub Action for PR checks
+```
 
-- **Line-level AI attribution** — know which agent, model, and prompt produced every line
-- **Session replay** — reconstruct what happened during AI development sessions
-- **PR risk reports** — highlight AI-generated changes, sensitive areas, missing tests
-- **Policy engine** — define rules for what AI is allowed to do in your codebase
-- **Vendor-neutral** — works with any AI coding tool through adapters
-- **Local-first** — no cloud required, no code uploaded, no SaaS dependency
-- **MCP-native** — integrates via Model Context Protocol for zero-friction adoption
-- **CI-ready** — GitHub Action, GitLab CI, and CLI for automated checks
+**Tech stack:** Rust (core + CLI), SQLite (index), JSONL (append-only event log)
 
-## Quick Start
+## Features (implemented)
+
+- **Line-level AI attribution** — maps code ranges to AI agent, model, prompt hash, and confidence score
+- **Tamper-evident event log** — SHA-256 hash chain across all events in JSONL format
+- **SQLite index** — fast queries for CLI, editor, and PR reports
+- **Policy engine** — YAML-based rules for sensitive paths, required reviews, and test evidence
+- **Secret redaction** — regex-based detection and sanitization of API keys, tokens, passwords
+- **PR risk reports** — risk scoring, AI involvement stats, reviewer checklist, markdown output
+- **Provenance export** — 6 profiles (developer, OSS, corporate, audit, release, CI)
+- **File change capture** — git diff integration with blob SHA tracking
+- **Adapter interface** — async trait for pluggable AI tool integrations
+- **GitHub Action** — automated PR provenance checks
+
+## CLI
 
 ```bash
-# Install
-npm install -g tracegit
+# Install (from source)
+cargo install --path crates/cli
 
 # Initialize in a repository
 tracegit init
 
-# Check setup
+# Check setup and detect AI tools
 tracegit doctor
 
 # Start capturing AI development activity
 tracegit watch
-```
 
-## Usage
-
-```bash
-# See who/what changed a specific line
+# Explain who/what changed a specific line
 tracegit explain src/auth/session.ts:84
 
 # Show AI attribution for a file
 tracegit blame src/auth/session.ts
 
 # Generate a PR risk report
-tracegit pr-report
+tracegit pr-report --base main --head feature/auth
 
 # Check policy compliance
 tracegit policy check
 
+# Emit a single event (generic adapter / CI)
+tracegit event --event-type file.write --session $SESSION --file src/api.ts
+
+# Verify provenance integrity (hash chain)
+tracegit verify
+
 # Export provenance data
-tracegit export --format agent-trace
+tracegit export --format json
 ```
+
+## Data Model
+
+TraceGit stores data in `.tracegit/` within your repository:
+
+```
+.tracegit/
+├── config.yml           # Configuration (committed)
+├── policies/
+│   └── default.yml      # Policy rules (committed)
+├── traces/
+│   └── sessions/        # JSONL event logs (gitignored by default)
+│       └── 2026/05/
+│           └── events-2026-05-31.jsonl
+├── index/
+│   └── tracegit.db      # SQLite index (gitignored)
+└── exports/             # Generated provenance bundles
+```
+
+### Schemas
+
+All data conforms to versioned schemas:
+
+| Schema | Description |
+|--------|-------------|
+| `tracegit.session.v1` | A bounded AI-assisted development interaction |
+| `tracegit.event.v1` | A timestamped action within a session |
+| `tracegit.attribution.v1` | Line-level origin mapping for a file |
+| `tracegit.pr-report.v1` | PR risk report with AI involvement stats |
+| `tracegit.provenance.v1` | Portable export bundle |
+
+JSON Schema definitions are in [`schemas/`](./schemas/).
 
 ## Supported AI Tools
 
 | Tool | Adapter | Status |
 |------|---------|--------|
-| Claude Code | Hooks + transcript | Planned |
-| Cursor | Agent Trace import | Planned |
-| Aider | Git commit attribution | Planned |
+| Claude Code | Hooks + transcript | Adapter built, hooks pending |
+| Cursor | Agent Trace import | Adapter built, import pending |
+| Aider | Git commit attribution | Adapter built, import pending |
 | GitHub Copilot | Metadata capture | Planned |
 | Codex CLI | Event stream | Planned |
-| OpenClaw | Custom adapter | Planned |
-| Generic | CLI + HTTP API | Planned |
+| Generic | CLI + HTTP API | Working |
 
-## Architecture
+## Policy Example
 
+```yaml
+# .tracegit/policies/default.yml
+version: 1
+
+sensitive_paths:
+  - path: "src/auth/**"
+    tags: ["auth", "security-sensitive"]
+    require_human_review: true
+    require_tests: true
+
+  - path: "**/.env*"
+    tags: ["secrets"]
+    block_ai_read: true
+
+rules:
+  - id: require-tests-for-ai-code
+    description: "AI code changes > 20 lines require test evidence"
+    when:
+      attribution.origin: ai
+      changed_lines.greater_than: 20
+    action: warn
+    require:
+      tests_run: true
 ```
-tracegit/
-├── packages/
-│   ├── core/          # Schemas, attribution engine, policy engine
-│   ├── cli/           # CLI interface
-│   ├── adapters/      # AI tool adapters (Claude Code, Cursor, etc.)
-│   └── vscode/        # VS Code extension
-├── schemas/           # JSON Schema definitions
-└── docs/              # Documentation
+
+## Development
+
+```bash
+# Build
+cargo build
+
+# Run tests (35 tests)
+cargo test
+
+# Run CLI
+cargo run -p tracegit-cli -- init
+cargo run -p tracegit-cli -- doctor
 ```
+
+## Roadmap
+
+- [ ] Claude Code hook installer
+- [ ] Aider commit attribution import
+- [ ] Cursor Agent Trace import/export
+- [ ] VS Code extension (TypeScript)
+- [ ] Session replay web dashboard
+- [ ] Local HTTP event API (daemon mode)
+- [ ] Git remapping across rebases
+- [ ] SLSA/SPDX export integration
+- [ ] Team/server mode
+- [ ] Homebrew formula
 
 ## Contributing
 
-We welcome contributions. See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
+See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## License
 
-Apache-2.0 — see [LICENSE](./LICENSE) for details.
+Apache-2.0 — see [LICENSE](./LICENSE).
