@@ -1,0 +1,26 @@
+[package]
+name = "tracegit-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core library for TraceGit — AI code provenance engine"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+toml = { workspace = true }
+dirs = { workspace = true }
+walkdir = { workspace = true }
+rusqlite = { version = "0.32", features = ["bundled"] }
+regex = "1"
+glob = "0.3"
+serde_yaml = "0.9"
+async-trait = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

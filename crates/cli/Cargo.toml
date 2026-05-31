@@ -1,0 +1,19 @@
+[package]
+name = "tracegit-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TraceGit CLI — AI code provenance from the terminal"
+
+[[bin]]
+name = "tracegit"
+path = "src/main.rs"
+
+[dependencies]
+tracegit-core = { path = "../core" }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+tokio = { version = "1", features = ["full"] }

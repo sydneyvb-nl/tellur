@@ -1,0 +1,13 @@
+[package]
+name = "tracegit-adapters"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TraceGit AI tool adapters"
+
+[dependencies]
+tracegit-core = { path = "../core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
