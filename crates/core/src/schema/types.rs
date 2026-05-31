@@ -149,6 +149,15 @@ pub enum EventType {
     // Export
     #[serde(rename = "export.created")]
     ExportCreated,
+    // Convenience aliases used by adapters
+    #[serde(rename = "command.exec")]
+    CommandExecution,
+    #[serde(rename = "code.search")]
+    CodeSearch,
+    #[serde(rename = "user.prompt")]
+    UserPrompt,
+    #[serde(rename = "custom")]
+    Custom(String),
 }
 
 // ─── Core Entities ──────────────────────────────────────────────────────────

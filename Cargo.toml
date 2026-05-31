@@ -25,3 +25,5 @@ toml = "0.8"
 dirs = "6"
 walkdir = "2"
 async-trait = "0.1"
+regex = "1"
+tokio = { version = "1", features = ["full"] }

@@ -1,6 +1,6 @@
 # TraceGit — Project Status & Agent Guide
 
-**Last updated:** 2026-05-31 17:15 CEST  
+**Last updated:** 2026-05-31 17:25 CEST  
 **Maintained by:** Jane (agent) — alle agents mogen dit updaten  
 **Repo:** github.com/sydneyvb-nl/TraceGit  
 **Branch:** main  
@@ -84,9 +84,9 @@ TraceGit/
 | 11 | PolicyEngine (YAML rules, sensitive paths) | 13 | ✅ Done | `crates/core/src/policy/mod.rs` |
 | 12 | AgentAdapter trait (async_trait) | 8.3 | ✅ Done | `crates/core/src/adapter/mod.rs` |
 | 13 | Built-in adapters (Claude Code, Aider, Cursor, Generic) | 8.3 | ✅ Done | `crates/core/src/adapter/builtin.rs` |
-| 14 | Claude Code adapter implementation | 8.1 | ⬜ Stub | Alleen struct/shell, geen hook installer |
-| 15 | Aider adapter implementation | 8.2 | ⬜ Stub | Alleen struct, geen commit parser |
-| 16 | Cursor adapter implementation | 8.2 | ⬜ Stub | Alleen struct, geen Agent Trace parser |
+| 14 | Claude Code adapter implementation | 8.1 | ✅ Done | Hook install, transcript parse, 3 tests |
+| 15 | Aider adapter implementation | 8.2 | ✅ Done | Git log parser, Aider pattern detection, 2 tests |
+| 16 | Cursor adapter implementation | 8.2 | ✅ Done | JSON/JSONL trace parsing, workspace detection, 3 tests |
 
 ### Phase 3: CLI (PRD sectie 8.1)
 
@@ -166,8 +166,9 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-35 tests, 0 failures
-- core: 35 tests (schema validation, storage, attribution, redaction, policy, export, PR report)
+43 tests, 0 failures
+- core: 35 tests (schema, storage, attribution, redaction, policy, export, PR report)
+- adapters: 8 tests (Claude Code, Aider, Cursor, Generic) (schema validation, storage, attribution, redaction, policy, export, PR report)
 - cli: 0 tests (CLI integration tests pending)
 - adapters: 0 tests
 ```

@@ -18,7 +18,6 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-use tracegit_core::adapter::builtin::all_adapters;
 use tracegit_core::storage::{EventWriter, RepoStorage, TraceIndex};
 
 #[derive(Parser)]
@@ -240,21 +239,26 @@ async fn cmd_doctor() -> Result<()> {
     // Detect AI tools
     println!();
     println!("AI Tool Detection:");
-    let workspace = &storage.root;
-    let adapters = all_adapters();
     let mut detected = 0;
-    for adapter in adapters {
-        let result = adapter.detect(workspace).await;
-        if result.detected {
-            detected += 1;
-            println!(
-                "  ✓ {}{} ({})",
-                result.tool_name,
-                result.version.map(|v| format!(" v{}", v)).unwrap_or_default(),
-                result.config_path.as_deref().unwrap_or("detected")
-            );
-        }
+
+    // Check for Claude Code
+    if std::path::Path::new(&std::env::var("HOME").unwrap_or_default()).join(".claude").exists() {
+        detected += 1;
+        println!("  ✓ Claude Code (~/.claude found)");
     }
+
+    // Check for Cursor
+    if storage.root.join(".cursor").exists() {
+        detected += 1;
+        println!("  ✓ Cursor (.cursor/ found)");
+    }
+
+    // Check for Aider
+    if std::process::Command::new("which").arg("aider").output().map(|o| o.status.success()).unwrap_or(false) {
+        detected += 1;
+        println!("  ✓ Aider (installed)");
+    }
+
     if detected == 0 {
         println!("  No AI coding tools detected");
     }

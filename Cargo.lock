@@ -993,8 +993,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
+ "regex",
  "serde",
  "serde_json",
+ "tokio",
  "tracegit-core",
 ]
 

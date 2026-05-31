@@ -21,53 +21,56 @@ pub struct DetectionResult {
     pub config_path: Option<String>,
 }
 
+/// Info about an adapter
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdapterInfo {
+    pub name: String,
+    pub version: String,
+    pub tool_name: String,
+}
+
 /// Capabilities that an adapter supports
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdapterCapabilities {
-    pub session_lifecycle: bool,
-    pub prompt_capture: bool,
-    pub file_read_capture: bool,
-    pub file_write_capture: bool,
-    pub shell_command_capture: bool,
-    pub tool_call_capture: bool,
-    pub mcp_capture: bool,
-    pub model_metadata: bool,
-    pub cost_capture: bool,
-    pub test_result_capture: bool,
-    pub external_context_capture: bool,
-    pub branch_commit_capture: bool,
-    pub native_attribution_import: bool,
+    pub can_capture_file_writes: bool,
+    pub can_capture_commands: bool,
+    pub can_capture_prompts: bool,
+    pub can_replay_session: bool,
+    pub supports_hooks: bool,
 }
 
 /// Adapter for a specific AI coding tool
 #[async_trait]
 pub trait AgentAdapter: Send + Sync {
-    /// Unique identifier for this adapter
-    fn id(&self) -> &str;
-
-    /// Human-readable name
-    fn name(&self) -> &str;
-
-    /// Detect if this tool is present in the workspace
-    async fn detect(&self, workspace_path: &Path) -> DetectionResult;
-
-    /// Install hooks/integration (optional)
-    async fn install(&self, workspace_path: &Path) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    /// Uninstall hooks/integration (optional)
-    async fn uninstall(&self, workspace_path: &Path) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    /// Import existing data from this tool
-    async fn import(&self, source: &Path) -> anyhow::Result<Vec<TraceEvent>> {
-        Ok(Vec::new())
-    }
+    /// Adapter info
+    fn info(&self) -> &AdapterInfo;
 
     /// List what this adapter can capture
     fn capabilities(&self) -> AdapterCapabilities;
+
+    /// Detect if this tool is present in the workspace
+    fn detect(&self, workspace_path: &Path) -> DetectionResult {
+        DetectionResult {
+            detected: false,
+            tool_name: self.info().tool_name.clone(),
+            version: None,
+            config_path: None,
+        }
+    }
+
+    /// Install hooks/integration
+    fn install(&self, workspace_path: &Path) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// Start a tracking session
+    async fn start_session(&self, session: &Session) -> anyhow::Result<String>;
+
+    /// End a tracking session
+    async fn end_session(&self, session_id: &str) -> anyhow::Result<()>;
+
+    /// Capture an event
+    async fn capture_event(&self, event: &TraceEvent) -> anyhow::Result<()>;
 }
 
 /// Built-in adapters that ship with TraceGit
