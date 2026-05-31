@@ -121,11 +121,11 @@ TraceGit/
 
 | # | Module | PRD Sectie | Status | Details |
 |---|--------|-----------|--------|---------|
-| 36 | VS Code extension scaffold | 10 | ❌ Not started | TypeScript, nog geen `editor/` map |
-| 37 | Inline attribution decorations | 10.1 | ❌ Not started | |
-| 38 | Hover cards (origin, model, confidence) | 10.2 | ❌ Not started | |
-| 39 | Sidebar panel | 10.3 | ❌ Not started | |
-| 40 | Session explorer | 10.4 | ❌ Not started | |
+| 36 | VS Code extension scaffold | 10 | ✅ Done | Full extension: client, decorations, tree views, commands |
+| 37 | Inline attribution decorations | 10.1 | ✅ Done | Purple (AI) vs green (human) line decorations | |
+| 38 | Hover cards (origin, model, confidence) | 10.2 | ✅ Done | Explain command shows origin, model, confidence, session | |
+| 39 | Sidebar panel | 10.3 | ✅ Done | Sessions + Attributions tree views in activity bar | |
+| 40 | Session explorer | 10.4 | ✅ Done | SessionProvider tree with agent, model, event count | |
 
 ### Phase 6: Advanced Features (PRD secties 16-25)
 
@@ -134,7 +134,7 @@ TraceGit/
 | 41 | Session replay | 16 | ❌ Not started | Web dashboard |
 | 42 | Git remapping (rebase/squash) | 17 | ❌ Not started | |
 | 43 | SLSA/SPDX export | 20 | ❌ Not started | |
-| 44 | Local HTTP daemon (event API) | 22 | ❌ Not started | |
+| 44 | Local HTTP daemon (event API) | 22 | ⬜ Scaffold | TCP listener scaffold, needs axum/warp routing | |
 | 45 | MCP server | 23 | ❌ Not started | |
 | 46 | Team/server mode | 24 | ❌ Not started | |
 | 47 | Plugin SDK | 25 | ❌ Not started | |
@@ -199,8 +199,8 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Git Log (laatste 5 commits)
 
 ```
-b9a052e feat: GitHub Action, README update, roadmap
-5345365 feat: PR report generator, file watcher, provenance export
+e3ad8ce feat: VS Code extension + HTTP daemon scaffold
+93c8826 feat: VS Code extension — inline attribution, session explorer, commands
 1db9723 feat: Rust rewrite — core engine, CLI, attribution, policy, redaction
 8cb1d1e feat: initial project scaffold — core schemas, CLI foundation, monorepo setup
 2a20ab8 Initial commit
@@ -210,11 +210,59 @@ b9a052e feat: GitHub Action, README update, roadmap
 
 ## Volgende Stappen (prioriteit)
 
-1. **Claude Code hook installer** — PRD 8.1, adapter is er maar hooks installeren ontbreekt
-2. **Aider commit parser** — PRD 8.2, git commit messages parsen voor attributie
-3. **VS Code extension scaffold** — PRD 10, TypeScript project opzetten
+1. ~~**Claude Code hook installer**~~ — ✅ Done
+2. ~~**Aider commit parser**~~ — ✅ Done  
+3. ~~**VS Code extension scaffold**~~ — ✅ Done
 4. **CLI integration tests** — robuustheid testen
 5. **Cross-compilation** — linux/mac/windows builds
+6. **HTTP daemon (axum/warp)** — PRD 22, local event API
+7. **Session replay web UI** — PRD 16
+8. **Git remapping** — PRD 17, rebase/squash resilience
+
+---
+
+## Concurrentieonderzoek (2026-05-31)
+
+Directe concurrenten die hetzelfde probleem oplossen:
+
+### 1. Git AI (usegitai.com)
+- **Open-source** git extension
+- Gebruikt **Git Notes** voor AI authorship tracking
+- `git-ai blame` + `git-ai stats` commands
+- Ondersteunt Agent Hooks voor automatische tracking
+- `refs/notes/ai` open standard
+- **+/−**: Git-native (goed), maar geen policy engine, geen redaction, geen export profiles
+
+### 2. AgentBlame (mesa.dev/agentblame)
+- **Line-level AI attribution** via git notes
+- Combineert git blame met AI attributie
+- Tool/model breakdown dashboards
+- Ondersteunt Cursor, Claude Code, OpenCode
+- **+/−**: Mooie UX, maar gesloten platform (SaaS?), geen policy/redaction
+
+### 3. Entire CLI
+- Captureert AI session transcripts in git commits
+- Line-level AI vs human attributie
+- **+/−**: Focus op session capture, minder breed dan TraceGit
+
+### 4. AI Footprint
+- Git-native AI code tracking
+- **+/−**: Vroeg stadium, vergelijkbare aanpak
+
+### TraceGit differentiators
+1. **Policy engine** — YAML-based rules voor sensitive paths, required reviews, test evidence
+2. **Secret redaction** — regex-based detection van API keys, tokens, passwords
+3. **6 export profiles** — developer, OSS, corporate, audit, release, CI
+4. **PR risk reports** — risico scoring, AI involvement stats, reviewer checklist
+5. **Tamper-evident log** — SHA-256 hash chain (geen concurrent heeft dit)
+6. **Multi-adapter** — Claude Code, Aider, Cursor, Generic uit de doos
+7. **Rust** — single binary, snel, geen runtime dependency
+8. **SLSA/SPDX ready** — export naar supply chain formats
+
+### Actiepunten uit concurrentie
+- Git Notes integratie overwegen (git-ai gebruikt dit als open standaard)
+- Dashboard metrics (tool/model breakdown) toevoegen aan `tracegit stats`
+- `/ask` feature (chat met AI die code schreef) — uniek, overwegen voor later
 
 ---
 
