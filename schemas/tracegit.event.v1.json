@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://tracegit.dev/schemas/tracegit.event.v1.json",
+  "title": "TraceGit Event",
+  "description": "A timestamped action within an AI development session",
+  "type": "object",
+  "required": ["schema", "id", "sessionId", "timestamp", "type", "actor", "payload"],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "tracegit.event.v1"
+    },
+    "id": {
+      "type": "string",
+      "description": "Unique event identifier"
+    },
+    "sessionId": {
+      "type": "string",
+      "description": "Parent session identifier"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "session.start", "session.end",
+        "prompt.submitted", "prompt.context_added",
+        "file.read", "file.write", "file.patch", "file.delete",
+        "command.pre_execute", "command.post_execute",
+        "tool.pre_call", "tool.post_call",
+        "mcp.pre_call", "mcp.post_call",
+        "test.run", "test.result",
+        "git.diff", "git.commit", "git.branch", "git.merge", "git.rebase",
+        "policy.violation", "policy.override",
+        "review.approval",
+        "export.created"
+      ]
+    },
+    "actor": {
+      "type": "string",
+      "enum": ["human", "agent", "system", "unknown"]
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "redaction": {
+      "$ref": "#/definitions/redactionInfo"
+    },
+    "prevHash": {
+      "type": "string",
+      "description": "SHA-256 hash of the previous event (chain)"
+    },
+    "eventHash": {
+      "type": "string",
+      "description": "SHA-256 hash of this event"
+    }
+  },
+  "definitions": {
+    "redactionInfo": {
+      "type": "object",
+      "required": ["applied", "mode"],
+      "properties": {
+        "applied": { "type": "boolean" },
+        "mode": {
+          "type": "string",
+          "enum": ["none", "automatic", "strict", "hash-only", "custom"]
+        },
+        "rulesApplied": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

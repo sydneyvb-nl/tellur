@@ -1,0 +1,105 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://tracegit.dev/schemas/tracegit.session.v1.json",
+  "title": "TraceGit Session",
+  "description": "A bounded AI-assisted development interaction",
+  "type": "object",
+  "required": ["schema", "id", "repoId", "workspaceId", "startedAt", "humanActor", "agent", "status", "relatedCommits", "relatedBranches", "relatedPRs"],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "tracegit.session.v1"
+    },
+    "id": {
+      "type": "string",
+      "description": "Unique session identifier"
+    },
+    "repoId": {
+      "type": "string",
+      "description": "Repository identifier"
+    },
+    "workspaceId": {
+      "type": "string",
+      "description": "Workspace identifier"
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "endedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "humanActor": {
+      "$ref": "#/definitions/actor"
+    },
+    "agent": {
+      "$ref": "#/definitions/agentInfo"
+    },
+    "model": {
+      "$ref": "#/definitions/modelInfo"
+    },
+    "task": {
+      "$ref": "#/definitions/taskInfo"
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "completed", "failed", "interrupted", "unknown"]
+    },
+    "relatedCommits": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "relatedBranches": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "relatedPRs": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "definitions": {
+    "actor": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "emailHash": { "type": "string" },
+        "type": { "type": "string", "enum": ["human", "agent", "system", "unknown"] }
+      }
+    },
+    "agentInfo": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "modelInfo": {
+      "type": "object",
+      "required": ["provider", "name"],
+      "properties": {
+        "provider": { "type": "string" },
+        "name": { "type": "string" },
+        "version": { "type": ["string", "null"] }
+      }
+    },
+    "taskInfo": {
+      "type": "object",
+      "required": ["promptHash"],
+      "properties": {
+        "title": { "type": "string" },
+        "promptHash": { "type": "string" },
+        "promptRedacted": { "type": "string" }
+      }
+    }
+  }
+}
