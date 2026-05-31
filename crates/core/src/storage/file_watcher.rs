@@ -3,7 +3,7 @@
 //! Watches for file changes in a repository and captures them as
 //! TraceGit events with before/after blob SHAs.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -100,7 +100,7 @@ fn get_file_diff(repo_root: &Path, file_path: &str) -> Result<String> {
 /// Take a snapshot of a file's contents (for blob SHA computation)
 pub fn compute_file_hash(path: &Path) -> Result<String> {
     let contents = std::fs::read(path)?;
-    let hash = crate::schema::ids::hash_content(&format!("blob {}\0", contents.len()));
+    let _hash = crate::schema::ids::hash_content(&format!("blob {}\0", contents.len()));
     // Reconstruct proper git blob hash
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
@@ -130,6 +130,7 @@ pub fn should_track(path: &Path, repo_root: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn test_should_track() {

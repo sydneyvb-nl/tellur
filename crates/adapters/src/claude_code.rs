@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use tracegit_core::adapter::{AgentAdapter, AdapterInfo, AdapterCapabilities};
 use tracegit_core::schema::types::*;
@@ -192,11 +192,11 @@ impl AgentAdapter for ClaudeCodeAdapter {
         Ok(session.id.clone())
     }
 
-    async fn end_session(&self, session_id: &str) -> Result<()> {
+    async fn end_session(&self, _session_id: &str) -> Result<()> {
         Ok(())
     }
 
-    async fn capture_event(&self, event: &TraceEvent) -> Result<()> {
+    async fn capture_event(&self, _event: &TraceEvent) -> Result<()> {
         // Events are captured via hooks, not actively pushed
         Ok(())
     }

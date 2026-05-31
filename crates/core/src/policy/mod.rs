@@ -4,7 +4,6 @@
 //! AI behavior restrictions, and review requirements.
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use crate::schema::types::*;
@@ -126,7 +125,7 @@ impl PolicyEngine {
         &self,
         rule: &PolicyRule,
         attr: &AttributionRange,
-        file_path: &str,
+        _file_path: &str,
     ) -> Option<PolicyResult> {
         let when = &rule.when;
 

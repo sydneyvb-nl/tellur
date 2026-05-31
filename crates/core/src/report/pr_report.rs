@@ -3,8 +3,6 @@
 //! Generates a risk report for a pull request based on AI attribution data,
 //! policy violations, sensitive file access, and test evidence.
 
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
 
 use crate::schema::types::*;
 

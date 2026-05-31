@@ -141,11 +141,11 @@ impl AgentAdapter for AiderAdapter {
         Ok(session.id.clone())
     }
 
-    async fn end_session(&self, session_id: &str) -> Result<()> {
+    async fn end_session(&self, _session_id: &str) -> Result<()> {
         Ok(())
     }
 
-    async fn capture_event(&self, event: &TraceEvent) -> Result<()> {
+    async fn capture_event(&self, _event: &TraceEvent) -> Result<()> {
         Ok(())
     }
 }

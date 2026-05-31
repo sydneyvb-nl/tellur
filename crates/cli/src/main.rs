@@ -484,7 +484,7 @@ fn cmd_policy_explain(rule_id: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn cmd_export(format: &str, output: Option<&std::path::Path>) -> Result<()> {
+fn cmd_export(format: &str, _output: Option<&std::path::Path>) -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
         println!("TraceGit not initialized. Run `tracegit init` first.");
@@ -575,7 +575,7 @@ fn cmd_event(
 }
 
 fn cmd_gc(dry_run: bool) -> Result<()> {
-    let storage = RepoStorage::discover()?;
+    let _storage = RepoStorage::discover()?;
     println!("Garbage collection{}", if dry_run { " (dry run)" } else { "" });
     println!("⚠ GC is under development.");
     Ok(())

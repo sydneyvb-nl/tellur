@@ -66,9 +66,9 @@ impl CursorAdapter {
         for entry in entries {
             let event_type = match entry.kind.as_deref().or(entry.tool.as_deref()) {
                 Some("edit" | "write" | "apply") => EventType::FileWrite,
-                Some("read" | "search") => EventType::FileRead,
-                Some("terminal" | "bash" | "command") => EventType::CommandExecution,
+                Some("read") => EventType::FileRead,
                 Some("search" | "codebase_search") => EventType::CodeSearch,
+                Some("terminal" | "bash" | "command") => EventType::CommandExecution,
                 Some("chat" | "prompt") => EventType::UserPrompt,
                 Some(other) => EventType::Custom(other.to_string()),
                 None => continue,
@@ -121,11 +121,11 @@ impl AgentAdapter for CursorAdapter {
         Ok(session.id.clone())
     }
 
-    async fn end_session(&self, session_id: &str) -> Result<()> {
+    async fn end_session(&self, _session_id: &str) -> Result<()> {
         Ok(())
     }
 
-    async fn capture_event(&self, event: &TraceEvent) -> Result<()> {
+    async fn capture_event(&self, _event: &TraceEvent) -> Result<()> {
         Ok(())
     }
 }

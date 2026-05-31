@@ -49,7 +49,7 @@ pub trait AgentAdapter: Send + Sync {
     fn capabilities(&self) -> AdapterCapabilities;
 
     /// Detect if this tool is present in the workspace
-    fn detect(&self, workspace_path: &Path) -> DetectionResult {
+    fn detect(&self, _workspace_path: &Path) -> DetectionResult {
         DetectionResult {
             detected: false,
             tool_name: self.info().tool_name.clone(),
@@ -59,7 +59,7 @@ pub trait AgentAdapter: Send + Sync {
     }
 
     /// Install hooks/integration
-    fn install(&self, workspace_path: &Path) -> anyhow::Result<()> {
+    fn install(&self, _workspace_path: &Path) -> anyhow::Result<()> {
         Ok(())
     }
 

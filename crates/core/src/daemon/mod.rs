@@ -5,7 +5,6 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -30,6 +29,7 @@ impl Default for DaemonConfig {
 
 /// API response wrapper
 #[derive(Serialize)]
+#[allow(dead_code)]
 struct ApiResponse<T: Serialize> {
     status: String,
     data: T,
@@ -37,6 +37,7 @@ struct ApiResponse<T: Serialize> {
 
 /// API error response
 #[derive(Serialize)]
+#[allow(dead_code)]
 struct ApiError {
     status: String,
     error: String,
