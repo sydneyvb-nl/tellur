@@ -1241,7 +1241,9 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tokio",
+ "tracegit-adapters",
  "tracegit-core",
 ]
 

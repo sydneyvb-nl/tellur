@@ -90,7 +90,10 @@ impl TraceIndex {
                 policy_tags TEXT,
                 risk_tags TEXT,
                 risk_level TEXT,
+                tests_run TEXT DEFAULT '[]',
                 tests_passed BOOLEAN,
+                reviewer TEXT,
+                reviewed_at TEXT,
                 updated_at TEXT NOT NULL
             );
 

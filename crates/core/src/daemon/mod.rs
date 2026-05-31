@@ -18,6 +18,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::schema::types::TraceEvent;
+use crate::storage::TraceIndex;
 
 /// Daemon configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -189,20 +190,22 @@ async fn export_bundle() -> Json<ApiResponse> {
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 fn write_event_to_disk(repo_root: &Path, event: &TraceEvent) -> Result<String> {
-    let traces_dir = repo_root.join(".tracegit").join("traces").join("sessions");
+    let traces_dir = repo_root.join(".tracegit").join("traces");
     std::fs::create_dir_all(&traces_dir)?;
 
-    let today = chrono::Local::now().format("%Y/%m").to_string();
-    let log_dir = traces_dir.join(&today);
-    std::fs::create_dir_all(&log_dir)?;
-
-    let log_path = log_dir.join("events.jsonl");
+    let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let log_path = traces_dir.join(format!("events-{}.jsonl", date));
 
     // Append event to JSONL
     let json = serde_json::to_string(event)?;
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&log_path)?;
     writeln!(file, "{}", json)?;
+
+    // Index the event
+    let index_path = repo_root.join(".tracegit").join("index").join("tracegit.db");
+    let index = TraceIndex::open(&index_path)?;
+    index.index_event(event)?;
 
     Ok(event.id.clone())
 }

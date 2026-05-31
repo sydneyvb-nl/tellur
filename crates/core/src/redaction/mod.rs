@@ -125,15 +125,31 @@ impl RedactionEngine {
 
     pub fn is_sensitive_path(&self, file_path: &str) -> bool {
         for pattern in &self.config.redact_paths {
+            // Handle ** glob patterns
+            if pattern.contains("**") {
+                let suffix = pattern.trim_start_matches("**/");
+                if file_path.ends_with(suffix) || file_path.ends_with(&format!("/{}", suffix)) {
+                    return true;
+                }
+                continue;
+            }
+            // Handle trailing * (prefix match)
             if pattern.ends_with('*') {
                 let prefix = pattern.trim_end_matches('*');
                 if file_path.starts_with(prefix) {
                     return true;
                 }
+                continue;
             }
+            // Exact match
             if file_path == pattern {
                 return true;
             }
+        }
+        // Also check file extensions
+        let sensitive_extensions = [".pem", ".key", ".p12", ".pfx", ".jks"];
+        if sensitive_extensions.iter().any(|ext| file_path.ends_with(ext)) {
+            return true;
         }
         false
     }

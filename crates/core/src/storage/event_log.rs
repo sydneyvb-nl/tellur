@@ -67,12 +67,27 @@ impl EventWriter {
         let event_id = ids::generate_event_id();
         let timestamp = Utc::now().to_rfc3339();
 
+        let parsed_event_type: crate::schema::types::EventType = serde_json::from_value(serde_json::Value::String(event_type.to_string()))
+            .unwrap_or(crate::schema::types::EventType::FileWrite);
+        let parsed_actor: crate::schema::types::EventActor = serde_json::from_value(serde_json::Value::String(actor.to_string()))
+            .unwrap_or(crate::schema::types::EventActor::Agent);
+
+        // Use the serialized enum values for hashing (deterministic)
+        let event_type_for_hash = serde_json::to_value(&parsed_event_type)
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| event_type.to_string());
+        let actor_for_hash = serde_json::to_value(&parsed_actor)
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| actor.to_string());
+
         let event_hash = hash_event(
             &event_id,
             session_id,
             &timestamp,
-            event_type,
-            actor,
+            &event_type_for_hash,
+            &actor_for_hash,
             &payload,
             self.last_hash.as_deref(),
         );
@@ -82,10 +97,8 @@ impl EventWriter {
             id: event_id,
             session_id: session_id.to_string(),
             timestamp,
-            event_type: serde_json::from_value(serde_json::Value::String(event_type.to_string()))
-                .unwrap_or(crate::schema::types::EventType::FileWrite),
-            actor: serde_json::from_value(serde_json::Value::String(actor.to_string()))
-                .unwrap_or(crate::schema::types::EventActor::Agent),
+            event_type: parsed_event_type,
+            actor: parsed_actor,
             payload,
             redaction,
             prev_hash: self.last_hash.clone(),
@@ -129,8 +142,21 @@ impl EventWriter {
         if let Some(last_file) = files.last() {
             let last_line = read_last_line(last_file)?;
             if let Some(line) = last_line {
-                let event: TraceEvent = serde_json::from_str(&line)?;
-                return Ok(event.event_hash);
+                if let Ok(event) = serde_json::from_str::<TraceEvent>(&line) {
+                    return Ok(event.event_hash);
+                }
+                // Corrupted last line — try earlier lines
+                let file = File::open(last_file)?;
+                let reader = BufReader::new(file);
+                let mut last_good_hash = None;
+                for line in reader.lines() {
+                    let line = line?;
+                    if line.trim().is_empty() { continue; }
+                    if let Ok(event) = serde_json::from_str::<TraceEvent>(&line) {
+                        last_good_hash = event.event_hash;
+                    }
+                }
+                return Ok(last_good_hash);
             }
         }
         Ok(None)

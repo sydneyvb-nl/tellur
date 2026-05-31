@@ -389,16 +389,62 @@ fn cmd_pr_report(base: &str, head: &str) -> Result<()> {
         return Ok(());
     }
 
-    println!("PR Risk Report: {}..{}", base, head);
-    println!("══════════════════════════════════════════════");
-    println!();
-    println!("⚠ PR report generation requires git diff analysis.");
-    println!("  This feature is under development.");
-    println!();
-    println!("  To generate a full report, TraceGit needs:");
-    println!("  1. The diff between {} and {}", base, head);
-    println!("  2. Attributed ranges from the index");
-    println!("  3. Policy evaluation results");
+    // Get file changes from git diff
+    let repo_root = std::env::current_dir()?;
+    let changes = tracegit_core::storage::file_watcher::capture_git_diff(&repo_root).unwrap_or_default();
+
+    // Get attributions from index
+    let index = TraceIndex::open(&storage.index_path)?;
+    let mut all_ranges: Vec<(String, String, tracegit_core::schema::types::AttributionRange)> = Vec::new();
+    for change in &changes {
+        if let Ok(attrs) = index.get_file_attributions(&change.path) {
+            for (blob_sha, attr) in attrs {
+                all_ranges.push((change.path.clone(), blob_sha, attr));
+            }
+        }
+    }
+
+    // Get policy results
+    let policy_dir = &storage.policies_dir;
+    let policy_files: Vec<_> = std::fs::read_dir(policy_dir)
+        .unwrap_or_else(|_| panic!("No policies dir"))
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "yml"))
+        .collect();
+
+    let mut policy_results = Vec::new();
+    for pf in &policy_files {
+        if let Ok(content) = std::fs::read_to_string(pf.path())
+            && let Ok(policy) = serde_yaml::from_str::<tracegit_core::schema::types::PolicyFile>(&content) {
+                let engine = tracegit_core::policy::PolicyEngine::from_policy(policy);
+                for (file_path, _blob_sha, range) in &all_ranges {
+                    let results = engine.evaluate_attribution(range, file_path);
+                    policy_results.extend(results);
+                }
+            }
+    }
+
+    // Build FileAttribution objects for the report
+    let mut file_attrs: Vec<tracegit_core::schema::types::FileAttribution> = Vec::new();
+    for (file_path, blob_sha, range) in &all_ranges {
+        if let Some(existing) = file_attrs.iter_mut().find(|fa| fa.file_path == *file_path && fa.git_blob_sha == *blob_sha) {
+            existing.ranges.push(range.clone());
+        } else {
+            file_attrs.push(tracegit_core::schema::types::FileAttribution {
+                schema: "tracegit.attribution.v1".to_string(),
+                file_path: file_path.clone(),
+                git_blob_sha: blob_sha.clone(),
+                ranges: vec![range.clone()],
+                updated_at: chrono::Utc::now().to_rfc3339(),
+            });
+        }
+    }
+
+    let report = tracegit_core::report::pr_report::PRReportGenerator::generate(
+        base, head, &file_attrs, &policy_results, vec![], vec![],
+    );
+
+    println!("{}", tracegit_core::report::pr_report::PRReportGenerator::to_markdown(&report));
 
     Ok(())
 }
@@ -533,8 +579,59 @@ fn cmd_export(format: &str, output: Option<&std::path::Path>) -> Result<()> {
 }
 
 async fn cmd_import(adapter: &str, source: &std::path::Path) -> Result<()> {
+    let storage = RepoStorage::discover()?;
+    if !storage.is_initialized() {
+        println!("TraceGit not initialized. Run `tracegit init` first.");
+        return Ok(());
+    }
+
     println!("Importing from {} adapter: {}", adapter, source.display());
-    println!("⚠ Adapter imports are under development.");
+
+    let events: Vec<tracegit_core::schema::types::TraceEvent> = match adapter {
+        "claude-code" | "claude" => {
+            let a = tracegit_adapters::ClaudeCodeAdapter::new();
+            a.parse_transcript(source, "imported")?
+        }
+        "aider" => {
+            let a = tracegit_adapters::AiderAdapter::new();
+            let repo_root = std::env::current_dir()?;
+            a.parse_git_log(&repo_root, "2020-01-01")?
+        }
+        "cursor" => {
+            let a = tracegit_adapters::CursorAdapter::new();
+            a.parse_trace_file(source, "imported")?
+        }
+        _ => {
+            println!("Unknown adapter: {}. Supported: claude-code, aider, cursor", adapter);
+            return Ok(());
+        }
+    };
+
+    if events.is_empty() {
+        println!("No events found to import.");
+        return Ok(());
+    }
+
+    // Write events via EventWriter for hash chain integrity
+    let mut writer = EventWriter::new(&storage.traces_dir);
+    writer.open()?;
+    let index = TraceIndex::open(&storage.index_path)?;
+    let mut count = 0u32;
+    for e in &events {
+        // Re-write through EventWriter for proper hash chain
+        let event = writer.write_event(
+            &e.session_id,
+            &serde_json::to_value(&e.event_type).ok().and_then(|v| v.as_str().map(|s| s.to_string())).unwrap_or_default(),
+            &serde_json::to_value(&e.actor).ok().and_then(|v| v.as_str().map(|s| s.to_string())).unwrap_or_default(),
+            e.payload.clone(),
+            None,
+        )?;
+        index.index_event(&event)?;
+        count += 1;
+    }
+    writer.close();
+
+    println!("Imported {} events from {}", count, adapter);
     Ok(())
 }
 
@@ -654,7 +751,34 @@ fn cmd_verify() -> Result<()> {
     let mut broken = 0;
 
     for event in &events {
-        // Verify hash chain
+        // Recompute event hash and verify
+        if let Some(ref stored_hash) = event.event_hash {
+            let event_type_str = serde_json::to_value(&event.event_type)
+                .ok()
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                .unwrap_or_default();
+            let actor_str = serde_json::to_value(&event.actor)
+                .ok()
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                .unwrap_or_default();
+            let recomputed = tracegit_core::schema::ids::hash_event(
+                &event.id,
+                &event.session_id,
+                &event.timestamp,
+                &event_type_str,
+                &actor_str,
+                &event.payload,
+                event.prev_hash.as_deref(),
+            );
+            if recomputed != *stored_hash {
+                println!("✗ Hash mismatch at event {} (tampered?)", event.id);
+                broken += 1;
+                prev_hash = event.event_hash.as_deref();
+                continue;
+            }
+        }
+
+        // Verify hash chain linkage
         if let Some(prev) = prev_hash {
             if event.prev_hash.as_deref() != Some(prev) {
                 println!("✗ Chain broken at event {}", event.id);
