@@ -8,3 +8,12 @@ dist/
 !.env.example
 coverage/
 *.log
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+# TraceGit local data
+.tracegit/traces/
+.tracegit/index/
