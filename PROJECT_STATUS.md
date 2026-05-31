@@ -143,10 +143,10 @@ TraceGit/
 
 | # | Module | PRD Sectie | Status | Details |
 |---|--------|-----------|--------|---------|
-| 48 | Cross-compilation (linux/mac/win) | 32.3 | ❌ Not started | |
-| 49 | Homebrew formula | 32.3 | ❌ Not started | |
+| 48 | Cross-compilation | 32.3 | ✅ Done | mac arm64/x64 + linux x64 (musl), 3.7-4.4MB binaries | |
+| 49 | Homebrew formula | 32.3 | ✅ Done | dist/tracegit.rb, brew install support | |
 | 50 | npm package (CLI wrapper) | 32.3 | ❌ Not started | |
-| 51 | GitHub Release automation | 32.3 | ❌ Not started | |
+| 51 | GitHub Release automation | 32.3 | ✅ Done | 5-target matrix build on tag push | |
 
 ---
 
@@ -166,7 +166,7 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-43 tests, 0 failures
+52 tests, 0 failures
 - core: 35 tests (schema, storage, attribution, redaction, policy, export, PR report)
 - adapters: 8 tests (Claude Code, Aider, Cursor, Generic) (schema validation, storage, attribution, redaction, policy, export, PR report)
 - cli: 0 tests (CLI integration tests pending)
@@ -199,8 +199,8 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Git Log (laatste 5 commits)
 
 ```
-e3ad8ce feat: VS Code extension + HTTP daemon scaffold
-93c8826 feat: VS Code extension — inline attribution, session explorer, commands
+3073a75 feat: release workflow, homebrew formula, zero warnings
+19f466e feat: cross-compilation + CLI integration tests
 1db9723 feat: Rust rewrite — core engine, CLI, attribution, policy, redaction
 8cb1d1e feat: initial project scaffold — core schemas, CLI foundation, monorepo setup
 2a20ab8 Initial commit
