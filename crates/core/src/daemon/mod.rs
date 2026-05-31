@@ -11,7 +11,7 @@ use anyhow::Result;
 use axum::{
     extract::{Json, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{Html, IntoResponse},
     routing::{get, post},
     Router,
 };
@@ -66,6 +66,7 @@ pub struct SubmitEventsRequest {
 /// Build the axum router
 pub fn build_router(state: DaemonState) -> Router {
     Router::new()
+        .route("/", get(get_ui))
         .route("/status", get(get_status))
         .route("/event", post(submit_event))
         .route("/events", post(submit_events))
@@ -98,6 +99,10 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<()> {
 }
 
 // ─── Handlers ──────────────────────────────────────────────────────────────
+
+async fn get_ui() -> Html<&'static str> {
+    Html(std::include_str!("../../../../web/index.html"))
+}
 
 async fn get_status() -> Json<ApiResponse> {
     Json(ApiResponse {

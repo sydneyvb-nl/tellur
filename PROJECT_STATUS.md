@@ -131,7 +131,7 @@ TraceGit/
 
 | # | Module | PRD Sectie | Status | Details |
 |---|--------|-----------|--------|---------|
-| 41 | Session replay | 16 | ❌ Not started | Needs web UI, backend data available | Web dashboard |
+| 41 | Session replay web UI | 16 | ✅ Done | Dark theme timeline, session sidebar, attribution bar, diff viewer, demo mode | Web dashboard |
 | 42 | Git remapping | 17 | ✅ Done | SHA remap via git diff-tree, rebase detection, 3 tests | |
 | 43 | SLSA/SPDX export | 20 | ✅ Done | SLSA v1.0 provenance + SPDX 2.3 SBOM with AI metadata, 2 tests | |
 | 44 | HTTP daemon (axum) | 22 | ✅ Done | 5 endpoints: status, event, events, sessions, export | TCP listener scaffold, needs axum/warp routing | |

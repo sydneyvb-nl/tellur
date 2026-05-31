@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TraceGit — Session Replay</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --orange: #d29922;
+      --red: #f85149;
+      --purple: #bc8cff;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .header {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .header h1 {
+      font-size: 18px;
+      font-weight: 600;
+    }
+    .header .badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      min-height: calc(100vh - 57px);
+    }
+    .sidebar {
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      max-height: calc(100vh - 57px);
+    }
+    .sidebar-header {
+      padding: 12px 16px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .session-item {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .session-item:hover { background: var(--surface); }
+    .session-item.active { background: var(--surface); border-left: 3px solid var(--accent); }
+    .session-agent {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .session-model {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .session-time {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    .session-stats {
+      display: flex;
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .stat {
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: rgba(255,255,255,0.06);
+    }
+    .stat.ai { color: var(--purple); }
+    .stat.human { color: var(--green); }
+    .stat.events { color: var(--accent); }
+    .main {
+      overflow-y: auto;
+      max-height: calc(100vh - 57px);
+      padding: 24px;
+    }
+    .timeline {
+      position: relative;
+    }
+    .timeline::before {
+      content: '';
+      position: absolute;
+      left: 20px;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: var(--border);
+    }
+    .event {
+      position: relative;
+      margin-left: 40px;
+      margin-bottom: 16px;
+      padding: 12px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .event::before {
+      content: '';
+      position: absolute;
+      left: -28px;
+      top: 16px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid var(--bg);
+    }
+    .event.file-write::before { background: var(--green); }
+    .event.file-read::before { background: var(--text-muted); }
+    .event.command::before { background: var(--orange); }
+    .event.user-prompt::before { background: var(--purple); }
+    .event-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .event-type {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .event-type.file-write { background: rgba(63,185,80,0.15); color: var(--green); }
+    .event-type.file-read { background: rgba(139,148,158,0.15); color: var(--text-muted); }
+    .event-type.command { background: rgba(210,153,34,0.15); color: var(--orange); }
+    .event-type.user-prompt { background: rgba(188,140,255,0.15); color: var(--purple); }
+    .event-type.ai-response { background: rgba(88,166,255,0.15); color: var(--accent); }
+    .event-time {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .event-body {
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .event-body code {
+      background: rgba(255,255,255,0.06);
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-size: 12px;
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    }
+    .diff-block {
+      margin-top: 8px;
+      background: rgba(0,0,0,0.3);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      overflow-x: auto;
+      white-space: pre;
+    }
+    .diff-add { color: var(--green); }
+    .diff-del { color: var(--red); }
+    .diff-ctx { color: var(--text-muted); }
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-muted);
+      text-align: center;
+      gap: 12px;
+    }
+    .empty-state .icon { font-size: 48px; opacity: 0.3; }
+    .empty-state h2 { font-size: 16px; font-weight: 500; }
+    .empty-state p { font-size: 13px; max-width: 400px; }
+    .summary-bar {
+      display: flex;
+      gap: 16px;
+      padding: 16px;
+      margin-bottom: 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .summary-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .summary-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+    .summary-value {
+      font-size: 20px;
+      font-weight: 700;
+    }
+    .attribution-bar {
+      height: 6px;
+      border-radius: 3px;
+      display: flex;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .attribution-bar .ai { background: var(--purple); }
+    .attribution-bar .human { background: var(--green); }
+    .filter-bar {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 6px;
+    }
+    .filter-btn {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+    .filter-btn:hover { border-color: var(--accent); color: var(--text); }
+    .filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🔍 TraceGit</h1>
+  <span class="badge">Session Replay</span>
+</div>
+
+<div class="layout">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <span>Sessions</span>
+      <span id="session-count">0</span>
+    </div>
+    <div class="filter-bar">
+      <button class="filter-btn active" data-filter="all">All</button>
+      <button class="filter-btn" data-filter="ai">AI</button>
+      <button class="filter-btn" data-filter="human">Human</button>
+    </div>
+    <div id="session-list"></div>
+  </div>
+
+  <div class="main" id="main-content">
+    <div class="empty-state">
+      <div class="icon">🔍</div>
+      <h2>TraceGit Session Replay</h2>
+      <p>Select a session from the sidebar to view the event timeline, or start the daemon with <code>tracegit daemon</code></p>
+    </div>
+  </div>
+</div>
+
+<script>
+// TraceGit Session Replay — Client
+const API_BASE = window.location.origin;
+
+// --- State ---
+let sessions = [];
+let activeSession = null;
+let activeFilter = 'all';
+
+// --- API ---
+async function fetchSessions() {
+  try {
+    const res = await fetch(`${API_BASE}/sessions`);
+    const data = await res.json();
+    return data.data?.sessions || [];
+  } catch {
+    // Demo mode — show sample data
+    return getDemoSessions();
+  }
+}
+
+async function fetchSessionEvents(sessionId) {
+  try {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/events`);
+    const data = await res.json();
+    return data.data?.events || [];
+  } catch {
+    return getDemoEvents(sessionId);
+  }
+}
+
+// --- Demo Data ---
+function getDemoSessions() {
+  return [
+    {
+      id: 'sess_demo_1',
+      agent_id: 'claude-code',
+      model_id: 'anthropic:claude-opus-4.7',
+      started_at: '2026-05-31T15:30:00Z',
+      event_count: 12,
+      files_changed: 3,
+      lines_added: 142,
+      ai_percentage: 89,
+    },
+    {
+      id: 'sess_demo_2',
+      agent_id: 'aider',
+      model_id: 'openai:gpt-4.1',
+      started_at: '2026-05-31T14:15:00Z',
+      event_count: 8,
+      files_changed: 2,
+      lines_added: 67,
+      ai_percentage: 100,
+    },
+    {
+      id: 'sess_demo_3',
+      agent_id: 'human',
+      model_id: null,
+      started_at: '2026-05-31T12:00:00Z',
+      event_count: 5,
+      files_changed: 1,
+      lines_added: 23,
+      ai_percentage: 0,
+    },
+  ];
+}
+
+function getDemoEvents(sessionId) {
+  const events = {
+    sess_demo_1: [
+      { id: 'e1', event_type: 'user_prompt', timestamp: '2026-05-31T15:30:01Z', body: 'Add a new REST endpoint for /api/v2/attribution with file path and line range parameters' },
+      { id: 'e2', event_type: 'file_read', timestamp: '2026-05-31T15:30:03Z', body: 'Reading <code>crates/core/src/daemon/mod.rs</code> to understand existing router structure' },
+      { id: 'e3', event_type: 'command', timestamp: '2026-05-31T15:30:05Z', body: 'Executing: <code>grep -r "Router" crates/core/src/</code>' },
+      { id: 'e4', event_type: 'file_write', timestamp: '2026-05-31T15:30:12Z', body: 'Modified <code>crates/core/src/daemon/mod.rs</code>', diff: '+ pub fn attribution_router() -> Router {\n+     Router::new()\n+         .route("/api/v2/attribution/:file", get(get_attribution))\n+         .route("/api/v2/attribution", post(query_attribution))\n+ }\n \n pub fn build_router(state: DaemonState) -> Router {' },
+      { id: 'e5', event_type: 'file_write', timestamp: '2026-05-31T15:30:18Z', body: 'Created <code>crates/core/src/daemon/attribution.rs</code>', diff: '+ use axum::extract::{Path, Query, State};\n+ use crate::attribution::engine::AttributionEngine;\n+ \n+ pub async fn get_attribution(\n+     Path(file): Path<String>,\n+ ) -> Json<ApiResponse> {\n+     // Line-level attribution lookup\n+ }' },
+      { id: 'e6', event_type: 'command', timestamp: '2026-05-31T15:30:20Z', body: 'Executing: <code>cargo build 2>&1</code>' },
+      { id: 'e7', event_type: 'ai_response', timestamp: '2026-05-31T15:30:25Z', body: 'Build successful. Added 2 new endpoints. Tests passing.' },
+    ],
+    sess_demo_2: [
+      { id: 'e1', event_type: 'user_prompt', timestamp: '2026-05-31T14:15:00Z', body: 'Refactor the attribution engine to support batch lookups' },
+      { id: 'e2', event_type: 'file_read', timestamp: '2026-05-31T14:15:02Z', body: 'Reading <code>crates/core/src/attribution/engine.rs</code>' },
+      { id: 'e3', event_type: 'file_write', timestamp: '2026-05-31T14:15:10Z', body: 'Modified <code>crates/core/src/attribution/engine.rs</code>', diff: '+ pub fn batch_attributions(\n+     &self,\n+     files: &[PathBuf],\n+ ) -> Result<Vec<FileAttribution>> {\n+     files.iter()\n+         .map(|f| self.attribute_file(f))\n+         .collect()\n+ }' },
+    ],
+    sess_demo_3: [
+      { id: 'e1', event_type: 'file_write', timestamp: '2026-05-31T12:00:00Z', body: 'Modified <code>README.md</code>', diff: '+ ## TraceGit\n+ \n+ AI Code Provenance — track who changed what: AI or human.' },
+    ],
+  };
+  return events[sessionId] || [];
+}
+
+// --- Rendering ---
+function renderSessionList() {
+  const list = document.getElementById('session-list');
+  const filtered = activeFilter === 'all' ? sessions : sessions.filter(s => {
+    if (activeFilter === 'ai') return s.ai_percentage > 0;
+    if (activeFilter === 'human') return s.ai_percentage === 0;
+    return true;
+  });
+
+  document.getElementById('session-count').textContent = filtered.length;
+
+  list.innerHTML = filtered.map(s => `
+    <div class="session-item ${activeSession === s.id ? 'active' : ''}" onclick="selectSession('${s.id}')">
+      <div class="session-agent">
+        ${getAgentIcon(s.agent_id)} ${s.agent_id}
+      </div>
+      ${s.model_id ? `<div class="session-model">${s.model_id}</div>` : ''}
+      <div class="session-time">${formatTime(s.started_at)}</div>
+      <div class="session-stats">
+        <span class="stat events">${s.event_count} events</span>
+        <span class="stat ${s.ai_percentage > 50 ? 'ai' : 'human'}">${s.ai_percentage}% AI</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function getAgentIcon(agent) {
+  const icons = { 'claude-code': '🤖', 'aider': '🤖', 'cursor': '🤖', 'human': '👤' };
+  return icons[agent] || '🔧';
+}
+
+function formatTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function getEventClass(type) {
+  const map = { 'file_write': 'file-write', 'file_read': 'file-read', 'command': 'command', 'user_prompt': 'user-prompt' };
+  return map[type] || '';
+}
+
+function getTypeLabel(type) {
+  const map = {
+    'file_write': 'File Write', 'file_read': 'File Read', 'command': 'Command',
+    'user_prompt': 'User Prompt', 'ai_response': 'AI Response', 'code_search': 'Code Search'
+  };
+  return map[type] || type;
+}
+
+function renderDiff(diff) {
+  if (!diff) return '';
+  return `<div class="diff-block">${diff.split('\n').map(line => {
+    if (line.startsWith('+')) return `<span class="diff-add">${escapeHtml(line)}</span>`;
+    if (line.startsWith('-')) return `<span class="diff-del">${escapeHtml(line)}</span>`;
+    return `<span class="diff-ctx">${escapeHtml(line)}</span>`;
+  }).join('\n')}</div>`;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+async function selectSession(id) {
+  activeSession = id;
+  renderSessionList();
+
+  const session = sessions.find(s => s.id === id);
+  const events = await fetchSessionEvents(id);
+
+  const main = document.getElementById('main-content');
+
+  const aiPct = session?.ai_percentage || 0;
+  const humanPct = 100 - aiPct;
+
+  main.innerHTML = `
+    <div class="summary-bar">
+      <div class="summary-item">
+        <span class="summary-label">Agent</span>
+        <span class="summary-value">${session?.agent_id || 'unknown'}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Model</span>
+        <span class="summary-value" style="font-size:14px">${session?.model_id || 'human'}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Events</span>
+        <span class="summary-value">${events.length}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Files Changed</span>
+        <span class="summary-value">${session?.files_changed || 0}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Lines Added</span>
+        <span class="summary-value">${session?.lines_added || 0}</span>
+      </div>
+      <div class="summary-item" style="flex:1">
+        <span class="summary-label">AI vs Human</span>
+        <span class="summary-value" style="font-size:14px">${aiPct}% / ${humanPct}%</span>
+        <div class="attribution-bar">
+          <div class="ai" style="width:${aiPct}%"></div>
+          <div class="human" style="width:${humanPct}%"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="timeline">
+      ${events.map(e => `
+        <div class="event ${getEventClass(e.event_type)}">
+          <div class="event-header">
+            <span class="event-type ${getEventClass(e.event_type)}">${getTypeLabel(e.event_type)}</span>
+            <span class="event-time">${formatTime(e.timestamp)}</span>
+          </div>
+          <div class="event-body">${e.body || ''}</div>
+          ${e.diff ? renderDiff(e.diff) : ''}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// --- Filters ---
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeFilter = btn.dataset.filter;
+    renderSessionList();
+  });
+});
+
+// --- Init ---
+async function init() {
+  sessions = await fetchSessions();
+  renderSessionList();
+}
+
+init();
+</script>
+
+</body>
+</html>
