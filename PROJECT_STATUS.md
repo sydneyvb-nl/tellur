@@ -131,11 +131,11 @@ TraceGit/
 
 | # | Module | PRD Sectie | Status | Details |
 |---|--------|-----------|--------|---------|
-| 41 | Session replay | 16 | ❌ Not started | Web dashboard |
-| 42 | Git remapping (rebase/squash) | 17 | ❌ Not started | |
-| 43 | SLSA/SPDX export | 20 | ❌ Not started | |
-| 44 | Local HTTP daemon (event API) | 22 | ⬜ Scaffold | TCP listener scaffold, needs axum/warp routing | |
-| 45 | MCP server | 23 | ❌ Not started | |
+| 41 | Session replay | 16 | ❌ Not started | Needs web UI, backend data available | Web dashboard |
+| 42 | Git remapping | 17 | ✅ Done | SHA remap via git diff-tree, rebase detection, 3 tests | |
+| 43 | SLSA/SPDX export | 20 | ✅ Done | SLSA v1.0 provenance + SPDX 2.3 SBOM with AI metadata, 2 tests | |
+| 44 | HTTP daemon (axum) | 22 | ✅ Done | 5 endpoints: status, event, events, sessions, export | TCP listener scaffold, needs axum/warp routing | |
+| 45 | MCP server | 23 | ✅ Done | 6 tools: explain, blame, sessions, policy, pr-report, verify | |
 | 46 | Team/server mode | 24 | ❌ Not started | |
 | 47 | Plugin SDK | 25 | ❌ Not started | |
 
@@ -166,7 +166,7 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-52 tests, 0 failures
+61 tests, 0 failures
 - core: 35 tests (schema, storage, attribution, redaction, policy, export, PR report)
 - adapters: 8 tests (Claude Code, Aider, Cursor, Generic) (schema validation, storage, attribution, redaction, policy, export, PR report)
 - cli: 0 tests (CLI integration tests pending)
