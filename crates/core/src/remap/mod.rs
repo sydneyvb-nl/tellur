@@ -83,12 +83,12 @@ pub fn apply_remap(
     let mut unchanged = 0u32;
     let mut missing = 0u32;
 
-    let remap_lookup: HashMap<&str, &RemapEntry> = remap.iter()
-        .map(|e| (e.old_sha.as_str(), e))
+    let remap_lookup: HashMap<(&str, &str), &RemapEntry> = remap.iter()
+        .map(|e| ((e.old_sha.as_str(), e.file_path.as_str()), e))
         .collect();
 
-    for (_file_path, current_sha) in file_shas.iter_mut() {
-        if let Some(entry) = remap_lookup.get(current_sha.as_str()) {
+    for (file_path, current_sha) in file_shas.iter_mut() {
+        if let Some(entry) = remap_lookup.get(&(current_sha.as_str(), file_path.as_str())) {
             *current_sha = entry.new_sha.clone();
             remapped += 1;
         } else {
@@ -97,10 +97,11 @@ pub fn apply_remap(
     }
 
     // Count entries in remap that didn't match any file
-    let matched_shas: std::collections::HashSet<&str> = remap.iter().map(|e| e.old_sha.as_str()).collect();
-    let file_sha_set: std::collections::HashSet<&str> = file_shas.values().map(|s| s.as_str()).collect();
-    for sha in &matched_shas {
-        if !file_sha_set.contains(sha) {
+    let matched: std::collections::HashSet<(&str, &str)> = file_shas.iter()
+        .map(|(fp, sha)| (sha.as_str(), fp.as_str()))
+        .collect();
+    for entry in remap {
+        if !matched.contains(&(entry.old_sha.as_str(), entry.file_path.as_str())) {
             missing += 1;
         }
     }

@@ -12,8 +12,25 @@ fn tracegit_binary() -> PathBuf {
     if release.exists() { release } else { debug }
 }
 
+fn require_binary() -> Command {
+    let binary = tracegit_binary();
+    if !binary.exists() {
+        eprintln!("Building tracegit binary for integration tests...");
+        let root = workspace_root();
+        let status = Command::new("cargo")
+            .args(["build", "--bin", "tracegit"])
+            .current_dir(&root)
+            .status()
+            .expect("Failed to run cargo build");
+        if !status.success() {
+            panic!("Failed to build tracegit binary for tests");
+        }
+    }
+    Command::new(binary)
+}
+
 fn tracegit() -> Command {
-    Command::new(tracegit_binary())
+    require_binary()
 }
 
 fn workspace_root() -> PathBuf {
@@ -89,7 +106,7 @@ fn test_init() {
 #[test]
 fn test_init_creates_structure() {
     let dir = temp_repo();
-    Command::new(tracegit_binary())
+    require_binary()
         .arg("init")
         .current_dir(&dir)
         .output()
@@ -108,7 +125,7 @@ fn test_init_creates_structure() {
 #[test]
 fn test_status_without_init() {
     let dir = temp_repo();
-    let output = Command::new(tracegit_binary())
+    let output = require_binary()
         .arg("status")
         .current_dir(&dir)
         .output()
@@ -127,13 +144,13 @@ fn test_status_without_init() {
 #[test]
 fn test_doctor() {
     let dir = temp_repo();
-    Command::new(tracegit_binary())
+    require_binary()
         .arg("init")
         .current_dir(&dir)
         .output()
         .unwrap();
 
-    let output = match Command::new(tracegit_binary())
+    let output = match require_binary()
         .arg("doctor")
         .current_dir(&dir)
         .output()
@@ -154,13 +171,13 @@ fn test_doctor() {
 #[test]
 fn test_sessions_empty() {
     let dir = temp_repo();
-    Command::new(tracegit_binary())
+    require_binary()
         .arg("init")
         .current_dir(&dir)
         .output()
         .unwrap();
 
-    let output = Command::new(tracegit_binary())
+    let output = require_binary()
         .arg("sessions")
         .current_dir(&dir)
         .output()
@@ -176,13 +193,13 @@ fn test_sessions_empty() {
 #[test]
 fn test_verify_empty() {
     let dir = temp_repo();
-    Command::new(tracegit_binary())
+    require_binary()
         .arg("init")
         .current_dir(&dir)
         .output()
         .unwrap();
 
-    let output = Command::new(tracegit_binary())
+    let output = require_binary()
         .arg("verify")
         .current_dir(&dir)
         .output()

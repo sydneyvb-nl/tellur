@@ -27,13 +27,11 @@ impl PRReportGenerator {
         let mut checklist: Vec<String> = Vec::new();
 
         for attr in attributions {
-            let mut file_has_ai = false;
             for range in &attr.ranges {
                 let line_count = (range.end_line - range.start_line + 1) as u64;
                 match range.origin {
                     Origin::Ai | Origin::Mixed => {
                         ai_lines += line_count;
-                        file_has_ai = true;
                     }
                     Origin::Human => human_lines += line_count,
                     Origin::Unknown => unknown_lines += line_count,
