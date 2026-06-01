@@ -121,8 +121,18 @@
         },
         "tellur.autoWatch": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Automatically start watching when opening a workspace"
+        },
+        "tellur.autoInit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically initialize Tellur storage in Git workspaces"
+        },
+        "tellur.captureOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Capture saved file changes through Tellur hook ingestion"
         },
         "tellur.vscodeAgentId": {
           "type": "string",

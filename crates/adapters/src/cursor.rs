@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use tellur_core::adapter::{AdapterCapabilities, AdapterInfo, AgentAdapter};
 use tellur_core::schema::types::*;
@@ -53,14 +53,25 @@ impl CursorAdapter {
     /// Parse a Cursor Agent Trace file
     pub fn parse_trace_file(&self, trace_path: &Path, session_id: &str) -> Result<Vec<TraceEvent>> {
         let content = std::fs::read_to_string(trace_path)?;
-        let entries: Vec<CursorTraceEntry> = serde_json::from_str(&content).unwrap_or_else(|_| {
-            // Try JSONL format
-            content
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .filter_map(|l| serde_json::from_str(l).ok())
-                .collect()
-        });
+        let entries: Vec<CursorTraceEntry> = match serde_json::from_str(&content) {
+            Ok(entries) => entries,
+            Err(array_err) => {
+                let mut entries = Vec::new();
+                for (idx, line) in content.lines().enumerate() {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    entries.push(serde_json::from_str(line).with_context(|| {
+                        format!(
+                            "invalid Cursor trace JSON/JSONL at line {} (array parse failed: {})",
+                            idx + 1,
+                            array_err
+                        )
+                    })?);
+                }
+                entries
+            }
+        };
 
         let mut events = Vec::new();
 

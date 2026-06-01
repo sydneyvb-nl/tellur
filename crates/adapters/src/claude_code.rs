@@ -117,11 +117,17 @@ impl ClaudeCodeAdapter {
         let content =
             std::fs::read_to_string(transcript_path).context("Failed to read transcript")?;
 
-        let entries: Vec<ClaudeTranscriptEntry> = content
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .filter_map(|l| serde_json::from_str(l).ok())
-            .collect();
+        let mut entries: Vec<ClaudeTranscriptEntry> = Vec::new();
+        for (idx, line) in content.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            entries.push(
+                serde_json::from_str(line).with_context(|| {
+                    format!("invalid Claude transcript JSONL at line {}", idx + 1)
+                })?,
+            );
+        }
 
         let mut events = Vec::new();
 

@@ -32,7 +32,7 @@ Tellur/
 │   ├── core/          # Schemas, attribution engine, storage, policy, redaction,
 │   │                  #   capture pipeline, export, daemon, MCP server
 │   ├── cli/           # CLI binary (the `tellur` command)
-│   └── adapters/      # AI tool adapters (Claude Code, Aider, Cursor, Generic)
+│   └── adapters/      # AI tool adapters (Claude Code, Aider, Cursor, Codex, Copilot, Generic)
 ├── schemas/           # JSON Schema definitions
 ├── editor/            # VS Code extension (TypeScript)
 ├── dist/              # Packaging: npm wrapper, Homebrew formula
@@ -48,11 +48,21 @@ npm run compile
 ```
 
 The extension shells out to the `tellur` binary and consumes its `--json`
-output (`explain --json`, `blame --json`, `sessions --json`).
+output (`explain --json`, `blame --json`, `sessions --json`). It also uses
+`tellur hooks ingest --source <vscode|cursor> --auto-init` for save capture.
+
+Global editor setup is configured through:
+
+```bash
+tellur setup agents      # Codex, Claude Code, Cursor, and VS Code
+tellur setup cursor      # Cursor MCP/settings only
+tellur setup vscode      # VS Code settings only
+```
 
 ## Code Style
 
-- Rust: keep `cargo build` warning-free; run `cargo fmt` and `cargo clippy`.
+- Rust: keep `cargo clippy --workspace --all-targets -- -D warnings` clean; run `cargo fmt`.
+- Editor: run `npm run compile`, `npm run test:unit`, and when practical `npm run test:extension` from `editor/tellur-vscode`.
 - No `unwrap()`/`panic!` on user-reachable paths — return `anyhow::Result`.
 - Match the surrounding code's naming and comment density.
 

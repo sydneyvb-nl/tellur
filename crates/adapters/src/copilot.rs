@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tellur_core::adapter::{AdapterCapabilities, AdapterInfo, AgentAdapter};
 use tellur_core::schema::types::*;
 
@@ -33,13 +33,25 @@ impl CopilotAdapter {
     /// metadata fields teams can export from editor logs or telemetry pipelines.
     pub fn parse_metadata_file(&self, path: &Path, session_id: &str) -> Result<Vec<TraceEvent>> {
         let content = std::fs::read_to_string(path)?;
-        let entries: Vec<serde_json::Value> = serde_json::from_str(&content).unwrap_or_else(|_| {
-            content
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .filter_map(|l| serde_json::from_str(l).ok())
-                .collect()
-        });
+        let entries: Vec<serde_json::Value> = match serde_json::from_str(&content) {
+            Ok(entries) => entries,
+            Err(array_err) => {
+                let mut entries = Vec::new();
+                for (idx, line) in content.lines().enumerate() {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    entries.push(serde_json::from_str(line).with_context(|| {
+                        format!(
+                            "invalid Copilot metadata JSON/JSONL at line {} (array parse failed: {})",
+                            idx + 1,
+                            array_err
+                        )
+                    })?);
+                }
+                entries
+            }
+        };
 
         let events = entries
             .into_iter()
@@ -105,7 +117,6 @@ fn copilot_payload(entry: &serde_json::Value) -> serde_json::Value {
         .cloned();
     let mut payload = serde_json::json!({
         "tool": "github-copilot",
-        "raw": entry,
     });
     for key in [
         "language",
@@ -116,11 +127,14 @@ fn copilot_payload(entry: &serde_json::Value) -> serde_json::Value {
         "command",
     ] {
         if let Some(value) = entry.get(key).cloned() {
-            payload[key] = value;
+            payload[key] = crate::sanitize::sanitized_value(&value);
         }
     }
     if let Some(file_path) = file_path {
-        payload["file_path"] = file_path;
+        payload["file_path"] = crate::sanitize::sanitized_value(&file_path);
+    }
+    if let Some(prompt_hash) = crate::sanitize::first_prompt_hash(entry) {
+        payload["prompt_hash"] = serde_json::Value::String(prompt_hash);
     }
     payload
 }
@@ -202,5 +216,34 @@ mod tests {
         assert_eq!(events[1].event_type, EventType::FileWrite);
         assert_eq!(events[1].payload["file_path"], "src/main.ts");
         assert_eq!(events[1].payload["completion_id"], "cmp_123");
+    }
+
+    #[test]
+    fn test_parse_copilot_redacts_raw_prompt_material() {
+        let adapter = CopilotAdapter::new();
+        let dir = std::env::temp_dir().join("tellur_test_copilot_redaction");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("copilot.jsonl");
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "timestamp": "2026-05-31T11:00:00Z",
+                "type": "chat.prompt",
+                "prompt": "token=abcdefghijklmnopqrstuvwxyz123456",
+                "model": "gpt-4.1"
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let events = adapter.parse_metadata_file(&path, "sess_copilot").unwrap();
+        let payload = &events[0].payload;
+        assert!(payload.get("prompt_hash").is_some());
+        assert!(payload.get("raw").is_none());
+        assert!(
+            !serde_json::to_string(payload)
+                .unwrap()
+                .contains("abcdefghijklmnopqrstuvwxyz123456")
+        );
     }
 }

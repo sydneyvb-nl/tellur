@@ -37,8 +37,21 @@ export function activate(context: vscode.ExtensionContext) {
     // Commands
     registerCommands(context, client, sessionProvider, attributionProvider, decorationManager);
 
-    // Auto-watch
-    if (config.get('autoWatch', false)) {
+    if (config.get('captureOnSave', true)) {
+        context.subscriptions.push(
+            vscode.workspace.onDidSaveTextDocument(document => {
+                captureSavedDocument(document);
+            })
+        );
+    }
+
+    // Auto-init and auto-watch
+    if (config.get('autoInit', true)) {
+        client.ensureInitialized().catch(err => {
+            console.warn(`Tellur auto-init failed: ${err?.message || err}`);
+        });
+    }
+    if (config.get('autoWatch', true)) {
         startVSCodeWatch(config);
     }
 
@@ -56,11 +69,50 @@ export function deactivate() {
 }
 
 async function startVSCodeWatch(config: vscode.WorkspaceConfiguration): Promise<void> {
+    if (config.get('autoInit', true)) {
+        await client.ensureInitialized();
+    }
     client.startWatch({
-        agentId: config.get('vscodeAgentId', 'vscode-ai'),
-        agentName: config.get('vscodeAgentName', 'VS Code AI'),
+        agentId: config.get('vscodeAgentId', defaultEditorSource()),
+        agentName: config.get('vscodeAgentName', defaultEditorName()),
         modelId: await resolveConfiguredVSCodeModel(),
     });
+}
+
+async function captureSavedDocument(document: vscode.TextDocument): Promise<void> {
+    if (document.uri.scheme !== 'file' || document.isUntitled) {
+        return;
+    }
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+    if (!workspaceFolder) {
+        return;
+    }
+    const config = vscode.workspace.getConfiguration('tellur', document.uri);
+    const source = config.get('vscodeAgentId', defaultEditorSource());
+    try {
+        await client.ingestHook(source, {
+            event: 'PostToolUse',
+            session_id: config.get('vscodePromptSessionId', source),
+            cwd: workspaceFolder.uri.fsPath,
+            model: await resolveConfiguredVSCodeModel(),
+            tool: {
+                name: 'VSCodeSave',
+                input: {
+                    file_path: document.uri.fsPath,
+                },
+            },
+        }, workspaceFolder.uri.fsPath);
+    } catch (err: any) {
+        console.warn(`Tellur save capture failed: ${err?.message || err}`);
+    }
+}
+
+function defaultEditorSource(): string {
+    return vscode.env.appName.toLowerCase().includes('cursor') ? 'cursor' : 'vscode';
+}
+
+function defaultEditorName(): string {
+    return vscode.env.appName.toLowerCase().includes('cursor') ? 'Cursor' : 'VS Code AI';
 }
 
 async function updateStatusItem(statusItem: vscode.StatusBarItem): Promise<void> {

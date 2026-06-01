@@ -2,7 +2,6 @@
 
 import * as vscode from 'vscode';
 import { execFile } from 'child_process';
-import * as path from 'path';
 
 export interface AttributionRange {
     range_id: string;
@@ -75,6 +74,11 @@ export class TellurClient {
         return this.exec(['init']);
     }
 
+    /** Initialize Tellur when needed; init is idempotent in the CLI. */
+    async ensureInitialized(): Promise<void> {
+        await this.init();
+    }
+
     /** Explain who changed a specific line */
     async explain(filePath: string, line: number): Promise<ExplainResult | null> {
         try {
@@ -128,6 +132,15 @@ export class TellurClient {
         ]);
     }
 
+    /** Ingest a hook-shaped payload using Tellur's safe auto-init path. */
+    async ingestHook(source: string, payload: Record<string, unknown>, cwd?: string): Promise<string> {
+        return this.execWithInput(
+            ['hooks', 'ingest', '--source', source, '--auto-init'],
+            JSON.stringify(payload),
+            cwd,
+        );
+    }
+
     /** Start watching for changes */
     startWatch(options?: { agentId?: string; agentName?: string; modelId?: string }): void {
         const workDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -154,6 +167,22 @@ export class TellurClient {
         });
         this.watchProcess.on('exit', () => {
             this.watchProcess = null;
+        });
+    }
+
+    private async execWithInput(args: string[], input: string, cwd?: string): Promise<string> {
+        const workDir = cwd || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        return new Promise((resolve, reject) => {
+            const child = execFile(this.binaryPath, args, { cwd: workDir, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+                if (err) {
+                    this.outputChannel.appendLine(`ERROR: ${this.binaryPath} ${args.join(' ')}`);
+                    this.outputChannel.appendLine(stderr || err.message);
+                    reject(new Error(`tellur ${args[0]} failed: ${stderr || err.message}`));
+                } else {
+                    resolve(stdout);
+                }
+            });
+            child.stdin?.end(input);
         });
     }
 

@@ -126,10 +126,11 @@ export function registerCommands(
     context.subscriptions.push(
         vscode.commands.registerCommand('tellur.startWatch', async () => {
             const config = vscode.workspace.getConfiguration('tellur');
-            const modelId = await resolveConfiguredVSCodeModel();
-            client.startWatch({
-                agentId: config.get('vscodeAgentId', 'vscode-ai'),
-                agentName: config.get('vscodeAgentName', 'VS Code AI'),
+                const modelId = await resolveConfiguredVSCodeModel();
+                await client.ensureInitialized();
+                client.startWatch({
+                    agentId: config.get('vscodeAgentId', 'vscode-ai'),
+                    agentName: config.get('vscodeAgentName', 'VS Code AI'),
                 modelId,
             });
             vscode.window.showInformationMessage(

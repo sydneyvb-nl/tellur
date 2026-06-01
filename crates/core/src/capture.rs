@@ -67,7 +67,7 @@ impl CaptureContext {
         Self {
             session_id: session_id.into(),
             agent_id: agent_id.into(),
-            model_id: model_id.map(Into::into),
+            model_id,
             prompt_hash: None,
             origin: Origin::Ai,
             evidence_strength: EvidenceStrength::Inferred,
@@ -92,11 +92,44 @@ pub fn capture_working_changes(
     policy: Option<&PolicyEngine>,
     ctx: &CaptureContext,
 ) -> Result<CaptureSummary> {
+    capture_working_changes_inner(storage, writer, index, policy, ctx, None)
+}
+
+/// Capture only the changed files listed in `paths`. Used by tool hooks that
+/// identify the exact file touched by an agent tool call.
+pub fn capture_working_changes_for_paths(
+    storage: &RepoStorage,
+    writer: &mut EventWriter,
+    index: &TraceIndex,
+    policy: Option<&PolicyEngine>,
+    ctx: &CaptureContext,
+    paths: &[String],
+) -> Result<CaptureSummary> {
+    let normalized = paths
+        .iter()
+        .filter_map(|path| normalize_capture_path(&storage.root, path))
+        .collect::<Vec<_>>();
+    capture_working_changes_inner(storage, writer, index, policy, ctx, Some(&normalized))
+}
+
+fn capture_working_changes_inner(
+    storage: &RepoStorage,
+    writer: &mut EventWriter,
+    index: &TraceIndex,
+    policy: Option<&PolicyEngine>,
+    ctx: &CaptureContext,
+    only_paths: Option<&[String]>,
+) -> Result<CaptureSummary> {
     let engine = AttributionEngine::new();
     let mut summary = CaptureSummary::default();
 
     let changes = capture_git_diff(&storage.root)?;
     for change in changes {
+        if let Some(only_paths) = only_paths
+            && !only_paths.iter().any(|path| path == &change.path)
+        {
+            continue;
+        }
         let abs = storage.root.join(&change.path);
         if !should_track(&abs, &storage.root) {
             continue;
@@ -186,6 +219,16 @@ pub fn capture_working_changes(
     Ok(summary)
 }
 
+fn normalize_capture_path(root: &std::path::Path, path: &str) -> Option<String> {
+    let path = std::path::Path::new(path);
+    let rel = if path.is_absolute() {
+        path.strip_prefix(root).ok()?
+    } else {
+        path
+    };
+    Some(rel.to_string_lossy().replace('\\', "/"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,6 +297,47 @@ mod tests {
         assert_eq!(ctx.origin, Origin::Ai);
         assert_eq!(ctx.evidence_strength, EvidenceStrength::Inferred);
         assert_eq!(ctx.confidence, 0.6);
+    }
+
+    #[test]
+    fn test_capture_filtered_paths_only_attributes_matching_file() {
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        git(root, &["init"]);
+        git(root, &["config", "user.email", "t@t.dev"]);
+        git(root, &["config", "user.name", "T"]);
+        std::fs::write(root.join("a.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(root.join("b.rs"), "fn b() {}\n").unwrap();
+        git(root, &["add", "a.rs", "b.rs"]);
+        git(root, &["commit", "-m", "init"]);
+
+        std::fs::write(root.join("a.rs"), "fn a() {\n    let x = 1;\n}\n").unwrap();
+        std::fs::write(root.join("b.rs"), "fn b() {\n    let y = 2;\n}\n").unwrap();
+
+        let storage = RepoStorage::from_git_root(root).unwrap();
+        storage.init().unwrap();
+        let index = TraceIndex::open(&storage.index_path).unwrap();
+        let mut writer = EventWriter::new(&storage.traces_dir);
+        writer.open().unwrap();
+        let ctx = CaptureContext::recorded_ai("sess_filter", "claude-code");
+
+        let summary = capture_working_changes_for_paths(
+            &storage,
+            &mut writer,
+            &index,
+            None,
+            &ctx,
+            &["a.rs".to_string()],
+        )
+        .unwrap();
+        writer.close();
+
+        assert_eq!(summary.files_captured, 1);
+        assert!(!index.get_file_attributions("a.rs").unwrap().is_empty());
+        assert!(index.get_file_attributions("b.rs").unwrap().is_empty());
     }
 
     #[test]

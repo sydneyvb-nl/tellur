@@ -81,7 +81,7 @@ impl EventWriter {
         self.last_hash = self.find_last_hash()?;
 
         // Open today's log file
-        let log_file = self.today_log_path();
+        let log_file = self.append_log_path()?;
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -161,6 +161,45 @@ impl EventWriter {
         Ok(event)
     }
 
+    /// Append an imported event while preserving its source identity and
+    /// timestamp. The hash-chain fields are always recomputed for the local log.
+    pub fn write_imported_event(&mut self, mut event: TraceEvent) -> Result<TraceEvent> {
+        let _lock = acquire_lock(&self.log_dir)?;
+        self.last_hash = self.find_last_hash()?;
+
+        let event_type_for_hash = event.event_type.as_wire();
+        let actor_for_hash = serde_json::to_value(&event.actor)
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| "unknown".to_string());
+        let event_hash = hash_event(
+            &event.id,
+            &event.session_id,
+            &event.timestamp,
+            &event_type_for_hash,
+            &actor_for_hash,
+            &event.payload,
+            self.last_hash.as_deref(),
+        );
+
+        event.prev_hash = self.last_hash.clone();
+        event.event_hash = Some(event_hash.clone());
+
+        let log_file = self.today_log_path();
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_file)
+            .context("Failed to open imported event log file")?;
+        let line = serde_json::to_string(&event)? + "\n";
+        file.write_all(line.as_bytes())
+            .context("Failed to write imported event to log")?;
+        file.flush()?;
+
+        self.last_hash = Some(event_hash);
+        Ok(event)
+    }
+
     /// Close the writer
     pub fn close(&mut self) {
         self.current_file = None;
@@ -170,6 +209,23 @@ impl EventWriter {
     fn today_log_path(&self) -> PathBuf {
         let date = Utc::now().format("%Y-%m-%d").to_string();
         self.log_dir.join(format!("events-{}.jsonl", date))
+    }
+
+    fn append_log_path(&self) -> Result<PathBuf> {
+        let today = self.today_log_path();
+        let mut files: Vec<PathBuf> = Vec::new();
+        if self.log_dir.exists() {
+            for entry in fs::read_dir(&self.log_dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.extension().is_some_and(|e| e == "jsonl") {
+                    files.push(path);
+                }
+            }
+        }
+        files.push(today);
+        files.sort();
+        Ok(files.pop().unwrap_or_else(|| self.today_log_path()))
     }
 
     /// Find the last event hash from existing log files

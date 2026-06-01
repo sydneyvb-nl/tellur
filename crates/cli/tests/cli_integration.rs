@@ -1,10 +1,12 @@
 //! CLI integration tests — test the tellur binary end-to-end
 
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use tellur_core::schema::types::{AttributionRange, AttributionState, EvidenceStrength, Origin};
-use tellur_core::storage::{RepoStorage, TraceIndex};
+use tellur_core::schema::types::{EventActor, EventType, TraceEvent};
+use tellur_core::storage::{RepoStorage, TraceIndex, read_events};
 
 fn tellur_binary() -> PathBuf {
     if let Ok(path) = std::env::var("CARGO_BIN_EXE_tellur") {
@@ -128,6 +130,277 @@ fn test_watch_help_lists_vscode_agent_model_metadata_options() {
 }
 
 #[test]
+fn test_setup_agents_installs_user_level_codex_and_claude_hooks() {
+    let home = std::env::temp_dir().join(format!(
+        "tellur-home-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&home).unwrap();
+
+    let output = require_binary()
+        .args(["setup", "agents", "--home", home.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let claude_settings: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.join(".claude/settings.json")).unwrap())
+            .unwrap();
+    assert_hook_command(&claude_settings, "UserPromptSubmit", "claude-code");
+    assert_hook_command(&claude_settings, "PostToolUse", "claude-code");
+
+    let codex_hooks: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.join(".codex/hooks.json")).unwrap()).unwrap();
+    assert_hook_command(&codex_hooks, "UserPromptSubmit", "codex");
+    assert_hook_command(&codex_hooks, "PostToolUse", "codex");
+
+    let codex_plugin = home.join(".codex/plugins/tellur-provenance/.codex-plugin/plugin.json");
+    assert!(codex_plugin.exists());
+    let plugin_manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&codex_plugin).unwrap()).unwrap();
+    assert_eq!(plugin_manifest["skills"], "./skills/");
+    assert!(plugin_manifest.get("hooks").is_none());
+    let marketplace: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(home.join(".agents/plugins/marketplace.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        marketplace["plugins"][0]["source"]["path"],
+        "./.codex/plugins/tellur-provenance"
+    );
+    let cursor_mcp: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.join(".cursor/mcp.json")).unwrap()).unwrap();
+    assert_eq!(cursor_mcp["mcpServers"]["tellur"]["args"][0], "mcp");
+    assert!(
+        PathBuf::from(
+            cursor_mcp["mcpServers"]["tellur"]["command"]
+                .as_str()
+                .unwrap()
+        )
+        .is_absolute()
+    );
+    let cursor_settings = read_editor_settings(&home, "Cursor");
+    assert_eq!(cursor_settings["tellur.vscodeAgentId"], "cursor");
+    assert_eq!(cursor_settings["tellur.autoInit"], true);
+    assert_eq!(cursor_settings["tellur.captureOnSave"], true);
+    let vscode_settings = read_editor_settings(&home, "Code");
+    assert_eq!(vscode_settings["tellur.vscodeAgentId"], "vscode");
+    assert_eq!(vscode_settings["tellur.autoInit"], true);
+    assert_eq!(vscode_settings["tellur.captureOnSave"], true);
+
+    let status = require_binary()
+        .args(["setup", "status", "--home", home.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(status_stdout.contains("Claude Code global hooks: installed"));
+    assert!(status_stdout.contains("Codex global hooks: installed"));
+    assert!(status_stdout.contains("Codex personal plugin: installed"));
+    assert!(status_stdout.contains("Cursor global integration: installed"));
+    assert!(status_stdout.contains("VS Code global integration: installed"));
+
+    let uninstall = require_binary()
+        .args(["setup", "uninstall", "--home", home.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(uninstall.status.success());
+    let status = require_binary()
+        .args(["setup", "status", "--home", home.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(status_stdout.contains("Claude Code global hooks: missing"));
+    assert!(status_stdout.contains("Codex global hooks: missing"));
+    assert!(status_stdout.contains("Codex personal plugin: missing"));
+    assert!(status_stdout.contains("Cursor global integration: missing"));
+    assert!(status_stdout.contains("VS Code global integration: missing"));
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+fn read_editor_settings(home: &std::path::Path, app_name: &str) -> serde_json::Value {
+    #[cfg(target_os = "macos")]
+    let path = home
+        .join("Library")
+        .join("Application Support")
+        .join(app_name)
+        .join("User/settings.json");
+    #[cfg(target_os = "windows")]
+    let path = home
+        .join("AppData/Roaming")
+        .join(app_name)
+        .join("User/settings.json");
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    let path = home
+        .join(".config")
+        .join(app_name)
+        .join("User/settings.json");
+    serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+}
+
+fn assert_hook_command(config: &serde_json::Value, event: &str, source: &str) {
+    let command = config["hooks"][event][0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap();
+    assert!(command.contains(&format!(" hooks ingest --source {source} --auto-init")));
+    let exe = command
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .trim_matches('\'');
+    assert!(
+        PathBuf::from(exe).is_absolute(),
+        "hook command must use an absolute executable path: {command}"
+    );
+}
+
+#[test]
+fn test_hooks_ingest_auto_init_records_event_in_new_repo() {
+    let dir = temp_repo();
+    let mut child = require_binary()
+        .args(["hooks", "ingest", "--source", "codex", "--auto-init"])
+        .current_dir(&dir)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            serde_json::json!({
+                "session_id": "sess_auto",
+                "hook_event_name": "SessionStart",
+                "cwd": dir,
+                "model": "gpt-5-codex"
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+
+    let storage = RepoStorage::from_git_root(&dir).unwrap();
+    assert!(storage.is_initialized());
+    let index = TraceIndex::open(&storage.index_path).unwrap();
+    let events = index.get_session_events("sess_auto").unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type, EventType::SessionStart);
+    assert_eq!(events[0].payload["tool"], "codex");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_hooks_ingest_invalid_json_does_not_auto_init_repo() {
+    let dir = temp_repo();
+    let mut child = require_binary()
+        .args(["hooks", "ingest", "--source", "codex", "--auto-init"])
+        .current_dir(&dir)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"{not-json")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+
+    let storage = RepoStorage::from_git_root(&dir).unwrap();
+    assert!(!storage.is_initialized());
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_hooks_ingest_post_tool_without_file_path_does_not_capture_whole_tree() {
+    let dir = temp_repo();
+    require_binary()
+        .arg("init")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(dir.join("src/lib.rs"), "fn changed() {}\n").unwrap();
+
+    let mut child = require_binary()
+        .args(["hooks", "ingest", "--source", "codex", "--auto-init"])
+        .current_dir(&dir)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            serde_json::json!({
+                "session_id": "sess_post_no_path",
+                "event": "PostToolUse",
+                "cwd": dir,
+                "tool": { "name": "Bash", "input": { "command": "echo ok" } }
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+
+    let storage = RepoStorage::from_git_root(&dir).unwrap();
+    let events = read_events(&storage.traces_dir).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|event| event.event_type == EventType::ToolPostCall)
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| event.payload["file"] == "src/lib.rs"
+                || event.payload["file_path"] == "src/lib.rs")
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_setup_refuses_to_overwrite_invalid_existing_hook_config() {
+    let home = std::env::temp_dir().join(format!(
+        "tellur-invalid-home-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(home.join(".codex")).unwrap();
+    fs::write(home.join(".codex/hooks.json"), "{invalid").unwrap();
+
+    let output = require_binary()
+        .args(["setup", "codex", "--home", home.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        fs::read_to_string(home.join(".codex/hooks.json")).unwrap(),
+        "{invalid"
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
 fn test_event_accepts_structured_payload_json() {
     let dir = temp_repo();
     require_binary()
@@ -157,6 +430,56 @@ fn test_event_accepts_structured_payload_json() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].payload["prompt_hash"], "sha256:abc");
     assert_eq!(events[0].payload["model_id"], "openai:gpt-5");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_import_preserves_source_event_identity_and_timestamp() {
+    let dir = temp_repo();
+    require_binary()
+        .arg("init")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    let source = dir.join("events.jsonl");
+    let imported = TraceEvent {
+        schema: "tellur.event.v1".to_string(),
+        id: "evt_imported_original".to_string(),
+        session_id: "sess_imported_original".to_string(),
+        timestamp: "2026-05-30T12:34:56Z".to_string(),
+        event_type: EventType::Custom("custom.imported".to_string()),
+        actor: EventActor::Agent,
+        payload: serde_json::json!({"tool": "test", "file_path": "src/lib.rs"}),
+        redaction: None,
+        prev_hash: None,
+        event_hash: None,
+    };
+    fs::write(
+        &source,
+        format!("{}\n", serde_json::to_string(&imported).unwrap()),
+    )
+    .unwrap();
+
+    let output = require_binary()
+        .args(["import", "generic", source.to_str().unwrap()])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let storage = RepoStorage::from_git_root(&dir).unwrap();
+    let events = read_events(&storage.traces_dir).unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].id, "evt_imported_original");
+    assert_eq!(events[0].session_id, "sess_imported_original");
+    assert_eq!(events[0].timestamp, "2026-05-30T12:34:56Z");
+    assert_eq!(
+        events[0].event_type,
+        EventType::Custom("custom.imported".to_string())
+    );
+    assert!(events[0].event_hash.is_some());
 
     let _ = fs::remove_dir_all(&dir);
 }

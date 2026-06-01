@@ -54,10 +54,11 @@ Tellur is in beta. The local pipeline is functional end to end:
 capture -> attribution -> event log -> SQLite index -> CLI/editor/reports
 ```
 
-Implemented surfaces include the CLI, Claude Code hooks, importers for Cursor,
-Aider, Codex CLI, and GitHub Copilot, a local token-authenticated daemon, an MCP
-stdio server, a VS Code extension, provenance export, Git notes interop, and a
-static session replay dashboard backed by daemon data.
+Implemented surfaces include the CLI, global Codex/Claude Code hooks, Cursor
+MCP/settings, VS Code/Cursor extension capture, importers for Cursor, Aider,
+Codex CLI, and GitHub Copilot, a local token-authenticated daemon, an MCP stdio
+server, provenance export, Git notes interop, and a static session replay
+dashboard backed by daemon data.
 
 Team/server mode is not implemented yet.
 
@@ -99,10 +100,10 @@ Start capturing file changes:
 tellur watch
 ```
 
-Install Claude Code hooks for automatic capture:
+Install one-time global agent/editor integrations:
 
 ```bash
-tellur hooks install
+tellur setup agents
 ```
 
 Import activity from supported tools:
@@ -154,6 +155,10 @@ tellur notes push                   # Push refs/notes/ai to origin
 tellur notes fetch                  # Fetch refs/notes/ai from origin
 tellur daemon                       # Run local HTTP ingestion/dashboard API
 tellur mcp                          # Run MCP server over stdio
+tellur setup agents                 # Install one-time global agent/editor integrations
+tellur setup cursor                 # Install Cursor MCP/settings integration
+tellur setup vscode                 # Install VS Code extension settings
+tellur setup status                 # Check global agent integration status
 tellur gc --dry-run                 # Garbage-collect expired events
 tellur redact                       # Redact secrets from stored events
 tellur verify                       # Verify hash-chain integrity
@@ -161,19 +166,84 @@ tellur verify                       # Verify hash-chain integrity
 
 `explain`, `blame`, and `sessions` support `--json` for machine-readable output.
 
-## Supported Adapters
+## Supported Adapters And Integrations
 
-| Tool | Input | Status |
+| Tool | Mechanism | Status |
 | --- | --- | --- |
-| Claude Code | Hooks + transcript parsing | Working |
-| Cursor | Agent Trace JSON import | Working |
+| Claude Code | User/project lifecycle hooks + transcript import | Working |
+| Codex CLI/App | User lifecycle hooks, local personal plugin, JSONL import | Working |
+| Cursor IDE/CLI | Cursor MCP/settings, VS Code-compatible extension save/watch capture, JSON/JSONL import | Working |
+| VS Code/Copilot | VS Code extension auto-init, watch, save capture, explicit prompt hashing, metadata import | Working with VS Code API limits |
 | Aider | Git commit attribution import | Working |
-| Codex CLI | JSONL event stream/session transcript import | Working |
 | GitHub Copilot | Metadata JSON/JSONL import | Working |
 | Generic | CLI events, JSONL, local HTTP daemon | Working |
 
+Import adapters preserve source event IDs, source timestamps, session IDs, actor,
+event type, and payload while recomputing Tellur's local hash chain. Invalid
+non-empty JSON/JSONL lines fail the import instead of being silently skipped.
+Prompt-like fields are stored as hashes, not raw prompt text; secret-looking
+strings in retained metadata are redacted.
+
+`tellur import aider <source>` expects `<source>` to be a Git repository path.
+Other import adapters expect a file path unless the adapter-specific docs say
+otherwise.
+
 The adapter layer is pluggable, so additional tools can normalize their events
 into Tellur's schema without changing the core attribution engine.
+See [`docs/ADAPTERS.md`](docs/ADAPTERS.md) for current adapter guarantees,
+known limits, and the adoption roadmap.
+
+## One-Time Agent Setup
+
+For Codex, Claude Code, Cursor, and VS Code, Tellur supports user-level
+installation so users do not need to invoke a skill or plugin in every project:
+
+```bash
+tellur setup agents
+```
+
+This installs global hooks for Claude Code (`~/.claude/settings.json`) and Codex
+(`~/.codex/hooks.json`). It publishes a local Codex personal plugin under
+`~/.codex/plugins/tellur-provenance` with a marketplace entry in
+`~/.agents/plugins/marketplace.json` for manual workflows such as status,
+verification, and PR reporting. It also writes Cursor MCP/settings
+(`~/.cursor/mcp.json` plus Cursor user settings) and VS Code user settings so
+the Tellur extension can auto-init, watch, and capture saved files in every Git
+workspace.
+
+Global hooks call the absolute path of the installed `tellur` executable:
+
+```bash
+/absolute/path/to/tellur hooks ingest --source <codex|claude-code> --auto-init
+```
+
+When a hook runs outside a Git repository it no-ops. When it runs inside a Git
+repository without `.tellur/`, `--auto-init` creates the local Tellur storage
+with safe defaults. To disable capture for a repository, create
+`.tellur/disable`. Invalid hook payloads no-op, and tool hooks only capture
+working-tree changes when the hook payload includes a concrete file path.
+
+Use `tellur setup status` to inspect installed global integrations and
+`tellur setup uninstall` to remove Tellur-installed global hooks and the local
+Codex plugin, Cursor MCP/settings, and VS Code settings.
+
+Cursor and VS Code do not have the same documented local lifecycle hook model as
+Codex. Tellur therefore uses the durable editor surfaces they do expose:
+extension save/watch capture, Cursor MCP tools, explicit prompt hashing, Git
+policy checks, and import adapters.
+
+### Integration Mechanisms
+
+| Surface | Setup command | Files written | Runtime behavior |
+| --- | --- | --- | --- |
+| Claude Code | `tellur setup claude-code` or `tellur setup agents` | `~/.claude/settings.json` | Lifecycle hooks call `tellur hooks ingest --source claude-code --auto-init`; project hooks remain available via `tellur hooks install claude-code`. |
+| Codex CLI/App | `tellur setup codex` or `tellur setup agents` | `~/.codex/hooks.json`, `~/.codex/plugins/tellur-provenance`, `~/.agents/plugins/marketplace.json` | User hooks call `tellur hooks ingest --source codex --auto-init`; local plugin exposes manual Tellur workflows through Codex's plugin directory. |
+| Cursor | `tellur setup cursor` or `tellur setup agents` | `~/.cursor/mcp.json`, Cursor user `settings.json` | Cursor can call Tellur MCP tools; the installed Tellur extension uses auto-init, watch, and save capture with source `cursor`. |
+| VS Code | `tellur setup vscode` or `tellur setup agents` | VS Code user `settings.json` | The installed extension auto-inits Git workspaces, starts `tellur watch`, and captures saved files through safe hook ingestion with source `vscode`. |
+
+All setup commands write absolute `tellur` executable paths. Existing malformed
+JSON settings are not overwritten; setup fails so the user can repair or back up
+the file.
 
 ## Data Model
 
@@ -297,7 +367,9 @@ metadata, not the raw prompt text.
 ## Roadmap
 
 - Team/server mode for shared organizational visibility
-- More first-party adapters for emerging AI coding tools
+- More first-party adapters for emerging AI coding tools, prioritized as:
+  Gemini CLI / Google Antigravity, Windsurf/Cascade, JetBrains AI Assistant /
+  Junie, Devin, Continue, and Cline/Roo Code
 - Richer policy templates for security-sensitive repositories
 - Packaged releases for npm, Homebrew, and GitHub Releases
 

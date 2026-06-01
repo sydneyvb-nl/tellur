@@ -1,11 +1,29 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-05-31 (Git notes interop, Codex)
+**Last updated:** 2026-06-01 (global agent/editor integrations)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0
 
+> **2026-06-01 — Global agent setup.** Added one-time user-level setup for
+> Codex, Claude Code, Cursor, and VS Code: `tellur setup agents` installs global
+> hooks/settings with an absolute `tellur` executable path, generates a local
+> Codex personal plugin/marketplace entry for manual workflows, writes Cursor
+> MCP/settings and VS Code settings, and routes hook/editor payloads through
+> `tellur hooks ingest --auto-init` so new Git repositories can start capturing
+> without per-project plugin invocation. Hook ingest now ignores invalid JSON,
+> refuses malformed setup config instead of overwriting it, and never falls back
+> to whole-tree capture when a tool hook lacks a file path.
+>
+> **2026-06-01 — Adapter hardening.** Tightened adapter imports after review:
+> imported events now preserve source IDs, timestamps, session IDs, actors, and
+> event types while Tellur recomputes the local hash chain; malformed non-empty
+> JSON/JSONL lines now fail instead of being silently dropped; Codex/Copilot
+> prompt-like fields are hashed and retained metadata is sanitized; Claude Code
+> hook capture is scoped to the hook file path when available; `tellur import
+> aider <source>` now uses `<source>` as the Git repository path.
+>
 > **2026-05-31 — Git notes interop.** Added Git AI-compatible authorship notes
 > support under `refs/notes/ai`: `tellur notes export/show/import/fetch/push`
 > plus `install-config` for notes fetch/rewrite setup. Notes are a compact
@@ -35,8 +53,8 @@
 > works end-to-end, the daemon is loopback-only + token-authenticated, the MCP
 > server speaks real stdio JSON-RPC, hooks use Claude Code's real schema, and
 > two security issues (CI command injection, unauthenticated daemon) are
-> resolved. `cargo build`, `cargo clippy` (0 warnings) and `cargo test`
-> (73 tests) are green.
+> resolved. That remediation pass was verified with `cargo build`,
+> `cargo clippy` (0 warnings), and `cargo test`.
 
 ---
 
@@ -58,7 +76,7 @@ De PRD bevindt zich op een locatie die Sydney bepaalt. Als je de PRD niet hebt, 
 
 1. **Altijd `PROJECT_STATUS.md` updaten** na elke wijziging — dit is het single source of truth
 2. **Build moet groen zijn** voor je commit: `cargo build && cargo test`
-3. **Rust code** in `crates/` — TypeScript alleen in `editor/` (nog te maken)
+3. **Rust code** in `crates/` — TypeScript alleen in `editor/`
 4. **Commits** in het Engels, conventional commits format (`feat:`, `fix:`, `docs:`)
 5. **Push altijd** na commit — `git push origin main`
 6. **Als je een module afmaakt**, update dan de checklist hieronder met ✅
@@ -68,11 +86,13 @@ De PRD bevindt zich op een locatie die Sydney bepaalt. Als je de PRD niet hebt, 
 ### Build & Test
 
 ```bash
-source "$HOME/.cargo/env"  # Rust toolchain
-cd /Users/sydneyassistent/.openclaw/workspace/Tellur
-cargo build          # Alle crates compileren
-cargo test           # Alle tests draaien (35 tests)
-cargo run -p tellur-cli -- init  # CLI testen
+cargo build
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test
+cd editor/tellur-vscode
+npm run compile
+npm run test:unit
+npm run test:extension
 ```
 
 ### Structuur
@@ -87,7 +107,7 @@ Tellur/
 │   └── adapters/            ← AI tool adapters
 ├── schemas/                 ← JSON Schema definities
 ├── .github/workflows/       ← GitHub Actions
-└── editor/                  ← VS Code extension (NOG TE MAKEN)
+└── editor/                  ← VS Code/Cursor-compatible extension
 ```
 
 ---
@@ -116,11 +136,12 @@ Tellur/
 | 11 | PolicyEngine (YAML rules, sensitive paths) | 13 | ✅ Done | `crates/core/src/policy/mod.rs` |
 | 12 | AgentAdapter trait (async_trait) | 8.3 | ✅ Done | `crates/core/src/adapter/mod.rs` |
 | 13 | Built-in adapters (Claude Code, Aider, Cursor, Generic, Codex, Copilot) | 8.3 | ✅ Done | `crates/core/src/adapter/builtin.rs` + `crates/adapters/src/*` |
-| 14 | Claude Code adapter implementation | 8.1 | ✅ Done | Real Claude Code hook schema (PostToolUse/SessionStart), `tellur hooks install`, stdin payload handler `tellur hooks claude` wired to capture pipeline, transcript parse |
-| 15 | Aider adapter implementation | 8.2 | ✅ Done | Git log parser, Aider pattern detection, 2 tests |
-| 16 | Cursor adapter implementation | 8.2 | ✅ Done | JSON/JSONL trace parsing, workspace detection, 3 tests |
-| 16a | Codex CLI adapter implementation | 8.2 | ✅ Done | JSONL event stream/session transcript import via `tellur import codex <file>`, command/prompt/file-write normalization |
-| 16b | GitHub Copilot adapter implementation | 8.2 | ✅ Done | Metadata JSON/JSONL import via `tellur import copilot <file>`, accepted suggestion + prompt metadata normalization |
+| 14 | Claude Code adapter implementation | 8.1 | ✅ Done | Real Claude Code hook schema (PostToolUse/SessionStart), `tellur hooks install`, stdin payload handler `tellur hooks claude` wired to capture pipeline and scoped to hook file path when available, transcript parse |
+| 15 | Aider adapter implementation | 8.2 | ✅ Done | Git log parser, Aider pattern detection, source repo path honored by CLI import |
+| 16 | Cursor adapter implementation | 8.2 | ✅ Done | Cursor MCP/settings setup, VS Code-compatible extension capture, JSON/JSONL trace parsing, workspace detection, adapter tests |
+| 16a | Codex CLI adapter implementation | 8.2 | ✅ Done | JSONL event stream/session transcript import via `tellur import codex <file>`, command/prompt/file-write normalization, prompt hashing, strict JSONL errors |
+| 16b | GitHub Copilot adapter implementation | 8.2 | ✅ Done | Metadata JSON/JSONL import via `tellur import copilot <file>`, accepted suggestion + prompt metadata normalization, prompt hashing, no raw metadata payload |
+| 16c | Global agent/editor setup | 8.1/8.3/10/23 | ✅ Done | `tellur setup agents/status/uninstall/cursor/vscode`, user-level Codex/Claude hooks, Codex personal plugin scaffold, Cursor MCP/settings, VS Code settings, extension save capture, generic hook ingest with auto-init |
 
 ### Phase 3: CLI (PRD sectie 8.1)
 
@@ -155,7 +176,7 @@ Tellur/
 
 | # | Module | PRD Sectie | Status | Details |
 |---|--------|-----------|--------|---------|
-| 36 | VS Code extension scaffold | 10 | ✅ Done | Full extension: client, decorations, tree views, commands |
+| 36 | VS Code/Cursor-compatible extension | 10 | ✅ Done | Full extension: client, decorations, tree views, commands, auto-init, auto-watch, save capture through `hooks ingest` |
 | 37 | Inline attribution decorations | 10.1 | ✅ Done | Purple (AI) vs green (human) line decorations | |
 | 38 | Hover cards (origin, model, confidence) | 10.2 | ✅ Done | Explain command shows origin, model, confidence, session | |
 | 39 | Sidebar panel | 10.3 | ✅ Done | Sessions + Attributions tree views in activity bar | |
@@ -201,16 +222,17 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-80 tests, 0 failures, 0 clippy warnings
-- core:     60 tests (schema/event-type round-trip, glob matcher, storage,
-            hash-chain verify + reseal, index session/attribution round-trip,
-            capture pipeline end-to-end, block_ai_read, attribution, redaction,
-            policy, export, PR report, dashboard daemon endpoints)
-- adapters:  12 tests (Claude Code, Aider, Cursor, Codex, Copilot)
-- cli:       10 integration tests (version/help/init/doctor/status/sessions/verify/import codex/import copilot)
+101 Rust tests, 0 failures, 0 clippy warnings.
+- core:      65 tests (schema/event-type round-trip, glob matcher, storage,
+             hash-chain verify + reseal, index session/attribution round-trip,
+             capture pipeline end-to-end, block_ai_read, attribution, redaction,
+             policy, export, PR report, dashboard daemon endpoints)
+- adapters:  16 tests (Claude Code, Aider, Cursor, Codex, Copilot, Generic)
+- cli:       20 integration tests (version/help/init/doctor/status/sessions/verify/import/setup/hooks ingest)
+- editor:    TypeScript compile, 5 unit tests, VS Code extension integration tests
 ```
 
-Run: `cargo build && cargo test && cargo clippy --workspace -- -D warnings`.
+Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && cargo test`, then `cd editor/tellur-vscode && npm run compile && npm run test:unit && npm run test:extension`.
 
 ---
 
@@ -251,11 +273,12 @@ Run: `cargo build && cargo test && cargo clippy --workspace -- -D warnings`.
 
 1. ~~**Claude Code hook installer**~~ — ✅ Done
 2. ~~**Aider commit parser**~~ — ✅ Done  
-3. ~~**VS Code extension scaffold**~~ — ✅ Done
+3. ~~**VS Code/Cursor-compatible extension**~~ — ✅ Done
 4. ~~**Codex CLI adapter**~~ — ✅ Done
 5. ~~**GitHub Copilot adapter**~~ — ✅ Done
-6. **Team/server mode** — decide architecture after local dashboard settles
-7. **Plugin SDK** — requires stable adapter/event API
+6. **Next first-party adapters for adoption** — Gemini CLI / Google Antigravity, Windsurf/Cascade, JetBrains AI Assistant / Junie, Devin, Continue, Cline/Roo Code
+7. **Team/server mode** — decide architecture after local dashboard settles
+8. **Plugin SDK** — requires stable adapter/event API
 
 ---
 

@@ -16,9 +16,11 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use tellur_core::capture::{CaptureContext, capture_working_changes};
+use tellur_core::capture::{
+    CaptureContext, capture_working_changes, capture_working_changes_for_paths,
+};
 use tellur_core::policy::PolicyEngine;
 use tellur_core::schema::types::{Actor, AgentInfo, EventActor, ModelInfo, Session};
 use tellur_core::storage::{EventWriter, RepoStorage, TraceIndex};
@@ -186,6 +188,12 @@ enum Commands {
         #[command(subcommand)]
         action: HookActions,
     },
+
+    /// Install one-time global integrations for AI coding agents
+    Setup {
+        #[command(subcommand)]
+        action: SetupActions,
+    },
 }
 
 #[derive(Subcommand)]
@@ -263,6 +271,62 @@ enum HookActions {
     /// Internal: handle a Claude Code hook payload from stdin
     #[command(hide = true)]
     Claude,
+    /// Internal: ingest a supported agent hook payload from stdin
+    #[command(hide = true)]
+    Ingest {
+        /// Hook source: claude-code | codex
+        #[arg(long)]
+        source: String,
+        /// Initialize Tellur automatically when inside a Git repository
+        #[arg(long)]
+        auto_init: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum SetupActions {
+    /// Install global Codex, Claude Code, Cursor, and VS Code integrations
+    Agents {
+        /// Override home directory, intended for tests and portable installs
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
+    /// Install global Codex integration
+    Codex {
+        /// Override home directory, intended for tests and portable installs
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
+    /// Install global Claude Code integration
+    ClaudeCode {
+        /// Override home directory, intended for tests and portable installs
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
+    /// Install global Cursor integration
+    Cursor {
+        /// Override home directory, intended for tests and portable installs
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
+    /// Install global VS Code integration
+    Vscode {
+        /// Override home directory, intended for tests and portable installs
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
+    /// Show global integration status
+    Status {
+        /// Override home directory, intended for tests and portable installs
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
+    /// Remove global integrations installed by Tellur
+    Uninstall {
+        /// Override home directory, intended for tests and portable installs
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -340,6 +404,16 @@ async fn main() -> Result<()> {
         Commands::Hooks { action } => match action {
             HookActions::Install { tool } => cmd_hooks_install(&tool),
             HookActions::Claude => cmd_hooks_claude(),
+            HookActions::Ingest { source, auto_init } => cmd_hooks_ingest(&source, auto_init),
+        },
+        Commands::Setup { action } => match action {
+            SetupActions::Agents { home } => cmd_setup_agents(home.as_deref()),
+            SetupActions::Codex { home } => cmd_setup_codex(home.as_deref()),
+            SetupActions::ClaudeCode { home } => cmd_setup_claude_code(home.as_deref()),
+            SetupActions::Cursor { home } => cmd_setup_cursor(home.as_deref()),
+            SetupActions::Vscode { home } => cmd_setup_vscode(home.as_deref()),
+            SetupActions::Status { home } => cmd_setup_status(home.as_deref()),
+            SetupActions::Uninstall { home } => cmd_setup_uninstall(home.as_deref()),
         },
     }
 }
@@ -810,8 +884,13 @@ async fn cmd_import(adapter: &str, source: &std::path::Path) -> Result<()> {
         }
         "aider" => {
             let a = tellur_adapters::AiderAdapter::new();
-            let repo_root = std::env::current_dir()?;
-            a.parse_git_log(&repo_root, "2020-01-01")?
+            if !source.is_dir() {
+                anyhow::bail!(
+                    "Aider import source must be a git repository directory: {}",
+                    source.display()
+                );
+            }
+            a.parse_git_log(source, "2020-01-01")?
         }
         "cursor" => {
             let a = tellur_adapters::CursorAdapter::new();
@@ -848,19 +927,9 @@ async fn cmd_import(adapter: &str, source: &std::path::Path) -> Result<()> {
     writer.open()?;
     let index = TraceIndex::open(&storage.index_path)?;
     let mut count = 0u32;
-    for e in &events {
-        // Re-write through EventWriter for a proper, server-side hash chain.
-        let actor = serde_json::to_value(&e.actor)
-            .ok()
-            .and_then(|v| v.as_str().map(|s| s.to_string()))
-            .unwrap_or_else(|| "agent".to_string());
-        let event = writer.write_event(
-            &e.session_id,
-            &e.event_type.as_wire(),
-            &actor,
-            e.payload.clone(),
-            None,
-        )?;
+    for e in events {
+        // Preserve source identity/timestamps while recomputing the local hash chain.
+        let event = writer.write_imported_event(e)?;
         index.index_event(&event)?;
         count += 1;
     }
@@ -1687,6 +1756,780 @@ fn sanitize_id(value: &str) -> String {
         .collect()
 }
 
+const TELLUR_CODEX_HOOK_SOURCE: &str = "codex";
+const TELLUR_CLAUDE_HOOK_SOURCE: &str = "claude-code";
+const TELLUR_CURSOR_HOOK_SOURCE: &str = "cursor";
+const TELLUR_VSCODE_HOOK_SOURCE: &str = "vscode";
+
+fn home_dir_override(home: Option<&Path>) -> Result<PathBuf> {
+    if let Some(home) = home {
+        return Ok(home.to_path_buf());
+    }
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .context("HOME is not set; pass --home explicitly")
+}
+
+fn cmd_setup_agents(home: Option<&Path>) -> Result<()> {
+    let home = home_dir_override(home)?;
+    let tellur_exe = tellur_executable_path()?;
+    let codex_command = tellur_hook_command(TELLUR_CODEX_HOOK_SOURCE)?;
+    let claude_command = tellur_hook_command(TELLUR_CLAUDE_HOOK_SOURCE)?;
+    install_claude_global_hooks(&home, &claude_command)?;
+    install_codex_global_hooks(&home, &codex_command)?;
+    install_codex_personal_plugin(&home, &codex_command)?;
+    install_cursor_integration(&home, &tellur_exe)?;
+    install_vscode_integration(&home, &tellur_exe)?;
+    println!("✓ Installed Tellur global integrations for Claude Code, Codex, Cursor, and VS Code");
+    println!(
+        "  Claude Code hooks: {}",
+        home.join(".claude/settings.json").display()
+    );
+    println!(
+        "  Codex hooks: {}",
+        home.join(".codex/hooks.json").display()
+    );
+    println!(
+        "  Codex plugin marketplace: {}",
+        home.join(".agents/plugins/marketplace.json").display()
+    );
+    println!(
+        "  Cursor MCP/settings: {}",
+        cursor_mcp_path(&home).display()
+    );
+    println!(
+        "  VS Code settings: {}",
+        vscode_user_settings_path(&home).display()
+    );
+    println!("  Restart Codex/Claude Code and review/trust hooks once when prompted.");
+    Ok(())
+}
+
+fn cmd_setup_codex(home: Option<&Path>) -> Result<()> {
+    let home = home_dir_override(home)?;
+    let codex_command = tellur_hook_command(TELLUR_CODEX_HOOK_SOURCE)?;
+    install_codex_global_hooks(&home, &codex_command)?;
+    install_codex_personal_plugin(&home, &codex_command)?;
+    println!("✓ Installed Tellur global Codex integration");
+    println!("  Hooks: {}", home.join(".codex/hooks.json").display());
+    println!(
+        "  Plugin marketplace: {}",
+        home.join(".agents/plugins/marketplace.json").display()
+    );
+    Ok(())
+}
+
+fn cmd_setup_claude_code(home: Option<&Path>) -> Result<()> {
+    let home = home_dir_override(home)?;
+    let claude_command = tellur_hook_command(TELLUR_CLAUDE_HOOK_SOURCE)?;
+    install_claude_global_hooks(&home, &claude_command)?;
+    println!("✓ Installed Tellur global Claude Code integration");
+    println!("  Hooks: {}", home.join(".claude/settings.json").display());
+    Ok(())
+}
+
+fn cmd_setup_cursor(home: Option<&Path>) -> Result<()> {
+    let home = home_dir_override(home)?;
+    let tellur_exe = tellur_executable_path()?;
+    install_cursor_integration(&home, &tellur_exe)?;
+    println!("✓ Installed Tellur global Cursor integration");
+    println!("  MCP: {}", cursor_mcp_path(&home).display());
+    println!("  Settings: {}", cursor_user_settings_path(&home).display());
+    Ok(())
+}
+
+fn cmd_setup_vscode(home: Option<&Path>) -> Result<()> {
+    let home = home_dir_override(home)?;
+    let tellur_exe = tellur_executable_path()?;
+    install_vscode_integration(&home, &tellur_exe)?;
+    println!("✓ Installed Tellur global VS Code integration");
+    println!("  Settings: {}", vscode_user_settings_path(&home).display());
+    Ok(())
+}
+
+fn cmd_setup_status(home: Option<&Path>) -> Result<()> {
+    let home = home_dir_override(home)?;
+    let claude = hook_config_has_tellur_source(
+        &home.join(".claude/settings.json"),
+        TELLUR_CLAUDE_HOOK_SOURCE,
+    );
+    let codex =
+        hook_config_has_tellur_source(&home.join(".codex/hooks.json"), TELLUR_CODEX_HOOK_SOURCE);
+    let plugin = codex_plugin_status(&home);
+    let cursor = cursor_integration_status(&home);
+    let vscode = vscode_integration_status(&home);
+    println!(
+        "Claude Code global hooks: {}",
+        if claude { "installed" } else { "missing" }
+    );
+    println!(
+        "Codex global hooks: {}",
+        if codex { "installed" } else { "missing" }
+    );
+    println!(
+        "Codex personal plugin: {}",
+        if plugin { "installed" } else { "missing" }
+    );
+    println!(
+        "Cursor global integration: {}",
+        if cursor { "installed" } else { "missing" }
+    );
+    println!(
+        "VS Code global integration: {}",
+        if vscode { "installed" } else { "missing" }
+    );
+    Ok(())
+}
+
+fn cmd_setup_uninstall(home: Option<&Path>) -> Result<()> {
+    let home = home_dir_override(home)?;
+    remove_hook_command_from_json(
+        &home.join(".claude/settings.json"),
+        TELLUR_CLAUDE_HOOK_SOURCE,
+    )?;
+    remove_hook_command_from_json(&home.join(".codex/hooks.json"), TELLUR_CODEX_HOOK_SOURCE)?;
+    let _ = std::fs::remove_dir_all(home.join(".codex/plugins/tellur-provenance"));
+    remove_codex_marketplace_entry(&home)?;
+    uninstall_cursor_integration(&home)?;
+    uninstall_vscode_integration(&home)?;
+    println!("✓ Removed Tellur global integrations where present");
+    Ok(())
+}
+
+fn tellur_executable_path() -> Result<PathBuf> {
+    std::env::current_exe().context("failed to resolve tellur executable path")
+}
+
+fn tellur_hook_command(source: &str) -> Result<String> {
+    let exe = tellur_executable_path()?;
+    Ok(format!(
+        "{} hooks ingest --source {} --auto-init",
+        shell_quote(&exe.to_string_lossy()),
+        source
+    ))
+}
+
+fn shell_quote(value: &str) -> String {
+    if value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-'))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
+fn hook_config_has_tellur_source(path: &Path, source: &str) -> bool {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return false;
+    };
+    value
+        .get("hooks")
+        .and_then(|hooks| hooks.as_object())
+        .is_some_and(|hooks| {
+            hooks.values().any(|entries| {
+                entries.as_array().is_some_and(|entries| {
+                    entries.iter().any(|entry| {
+                        entry
+                            .get("hooks")
+                            .and_then(|hooks| hooks.as_array())
+                            .is_some_and(|handlers| {
+                                handlers.iter().any(|handler| {
+                                    hook_command_matches_source(handler, source)
+                                        && hook_command_executable_exists(handler)
+                                })
+                            })
+                    })
+                })
+            })
+        })
+}
+
+fn hook_command_matches_source(handler: &serde_json::Value, source: &str) -> bool {
+    handler
+        .get("command")
+        .and_then(|command| command.as_str())
+        .is_some_and(|command| {
+            command.contains("hooks ingest")
+                && command.contains("--auto-init")
+                && command.contains(&format!("--source {}", source))
+        })
+}
+
+fn hook_command_executable_exists(handler: &serde_json::Value) -> bool {
+    let Some(command) = handler.get("command").and_then(|command| command.as_str()) else {
+        return false;
+    };
+    command_executable_path(command).is_some_and(|path| path.exists())
+}
+
+fn command_executable_path(command: &str) -> Option<PathBuf> {
+    let command = command.trim_start();
+    if let Some(rest) = command.strip_prefix('\'') {
+        let mut parsed = String::new();
+        let mut chars = rest.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\'' {
+                break;
+            }
+            if ch == '\\' && chars.peek() == Some(&'\'') {
+                let _ = chars.next();
+                parsed.push('\'');
+            } else {
+                parsed.push(ch);
+            }
+        }
+        return Some(PathBuf::from(parsed));
+    }
+    command
+        .split_whitespace()
+        .next()
+        .filter(|part| part.starts_with('/'))
+        .map(PathBuf::from)
+}
+
+fn codex_plugin_status(home: &Path) -> bool {
+    let plugin_manifest = home.join(".codex/plugins/tellur-provenance/.codex-plugin/plugin.json");
+    let hooks = home.join(".codex/plugins/tellur-provenance/hooks/hooks.json");
+    let marketplace = home.join(".agents/plugins/marketplace.json");
+    plugin_manifest.exists()
+        && hooks.exists()
+        && marketplace_plugin_path(&marketplace)
+            .as_deref()
+            .is_some_and(|path| path == "./.codex/plugins/tellur-provenance")
+}
+
+fn marketplace_plugin_path(path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&content).ok()?;
+    value
+        .get("plugins")?
+        .as_array()?
+        .iter()
+        .find(|plugin| {
+            plugin.get("name").and_then(|name| name.as_str()) == Some("tellur-provenance")
+        })
+        .and_then(|plugin| plugin.get("source"))
+        .and_then(|source| source.get("path"))
+        .and_then(|path| path.as_str())
+        .map(ToString::to_string)
+}
+
+fn cursor_mcp_path(home: &Path) -> PathBuf {
+    home.join(".cursor/mcp.json")
+}
+
+fn cursor_user_settings_path(home: &Path) -> PathBuf {
+    editor_user_settings_path(home, "Cursor")
+}
+
+fn vscode_user_settings_path(home: &Path) -> PathBuf {
+    editor_user_settings_path(home, "Code")
+}
+
+fn editor_user_settings_path(home: &Path, app_name: &str) -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        home.join("Library")
+            .join("Application Support")
+            .join(app_name)
+            .join("User/settings.json")
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var("APPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| home.join("AppData/Roaming"))
+            .join(app_name)
+            .join("User/settings.json")
+    }
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        let config_dir = match app_name {
+            "Code" => "Code",
+            "Cursor" => "Cursor",
+            other => other,
+        };
+        home.join(".config")
+            .join(config_dir)
+            .join("User/settings.json")
+    }
+}
+
+fn install_cursor_integration(home: &Path, tellur_exe: &Path) -> Result<()> {
+    install_editor_settings(
+        &cursor_user_settings_path(home),
+        tellur_exe,
+        TELLUR_CURSOR_HOOK_SOURCE,
+        "Cursor",
+    )?;
+    install_cursor_mcp(home, tellur_exe)?;
+    Ok(())
+}
+
+fn install_vscode_integration(home: &Path, tellur_exe: &Path) -> Result<()> {
+    install_editor_settings(
+        &vscode_user_settings_path(home),
+        tellur_exe,
+        TELLUR_VSCODE_HOOK_SOURCE,
+        "VS Code AI",
+    )
+}
+
+fn install_editor_settings(
+    path: &Path,
+    tellur_exe: &Path,
+    agent_id: &str,
+    agent_name: &str,
+) -> Result<()> {
+    let mut settings = read_json_object_or_empty(path)?;
+    settings.insert(
+        "tellur.tellurPath".to_string(),
+        serde_json::Value::String(tellur_exe.to_string_lossy().to_string()),
+    );
+    settings.insert("tellur.autoInit".to_string(), serde_json::json!(true));
+    settings.insert("tellur.autoWatch".to_string(), serde_json::json!(true));
+    settings.insert("tellur.captureOnSave".to_string(), serde_json::json!(true));
+    settings.insert(
+        "tellur.vscodeAgentId".to_string(),
+        serde_json::Value::String(agent_id.to_string()),
+    );
+    settings.insert(
+        "tellur.vscodeAgentName".to_string(),
+        serde_json::Value::String(agent_name.to_string()),
+    );
+    write_json_object(path, settings)
+}
+
+fn install_cursor_mcp(home: &Path, tellur_exe: &Path) -> Result<()> {
+    let path = cursor_mcp_path(home);
+    let mut config = read_json_object_or_empty(&path)?;
+    let servers = config
+        .entry("mcpServers".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !servers.is_object() {
+        *servers = serde_json::json!({});
+    }
+    servers.as_object_mut().unwrap().insert(
+        "tellur".to_string(),
+        serde_json::json!({
+            "command": tellur_exe.to_string_lossy(),
+            "args": ["mcp"]
+        }),
+    );
+    write_json_object(&path, config)
+}
+
+fn read_json_object_or_empty(path: &Path) -> Result<serde_json::Map<String, serde_json::Value>> {
+    if !path.exists() {
+        return Ok(serde_json::Map::new());
+    }
+    let content = std::fs::read_to_string(path)?;
+    let value = serde_json::from_str::<serde_json::Value>(&content)
+        .with_context(|| format!("invalid JSON in {}; refusing to overwrite", path.display()))?;
+    value
+        .as_object()
+        .cloned()
+        .with_context(|| format!("{} must contain a JSON object", path.display()))
+}
+
+fn write_json_object(
+    path: &Path,
+    object: serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(
+        path,
+        serde_json::to_string_pretty(&serde_json::Value::Object(object))?,
+    )?;
+    Ok(())
+}
+
+fn cursor_integration_status(home: &Path) -> bool {
+    editor_settings_status(&cursor_user_settings_path(home), TELLUR_CURSOR_HOOK_SOURCE)
+        && cursor_mcp_status(home)
+}
+
+fn vscode_integration_status(home: &Path) -> bool {
+    editor_settings_status(&vscode_user_settings_path(home), TELLUR_VSCODE_HOOK_SOURCE)
+}
+
+fn editor_settings_status(path: &Path, agent_id: &str) -> bool {
+    let Ok(settings) = read_json_object_or_empty(path) else {
+        return false;
+    };
+    let Some(tellur_path) = settings.get("tellur.tellurPath").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    Path::new(tellur_path).exists()
+        && settings
+            .get("tellur.autoInit")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        && settings
+            .get("tellur.captureOnSave")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        && settings
+            .get("tellur.vscodeAgentId")
+            .and_then(|v| v.as_str())
+            == Some(agent_id)
+}
+
+fn cursor_mcp_status(home: &Path) -> bool {
+    let Ok(config) = read_json_object_or_empty(&cursor_mcp_path(home)) else {
+        return false;
+    };
+    let Some(server) = config
+        .get("mcpServers")
+        .and_then(|v| v.get("tellur"))
+        .and_then(|v| v.as_object())
+    else {
+        return false;
+    };
+    let Some(command) = server.get("command").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    Path::new(command).exists()
+        && server
+            .get("args")
+            .and_then(|v| v.as_array())
+            .is_some_and(|args| args.iter().any(|arg| arg.as_str() == Some("mcp")))
+}
+
+fn uninstall_cursor_integration(home: &Path) -> Result<()> {
+    remove_editor_settings(&cursor_user_settings_path(home))?;
+    remove_cursor_mcp(home)
+}
+
+fn uninstall_vscode_integration(home: &Path) -> Result<()> {
+    remove_editor_settings(&vscode_user_settings_path(home))
+}
+
+fn remove_editor_settings(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut settings = read_json_object_or_empty(path)?;
+    for key in [
+        "tellur.tellurPath",
+        "tellur.autoInit",
+        "tellur.autoWatch",
+        "tellur.captureOnSave",
+        "tellur.vscodeAgentId",
+        "tellur.vscodeAgentName",
+        "tellur.vscodeModelId",
+        "tellur.vscodePromptSessionId",
+    ] {
+        settings.remove(key);
+    }
+    write_json_object(path, settings)
+}
+
+fn remove_cursor_mcp(home: &Path) -> Result<()> {
+    let path = cursor_mcp_path(home);
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut config = read_json_object_or_empty(&path)?;
+    if let Some(servers) = config.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
+        servers.remove("tellur");
+    }
+    write_json_object(&path, config)
+}
+
+fn install_claude_global_hooks(home: &Path, command: &str) -> Result<()> {
+    let path = home.join(".claude/settings.json");
+    install_hooks_json(&path, command, false)
+}
+
+fn install_codex_global_hooks(home: &Path, command: &str) -> Result<()> {
+    let path = home.join(".codex/hooks.json");
+    install_hooks_json(&path, command, true)
+}
+
+fn install_hooks_json(path: &Path, command: &str, include_codex_matchers: bool) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut settings = if path.exists() {
+        let content = std::fs::read_to_string(path)?;
+        serde_json::from_str::<serde_json::Value>(&content)
+            .with_context(|| format!("invalid JSON in {}; refusing to overwrite", path.display()))?
+    } else {
+        serde_json::json!({})
+    };
+    if !settings
+        .get("hooks")
+        .map(|hooks| hooks.is_object())
+        .unwrap_or(false)
+    {
+        settings["hooks"] = serde_json::json!({});
+    }
+    let hooks = settings["hooks"].as_object_mut().unwrap();
+    merge_setup_hook(
+        hooks,
+        "SessionStart",
+        Some("startup|resume|clear|compact"),
+        command,
+    );
+    merge_setup_hook(hooks, "UserPromptSubmit", None, command);
+    merge_setup_hook(hooks, "Stop", None, command);
+    if include_codex_matchers {
+        merge_setup_hook(
+            hooks,
+            "PreToolUse",
+            Some("Bash|apply_patch|Edit|Write"),
+            command,
+        );
+        merge_setup_hook(
+            hooks,
+            "PostToolUse",
+            Some("Bash|apply_patch|Edit|Write"),
+            command,
+        );
+    } else {
+        merge_setup_hook(
+            hooks,
+            "PreToolUse",
+            Some("Bash|Write|Edit|MultiEdit"),
+            command,
+        );
+        merge_setup_hook(
+            hooks,
+            "PostToolUse",
+            Some("Bash|Write|Edit|MultiEdit"),
+            command,
+        );
+    }
+    std::fs::write(path, serde_json::to_string_pretty(&settings)?)?;
+    Ok(())
+}
+
+fn merge_setup_hook(
+    hooks: &mut serde_json::Map<String, serde_json::Value>,
+    event: &str,
+    matcher: Option<&str>,
+    command: &str,
+) {
+    let arr = hooks
+        .entry(event.to_string())
+        .or_insert_with(|| serde_json::json!([]));
+    if !arr.is_array() {
+        *arr = serde_json::json!([]);
+    }
+    let already = arr.as_array().is_some_and(|items| {
+        items.iter().any(|item| {
+            item.get("hooks")
+                .and_then(|h| h.as_array())
+                .is_some_and(|hs| {
+                    hs.iter()
+                        .any(|h| h.get("command").and_then(|c| c.as_str()) == Some(command))
+                })
+        })
+    });
+    if already {
+        return;
+    }
+    let mut entry = serde_json::json!({
+        "hooks": [
+            {
+                "type": "command",
+                "command": command,
+                "timeout": 30,
+                "statusMessage": "Recording Tellur provenance"
+            }
+        ]
+    });
+    if let Some(matcher) = matcher {
+        entry["matcher"] = serde_json::Value::String(matcher.to_string());
+    }
+    arr.as_array_mut().unwrap().push(entry);
+}
+
+fn remove_hook_command_from_json(path: &Path, source: &str) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let content = std::fs::read_to_string(path)?;
+    let mut value = serde_json::from_str::<serde_json::Value>(&content)
+        .with_context(|| format!("invalid JSON in {}; refusing to overwrite", path.display()))?;
+    if let Some(hooks) = value.get_mut("hooks").and_then(|h| h.as_object_mut()) {
+        for entries in hooks.values_mut() {
+            if let Some(arr) = entries.as_array_mut() {
+                arr.retain(|entry| {
+                    !entry
+                        .get("hooks")
+                        .and_then(|h| h.as_array())
+                        .is_some_and(|hs| hs.iter().any(|h| hook_command_matches_source(h, source)))
+                });
+            }
+        }
+    }
+    std::fs::write(path, serde_json::to_string_pretty(&value)?)?;
+    Ok(())
+}
+
+fn install_codex_personal_plugin(home: &Path, command: &str) -> Result<()> {
+    let plugin_root = home.join(".codex/plugins/tellur-provenance");
+    std::fs::create_dir_all(plugin_root.join(".codex-plugin"))?;
+    std::fs::create_dir_all(plugin_root.join("skills/tellur-provenance"))?;
+    std::fs::create_dir_all(plugin_root.join("hooks"))?;
+
+    std::fs::write(
+        plugin_root.join(".codex-plugin/plugin.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "name": "tellur-provenance",
+            "version": env!("CARGO_PKG_VERSION"),
+            "description": "Tellur AI provenance workflows for Codex",
+            "skills": "./skills/"
+        }))?,
+    )?;
+    std::fs::write(
+        plugin_root.join("skills/tellur-provenance/SKILL.md"),
+        r#"---
+name: tellur-provenance
+description: Use Tellur to inspect AI provenance, verify event integrity, and generate PR provenance reports.
+---
+
+Use the local `tellur` CLI for provenance workflows:
+
+- `tellur status`
+- `tellur sessions`
+- `tellur verify`
+- `tellur pr-report --base main`
+
+Do not store raw prompts. Tellur records prompt hashes and sanitized metadata.
+"#,
+    )?;
+    let hooks = tellur_hooks_json(command, true);
+    std::fs::write(
+        plugin_root.join("hooks/hooks.json"),
+        serde_json::to_string_pretty(&hooks)?,
+    )?;
+
+    let marketplace_path = home.join(".agents/plugins/marketplace.json");
+    if let Some(parent) = marketplace_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut marketplace = if marketplace_path.exists() {
+        let content = std::fs::read_to_string(&marketplace_path)?;
+        serde_json::from_str::<serde_json::Value>(&content).with_context(|| {
+            format!(
+                "invalid JSON in {}; refusing to overwrite",
+                marketplace_path.display()
+            )
+        })?
+    } else {
+        serde_json::json!({
+            "name": "tellur-local",
+            "interface": { "displayName": "Tellur Local" },
+            "plugins": []
+        })
+    };
+    marketplace["name"] = serde_json::json!("tellur-local");
+    marketplace["interface"] = serde_json::json!({ "displayName": "Tellur Local" });
+    if !marketplace
+        .get("plugins")
+        .map(|plugins| plugins.is_array())
+        .unwrap_or(false)
+    {
+        marketplace["plugins"] = serde_json::json!([]);
+    }
+    let plugins = marketplace["plugins"].as_array_mut().unwrap();
+    plugins.retain(|p| p.get("name").and_then(|n| n.as_str()) != Some("tellur-provenance"));
+    plugins.push(serde_json::json!({
+        "name": "tellur-provenance",
+        "source": {
+            "source": "local",
+            "path": "./.codex/plugins/tellur-provenance"
+        },
+        "policy": {
+            "installation": "AVAILABLE",
+            "authentication": "ON_INSTALL"
+        },
+        "category": "Productivity"
+    }));
+    std::fs::write(
+        marketplace_path,
+        serde_json::to_string_pretty(&marketplace)?,
+    )?;
+    Ok(())
+}
+
+fn tellur_hooks_json(command: &str, codex: bool) -> serde_json::Value {
+    let mut value = serde_json::json!({ "hooks": {} });
+    let hooks = value["hooks"].as_object_mut().unwrap();
+    merge_setup_hook(
+        hooks,
+        "SessionStart",
+        Some("startup|resume|clear|compact"),
+        command,
+    );
+    merge_setup_hook(hooks, "UserPromptSubmit", None, command);
+    merge_setup_hook(hooks, "Stop", None, command);
+    if codex {
+        merge_setup_hook(
+            hooks,
+            "PreToolUse",
+            Some("Bash|apply_patch|Edit|Write"),
+            command,
+        );
+        merge_setup_hook(
+            hooks,
+            "PostToolUse",
+            Some("Bash|apply_patch|Edit|Write"),
+            command,
+        );
+    } else {
+        merge_setup_hook(
+            hooks,
+            "PreToolUse",
+            Some("Bash|Write|Edit|MultiEdit"),
+            command,
+        );
+        merge_setup_hook(
+            hooks,
+            "PostToolUse",
+            Some("Bash|Write|Edit|MultiEdit"),
+            command,
+        );
+    }
+    value
+}
+
+fn remove_codex_marketplace_entry(home: &Path) -> Result<()> {
+    let marketplace_path = home.join(".agents/plugins/marketplace.json");
+    if !marketplace_path.exists() {
+        return Ok(());
+    }
+    let content = std::fs::read_to_string(&marketplace_path)?;
+    let mut marketplace =
+        serde_json::from_str::<serde_json::Value>(&content).with_context(|| {
+            format!(
+                "invalid JSON in {}; refusing to overwrite",
+                marketplace_path.display()
+            )
+        })?;
+    if let Some(plugins) = marketplace
+        .get_mut("plugins")
+        .and_then(|p| p.as_array_mut())
+    {
+        plugins.retain(|p| p.get("name").and_then(|n| n.as_str()) != Some("tellur-provenance"));
+    }
+    std::fs::write(
+        marketplace_path,
+        serde_json::to_string_pretty(&marketplace)?,
+    )?;
+    Ok(())
+}
+
 fn cmd_hooks_install(tool: &str) -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
@@ -1750,20 +2593,398 @@ fn cmd_hooks_claude() -> Result<()> {
     writer.open()?;
 
     if payload.hook_event_name.as_deref() == Some("SessionStart") {
-        writer.write_event(
+        let event = writer.write_event(
             &session_id,
             "session.start",
             "agent",
             serde_json::json!({"tool": "claude-code"}),
             None,
         )?;
+        index.index_event(&event)?;
         writer.close();
         return Ok(());
     }
 
     let policy = load_policy(&storage);
     let ctx = CaptureContext::recorded_ai(&session_id, "claude-code");
-    let _ = capture_working_changes(&storage, &mut writer, &index, policy.as_ref(), &ctx)?;
+    if let Some(file_path) = payload.file_path() {
+        let _ = capture_working_changes_for_paths(
+            &storage,
+            &mut writer,
+            &index,
+            policy.as_ref(),
+            &ctx,
+            &[file_path],
+        )?;
+    }
     writer.close();
     Ok(())
+}
+
+#[derive(Debug, Default)]
+struct AgentHookPayload {
+    session_id: Option<String>,
+    hook_event_name: Option<String>,
+    tool_name: Option<String>,
+    tool_input: Option<serde_json::Value>,
+    cwd: Option<String>,
+    model: Option<String>,
+    prompt: Option<String>,
+    message: Option<String>,
+    raw: serde_json::Value,
+}
+
+impl AgentHookPayload {
+    fn parse(input: &str) -> Result<Self> {
+        let raw = serde_json::from_str::<serde_json::Value>(input).context("invalid hook JSON")?;
+        let tool_input = first_object_value(
+            &raw,
+            &[
+                &["tool_input"],
+                &["toolInput"],
+                &["input"],
+                &["tool", "input"],
+                &["tool_use", "input"],
+                &["toolUse", "input"],
+            ],
+        )
+        .cloned();
+        Ok(Self {
+            session_id: first_string(
+                &raw,
+                &[
+                    &["session_id"],
+                    &["sessionId"],
+                    &["session", "id"],
+                    &["conversation_id"],
+                    &["conversationId"],
+                ],
+            )
+            .map(ToString::to_string),
+            hook_event_name: first_string(
+                &raw,
+                &[
+                    &["hook_event_name"],
+                    &["hookEventName"],
+                    &["event_name"],
+                    &["eventName"],
+                    &["event"],
+                    &["type"],
+                ],
+            )
+            .map(ToString::to_string),
+            tool_name: first_string(
+                &raw,
+                &[
+                    &["tool_name"],
+                    &["toolName"],
+                    &["tool", "name"],
+                    &["tool"],
+                    &["name"],
+                ],
+            )
+            .map(ToString::to_string),
+            tool_input,
+            cwd: first_string(&raw, &[&["cwd"], &["working_dir"], &["workingDir"]])
+                .map(ToString::to_string),
+            model: first_string(&raw, &[&["model"], &["model_id"], &["modelId"]])
+                .map(ToString::to_string),
+            prompt: first_string(
+                &raw,
+                &[
+                    &["prompt"],
+                    &["user_prompt"],
+                    &["userPrompt"],
+                    &["input", "prompt"],
+                    &["message", "content"],
+                ],
+            )
+            .map(ToString::to_string),
+            message: first_string(&raw, &[&["message"]]).map(ToString::to_string),
+            raw,
+        })
+    }
+
+    fn event_name(&self) -> Option<String> {
+        self.hook_event_name.clone()
+    }
+
+    fn file_path(&self) -> Option<String> {
+        self.tool_input
+            .as_ref()
+            .and_then(|v| find_first_string_key(v, &["file_path", "filePath", "path"], 4))
+            .or_else(|| {
+                first_string(
+                    &self.raw,
+                    &[
+                        &["file_path"],
+                        &["filePath"],
+                        &["tool", "file_path"],
+                        &["tool", "filePath"],
+                        &["tool_use", "file_path"],
+                        &["toolUse", "filePath"],
+                    ],
+                )
+            })
+            .map(ToString::to_string)
+    }
+
+    fn command(&self) -> Option<String> {
+        self.tool_input
+            .as_ref()
+            .and_then(|v| find_first_string_key(v, &["command", "cmd"], 3))
+            .or_else(|| first_string(&self.raw, &[&["command"], &["cmd"]]))
+            .map(ToString::to_string)
+    }
+
+    fn prompt_text(&self) -> Option<&str> {
+        self.prompt.as_deref().or(self.message.as_deref())
+    }
+}
+
+fn first_object_value<'a>(
+    value: &'a serde_json::Value,
+    paths: &[&[&str]],
+) -> Option<&'a serde_json::Value> {
+    paths
+        .iter()
+        .filter_map(|path| json_path(value, path))
+        .find(|value| value.is_object())
+}
+
+fn first_string<'a>(value: &'a serde_json::Value, paths: &[&[&str]]) -> Option<&'a str> {
+    paths
+        .iter()
+        .filter_map(|path| json_path(value, path))
+        .find_map(|value| value.as_str())
+}
+
+fn json_path<'a>(mut value: &'a serde_json::Value, path: &[&str]) -> Option<&'a serde_json::Value> {
+    for key in path {
+        value = value.get(*key)?;
+    }
+    Some(value)
+}
+
+fn find_first_string_key<'a>(
+    value: &'a serde_json::Value,
+    keys: &[&str],
+    max_depth: usize,
+) -> Option<&'a str> {
+    if max_depth == 0 {
+        return None;
+    }
+    match value {
+        serde_json::Value::Object(map) => {
+            for key in keys {
+                if let Some(found) = map.get(*key).and_then(|value| value.as_str()) {
+                    return Some(found);
+                }
+            }
+            map.values()
+                .find_map(|value| find_first_string_key(value, keys, max_depth - 1))
+        }
+        serde_json::Value::Array(items) => items
+            .iter()
+            .find_map(|value| find_first_string_key(value, keys, max_depth - 1)),
+        _ => None,
+    }
+}
+
+/// Generic hook ingestion entrypoint used by user-level Codex and Claude Code
+/// hooks. It is deliberately no-op friendly so global hooks can be installed
+/// once and safely run in unrelated directories.
+fn cmd_hooks_ingest(source: &str, auto_init: bool) -> Result<()> {
+    use std::io::Read;
+
+    let mut input = String::new();
+    let _ = std::io::stdin().read_to_string(&mut input);
+    let payload = match AgentHookPayload::parse(&input) {
+        Ok(payload) => payload,
+        Err(err) => {
+            eprintln!("tellur hook ingest ignored invalid payload: {err:#}");
+            return Ok(());
+        }
+    };
+
+    if let Some(cwd) = payload.cwd.as_deref() {
+        let _ = std::env::set_current_dir(cwd);
+    }
+
+    let storage = match RepoStorage::discover() {
+        Ok(storage) => storage,
+        Err(_) => return Ok(()),
+    };
+    if storage.tellur_dir.join("disable").exists() {
+        return Ok(());
+    }
+    if !storage.is_initialized() {
+        if auto_init {
+            storage.init()?;
+        } else {
+            return Ok(());
+        }
+    }
+
+    let session_id = payload
+        .session_id
+        .clone()
+        .unwrap_or_else(tellur_core::schema::ids::generate_session_id);
+    let source = normalize_hook_source(source);
+    let agent_name = match source {
+        "codex" => "Codex",
+        "claude-code" => "Claude Code",
+        other => other,
+    };
+
+    let index = TraceIndex::open(&storage.index_path)?;
+    let repo_id = tellur_core::schema::ids::hash_content(&storage.root.to_string_lossy());
+    let mut session = Session::new(
+        repo_id,
+        current_actor(),
+        AgentInfo {
+            id: source.to_string(),
+            name: agent_name.to_string(),
+            version: None,
+        },
+    );
+    session.id = session_id.clone();
+    if let Some(model) = payload.model.as_deref() {
+        session.model = Some(ModelInfo {
+            provider: source.to_string(),
+            name: model.to_string(),
+            version: None,
+        });
+    }
+    index.index_session(&session)?;
+
+    let mut writer = EventWriter::new(&storage.traces_dir);
+    writer.open()?;
+    let hook_event_owned = payload
+        .event_name()
+        .unwrap_or_else(|| "unknown".to_string());
+    let hook_event = hook_event_owned.as_str();
+    match hook_event {
+        "SessionStart" => {
+            let event = writer.write_event(
+                &session_id,
+                "session.start",
+                "agent",
+                serde_json::json!({
+                    "tool": source,
+                    "hook_event_name": hook_event,
+                    "model": payload.model,
+                }),
+                None,
+            )?;
+            index.index_event(&event)?;
+        }
+        "UserPromptSubmit" => {
+            let mut event_payload = serde_json::json!({
+                "tool": source,
+                "hook_event_name": hook_event,
+                "model": payload.model,
+            });
+            if let Some(prompt) = payload.prompt_text() {
+                event_payload["prompt_hash"] =
+                    serde_json::Value::String(tellur_core::schema::ids::hash_content(prompt));
+            }
+            let event =
+                writer.write_event(&session_id, "user.prompt", "agent", event_payload, None)?;
+            index.index_event(&event)?;
+        }
+        "PreToolUse" => {
+            let event = writer.write_event(
+                &session_id,
+                "tool.pre_call",
+                "agent",
+                hook_tool_payload(source, hook_event, &payload),
+                None,
+            )?;
+            index.index_event(&event)?;
+        }
+        "PostToolUse" => {
+            let event = writer.write_event(
+                &session_id,
+                "tool.post_call",
+                "agent",
+                hook_tool_payload(source, hook_event, &payload),
+                None,
+            )?;
+            index.index_event(&event)?;
+
+            let policy = load_policy(&storage);
+            let ctx = CaptureContext::recorded_ai(&session_id, source);
+            if let Some(file_path) = payload.file_path() {
+                let _ = capture_working_changes_for_paths(
+                    &storage,
+                    &mut writer,
+                    &index,
+                    policy.as_ref(),
+                    &ctx,
+                    &[file_path],
+                )?;
+            }
+        }
+        "Stop" | "SessionEnd" => {
+            let event = writer.write_event(
+                &session_id,
+                "session.end",
+                "agent",
+                serde_json::json!({
+                    "tool": source,
+                    "hook_event_name": hook_event,
+                }),
+                None,
+            )?;
+            index.index_event(&event)?;
+        }
+        _ => {
+            let event = writer.write_event(
+                &session_id,
+                &format!("{}.hook.{}", source, sanitize_id(hook_event)),
+                "agent",
+                hook_tool_payload(source, hook_event, &payload),
+                None,
+            )?;
+            index.index_event(&event)?;
+        }
+    }
+    writer.close();
+    Ok(())
+}
+
+fn normalize_hook_source(source: &str) -> &str {
+    match source {
+        "claude" | "claude-code" => "claude-code",
+        "codex" | "codex-cli" => "codex",
+        other => other,
+    }
+}
+
+fn hook_tool_payload(
+    source: &str,
+    hook_event: &str,
+    payload: &AgentHookPayload,
+) -> serde_json::Value {
+    let mut out = serde_json::json!({
+        "tool": source,
+        "hook_event_name": hook_event,
+        "tool_name": payload.tool_name,
+        "model": payload.model,
+    });
+    if let Some(file_path) = payload.file_path() {
+        out["file_path"] = serde_json::Value::String(file_path);
+    }
+    if let Some(command) = payload.command() {
+        out["command"] = serde_json::Value::String(redact_hook_string(&command));
+    }
+    out
+}
+
+fn redact_hook_string(value: &str) -> String {
+    tellur_core::redaction::RedactionEngine::default_engine()
+        .scan_and_redact(value)
+        .redacted_content
+        .unwrap_or_else(|| "[REDACTED]".to_string())
 }

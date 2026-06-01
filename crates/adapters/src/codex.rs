@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tellur_core::adapter::{AdapterCapabilities, AdapterInfo, AgentAdapter};
 use tellur_core::schema::types::*;
 
@@ -36,10 +36,12 @@ impl CodexAdapter {
         let mut events = Vec::new();
         let mut session_id = fallback_session_id.to_string();
 
-        for line in content.lines().filter(|l| !l.trim().is_empty()) {
-            let Ok(raw) = serde_json::from_str::<serde_json::Value>(line) else {
+        for (idx, line) in content.lines().enumerate() {
+            if line.trim().is_empty() {
                 continue;
-            };
+            }
+            let raw = serde_json::from_str::<serde_json::Value>(line)
+                .with_context(|| format!("invalid Codex JSONL at line {}", idx + 1))?;
 
             if raw.get("type").and_then(|v| v.as_str()) == Some("session_meta")
                 && let Some(id) = raw
@@ -110,6 +112,7 @@ fn codex_event_type(raw: &serde_json::Value) -> EventType {
 
 fn normalized_payload(raw: &serde_json::Value) -> serde_json::Value {
     let payload = raw.get("payload").cloned().unwrap_or_else(|| raw.clone());
+    let prompt_hash = crate::sanitize::first_prompt_hash(&payload);
     let command = payload
         .get("command")
         .or_else(|| payload.get("cmd"))
@@ -120,25 +123,19 @@ fn normalized_payload(raw: &serde_json::Value) -> serde_json::Value {
         .or_else(|| payload.get("path"))
         .or_else(|| payload.get("file"))
         .cloned();
-    let prompt = payload
-        .get("message")
-        .or_else(|| payload.get("prompt"))
-        .or_else(|| payload.get("text"))
-        .cloned();
-
     let mut out = serde_json::json!({
         "tool": "codex",
         "raw_type": raw.get("type"),
-        "raw_payload": payload,
+        "raw_payload": crate::sanitize::sanitized_value(&payload),
     });
     if let Some(command) = command {
-        out["command"] = command;
+        out["command"] = crate::sanitize::sanitized_value(&command);
     }
     if let Some(file_path) = file_path {
-        out["file_path"] = file_path;
+        out["file_path"] = crate::sanitize::sanitized_value(&file_path);
     }
-    if let Some(prompt) = prompt {
-        out["prompt_redacted"] = prompt;
+    if let Some(prompt_hash) = prompt_hash {
+        out["prompt_hash"] = serde_json::Value::String(prompt_hash);
     }
     if let Some(model) = raw
         .get("payload")
@@ -250,5 +247,44 @@ mod tests {
         assert_eq!(events[2].payload["command"], "cargo test");
         assert_eq!(events[3].event_type, EventType::FileWrite);
         assert_eq!(events[3].payload["file_path"], "src/lib.rs");
+    }
+
+    #[test]
+    fn test_parse_codex_jsonl_rejects_invalid_lines() {
+        let adapter = CodexAdapter::new();
+        let dir = std::env::temp_dir().join("tellur_test_codex_invalid");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("events.jsonl");
+        std::fs::write(&path, "{\"type\":\"event_msg\"}\nnot-json\n").unwrap();
+
+        let err = adapter.parse_jsonl(&path, "fallback-session").unwrap_err();
+        assert!(err.to_string().contains("line 2"));
+    }
+
+    #[test]
+    fn test_parse_codex_hashes_prompt_and_redacts_raw_payload() {
+        let adapter = CodexAdapter::new();
+        let dir = std::env::temp_dir().join("tellur_test_codex_redaction");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("events.jsonl");
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "type": "event_msg",
+                "payload": {
+                    "type": "user_message",
+                    "message": "use api_key=sk-abclongkeyvalue12345"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let events = adapter.parse_jsonl(&path, "sess").unwrap();
+        let payload = &events[0].payload;
+        assert!(payload.get("prompt_hash").is_some());
+        let serialized = serde_json::to_string(payload).unwrap();
+        assert!(!serialized.contains("sk-abclongkeyvalue12345"));
+        assert!(!serialized.contains("use api_key"));
     }
 }

@@ -12,6 +12,7 @@ pub mod codex;
 pub mod copilot;
 pub mod cursor;
 pub mod generic;
+mod sanitize;
 
 pub use aider::AiderAdapter;
 pub use claude_code::ClaudeCodeAdapter;
