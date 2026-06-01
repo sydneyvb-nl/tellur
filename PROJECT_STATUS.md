@@ -7,10 +7,11 @@
 **License:** Apache-2.0
 
 > **2026-06-01 — Global agent setup.** Added one-time user-level setup for
-> Codex, Claude Code, Cursor, and VS Code: `tellur setup agents` installs global
-> hooks/settings with an absolute `tellur` executable path, generates a local
-> Codex personal plugin/marketplace entry for manual workflows, writes Cursor
-> MCP/settings and VS Code settings, and routes hook/editor payloads through
+> Codex, Claude Code, Gemini CLI, Antigravity, Cursor, and VS Code:
+> `tellur setup agents` installs global hooks/settings with an absolute `tellur`
+> executable path, generates a local Codex personal plugin/marketplace entry for
+> manual workflows, writes Gemini CLI hooks, Antigravity hooks/MCP, Cursor
+> MCP/settings, and VS Code settings, and routes hook/editor payloads through
 > `tellur hooks ingest --auto-init` so new Git repositories can start capturing
 > without per-project plugin invocation. Hook ingest now ignores invalid JSON,
 > refuses malformed setup config instead of overwriting it, and never falls back
@@ -135,13 +136,15 @@ Tellur/
 | 10 | RedactionEngine (regex secret detection) | 14 | ✅ Done | `crates/core/src/redaction/mod.rs` |
 | 11 | PolicyEngine (YAML rules, sensitive paths) | 13 | ✅ Done | `crates/core/src/policy/mod.rs` |
 | 12 | AgentAdapter trait (async_trait) | 8.3 | ✅ Done | `crates/core/src/adapter/mod.rs` |
-| 13 | Built-in adapters (Claude Code, Aider, Cursor, Generic, Codex, Copilot) | 8.3 | ✅ Done | `crates/core/src/adapter/builtin.rs` + `crates/adapters/src/*` |
+| 13 | Built-in adapters (Claude Code, Aider, Cursor, Generic, Codex, Copilot, Gemini CLI, Antigravity) | 8.3 | ✅ Done | `crates/core/src/adapter/builtin.rs` + `crates/adapters/src/*` |
 | 14 | Claude Code adapter implementation | 8.1 | ✅ Done | Real Claude Code hook schema (PostToolUse/SessionStart), `tellur hooks install`, stdin payload handler `tellur hooks claude` wired to capture pipeline and scoped to hook file path when available, transcript parse |
 | 15 | Aider adapter implementation | 8.2 | ✅ Done | Git log parser, Aider pattern detection, source repo path honored by CLI import |
 | 16 | Cursor adapter implementation | 8.2 | ✅ Done | Cursor MCP/settings setup, VS Code-compatible extension capture, JSON/JSONL trace parsing, workspace detection, adapter tests |
 | 16a | Codex CLI adapter implementation | 8.2 | ✅ Done | JSONL event stream/session transcript import via `tellur import codex <file>`, command/prompt/file-write normalization, prompt hashing, strict JSONL errors |
 | 16b | GitHub Copilot adapter implementation | 8.2 | ✅ Done | Metadata JSON/JSONL import via `tellur import copilot <file>`, accepted suggestion + prompt metadata normalization, prompt hashing, no raw metadata payload |
-| 16c | Global agent/editor setup | 8.1/8.3/10/23 | ✅ Done | `tellur setup agents/status/uninstall/cursor/vscode`, user-level Codex/Claude hooks, Codex personal plugin scaffold, Cursor MCP/settings, VS Code settings, extension save capture, generic hook ingest with auto-init |
+| 16c | Global agent/editor setup | 8.1/8.3/10/23 | ✅ Done | `tellur setup agents/status/uninstall/cursor/vscode/gemini-cli/antigravity`, user-level Codex/Claude/Gemini/Antigravity hooks, Codex personal plugin scaffold, Antigravity MCP, Cursor MCP/settings, VS Code settings, extension save capture, generic hook ingest with auto-init |
+| 16d | Gemini CLI adapter implementation | 8.2 | ✅ Done | `tellur setup gemini-cli`, `~/.gemini/settings.json` hooks, JSONL import via `tellur import gemini-cli <file>`, prompt hashing and metadata sanitization |
+| 16e | Antigravity 2.0 adapter implementation | 8.2/23 | ✅ Done | `tellur setup antigravity`, `~/.gemini/config/hooks.json`, Antigravity app/CLI MCP configs, JSONL import via `tellur import antigravity <file>` |
 
 ### Phase 3: CLI (PRD sectie 8.1)
 
@@ -222,13 +225,13 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-101 Rust tests, 0 failures, 0 clippy warnings.
+106 Rust tests, 0 failures, 0 clippy warnings.
 - core:      65 tests (schema/event-type round-trip, glob matcher, storage,
              hash-chain verify + reseal, index session/attribution round-trip,
              capture pipeline end-to-end, block_ai_read, attribution, redaction,
              policy, export, PR report, dashboard daemon endpoints)
-- adapters:  16 tests (Claude Code, Aider, Cursor, Codex, Copilot, Generic)
-- cli:       20 integration tests (version/help/init/doctor/status/sessions/verify/import/setup/hooks ingest)
+- adapters:  20 tests (Claude Code, Aider, Cursor, Codex, Copilot, Gemini CLI, Antigravity, Generic)
+- cli:       21 integration tests (version/help/init/doctor/status/sessions/verify/import/setup/hooks ingest)
 - editor:    TypeScript compile, 5 unit tests, VS Code extension integration tests
 ```
 
@@ -276,7 +279,7 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
 3. ~~**VS Code/Cursor-compatible extension**~~ — ✅ Done
 4. ~~**Codex CLI adapter**~~ — ✅ Done
 5. ~~**GitHub Copilot adapter**~~ — ✅ Done
-6. **Next first-party adapters for adoption** — Gemini CLI / Google Antigravity, Windsurf/Cascade, JetBrains AI Assistant / Junie, Devin, Continue, Cline/Roo Code
+6. **Next first-party adapters for adoption** — Windsurf/Cascade, JetBrains AI Assistant / Junie, Devin, Continue, Cline/Roo Code
 7. **Team/server mode** — decide architecture after local dashboard settles
 8. **Plugin SDK** — requires stable adapter/event API
 
@@ -316,12 +319,12 @@ Directe concurrenten die hetzelfde probleem oplossen:
 3. **6 export profiles** — developer, OSS, corporate, audit, release, CI
 4. **PR risk reports** — risico scoring, AI involvement stats, reviewer checklist
 5. **Tamper-evident log** — SHA-256 hash chain (geen concurrent heeft dit)
-6. **Multi-adapter** — Claude Code, Aider, Cursor, Generic uit de doos
+6. **Multi-adapter** — Claude Code, Aider, Cursor, Codex, Copilot, Gemini CLI, Antigravity, Generic uit de doos
 7. **Rust** — single binary, snel, geen runtime dependency
 8. **SLSA/SPDX ready** — export naar supply chain formats
 
 ### Actiepunten uit concurrentie
-- Git Notes integratie overwegen (git-ai gebruikt dit als open standaard)
+- Git Notes integratie uitbreiden met release/CI workflows waar nuttig
 - Dashboard metrics (tool/model breakdown) toevoegen aan `tellur stats`
 - `/ask` feature (chat met AI die code schreef) — uniek, overwegen voor later
 

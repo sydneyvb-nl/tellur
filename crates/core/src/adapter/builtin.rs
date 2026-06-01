@@ -32,6 +32,18 @@ pub const BUILTIN_ADAPTERS: &[BuiltinAdapter] = &[
         supports_hooks: false,
     },
     BuiltinAdapter {
+        id: "gemini-cli",
+        name: "Gemini CLI",
+        description: "Google Gemini CLI hooks and JSONL import",
+        supports_hooks: true,
+    },
+    BuiltinAdapter {
+        id: "antigravity",
+        name: "Google Antigravity",
+        description: "Google Antigravity 2.0 hooks, MCP, and JSONL import",
+        supports_hooks: true,
+    },
+    BuiltinAdapter {
         id: "generic",
         name: "Generic",
         description: "CLI and HTTP event ingestion for any tool",

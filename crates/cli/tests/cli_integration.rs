@@ -130,7 +130,7 @@ fn test_watch_help_lists_vscode_agent_model_metadata_options() {
 }
 
 #[test]
-fn test_setup_agents_installs_user_level_codex_and_claude_hooks() {
+fn test_setup_agents_installs_user_level_agent_editor_integrations() {
     let home = std::env::temp_dir().join(format!(
         "tellur-home-{}-{}",
         std::process::id(),
@@ -140,6 +140,10 @@ fn test_setup_agents_installs_user_level_codex_and_claude_hooks() {
             .as_nanos()
     ));
     fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(home.join(".gemini/antigravity")).unwrap();
+    fs::create_dir_all(home.join(".gemini/antigravity-cli")).unwrap();
+    fs::write(home.join(".gemini/antigravity/mcp_config.json"), "").unwrap();
+    fs::write(home.join(".gemini/antigravity-cli/mcp_config.json"), " \n").unwrap();
 
     let output = require_binary()
         .args(["setup", "agents", "--home", home.to_str().unwrap()])
@@ -191,6 +195,76 @@ fn test_setup_agents_installs_user_level_codex_and_claude_hooks() {
     assert_eq!(vscode_settings["tellur.vscodeAgentId"], "vscode");
     assert_eq!(vscode_settings["tellur.autoInit"], true);
     assert_eq!(vscode_settings["tellur.captureOnSave"], true);
+    let gemini_settings: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.join(".gemini/settings.json")).unwrap())
+            .unwrap();
+    assert_named_hook_command(&gemini_settings, "BeforeTool", "gemini-cli");
+    assert_named_hook_command(&gemini_settings, "AfterTool", "gemini-cli");
+    assert_eq!(gemini_settings["hooksConfig"]["enabled"], true);
+    let antigravity_hooks: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.join(".gemini/config/hooks.json")).unwrap())
+            .unwrap();
+    let command = antigravity_hooks["tellur-provenance"]["PostToolUse"][0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap();
+    assert!(command.contains("hooks ingest --source antigravity --auto-init --json-response"));
+    let antigravity_mcp: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(home.join(".gemini/antigravity/mcp_config.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(antigravity_mcp["mcpServers"]["tellur"]["args"][0], "mcp");
+    let antigravity_cli_mcp: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(home.join(".gemini/antigravity-cli/mcp_config.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        antigravity_cli_mcp["mcpServers"]["tellur"]["args"][0],
+        "mcp"
+    );
+
+    let stale_command =
+        "/tmp/old-tellur hooks ingest --source gemini-cli --auto-init --json-response";
+    let mut stale_gemini = gemini_settings.clone();
+    stale_gemini["hooks"]["BeforeTool"][0]["hooks"][0]["command"] =
+        serde_json::Value::String(stale_command.to_string());
+    fs::write(
+        home.join(".gemini/settings.json"),
+        serde_json::to_string_pretty(&stale_gemini).unwrap(),
+    )
+    .unwrap();
+    let mut stale_antigravity = antigravity_hooks.clone();
+    stale_antigravity["tellur-provenance"]["PostToolUse"][0]["hooks"][0]["command"] =
+        serde_json::Value::String(
+            "/tmp/old-tellur hooks ingest --source antigravity --auto-init --json-response"
+                .to_string(),
+        );
+    fs::write(
+        home.join(".gemini/config/hooks.json"),
+        serde_json::to_string_pretty(&stale_antigravity).unwrap(),
+    )
+    .unwrap();
+    let rerun = require_binary()
+        .args(["setup", "agents", "--home", home.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(rerun.status.success());
+    let refreshed_gemini: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.join(".gemini/settings.json")).unwrap())
+            .unwrap();
+    let refreshed_gemini_command =
+        refreshed_gemini["hooks"]["BeforeTool"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+    assert!(!refreshed_gemini_command.contains("/tmp/old-tellur"));
+    assert_named_hook_command(&refreshed_gemini, "BeforeTool", "gemini-cli");
+    let refreshed_antigravity: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.join(".gemini/config/hooks.json")).unwrap())
+            .unwrap();
+    let refreshed_antigravity_command = refreshed_antigravity["tellur-provenance"]["PostToolUse"]
+        [0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap();
+    assert!(!refreshed_antigravity_command.contains("/tmp/old-tellur"));
 
     let status = require_binary()
         .args(["setup", "status", "--home", home.to_str().unwrap()])
@@ -203,6 +277,8 @@ fn test_setup_agents_installs_user_level_codex_and_claude_hooks() {
     assert!(status_stdout.contains("Codex personal plugin: installed"));
     assert!(status_stdout.contains("Cursor global integration: installed"));
     assert!(status_stdout.contains("VS Code global integration: installed"));
+    assert!(status_stdout.contains("Gemini CLI global integration: installed"));
+    assert!(status_stdout.contains("Antigravity global integration: installed"));
 
     let uninstall = require_binary()
         .args(["setup", "uninstall", "--home", home.to_str().unwrap()])
@@ -220,6 +296,8 @@ fn test_setup_agents_installs_user_level_codex_and_claude_hooks() {
     assert!(status_stdout.contains("Codex personal plugin: missing"));
     assert!(status_stdout.contains("Cursor global integration: missing"));
     assert!(status_stdout.contains("VS Code global integration: missing"));
+    assert!(status_stdout.contains("Gemini CLI global integration: missing"));
+    assert!(status_stdout.contains("Antigravity global integration: missing"));
 
     let _ = fs::remove_dir_all(&home);
 }
@@ -258,6 +336,21 @@ fn assert_hook_command(config: &serde_json::Value, event: &str, source: &str) {
         PathBuf::from(exe).is_absolute(),
         "hook command must use an absolute executable path: {command}"
     );
+}
+
+fn assert_named_hook_command(config: &serde_json::Value, event: &str, source: &str) {
+    let command = config["hooks"][event][0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap();
+    assert!(command.contains(&format!(
+        " hooks ingest --source {source} --auto-init --json-response"
+    )));
+    let exe = command
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .trim_matches('\'');
+    assert!(PathBuf::from(exe).is_absolute());
 }
 
 #[test]
@@ -369,6 +462,55 @@ fn test_hooks_ingest_post_tool_without_file_path_does_not_capture_whole_tree() {
             .iter()
             .any(|event| event.payload["file"] == "src/lib.rs"
                 || event.payload["file_path"] == "src/lib.rs")
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_hooks_ingest_gemini_event_mapping_returns_json_response() {
+    let dir = temp_repo();
+    let mut child = require_binary()
+        .args([
+            "hooks",
+            "ingest",
+            "--source",
+            "gemini-cli",
+            "--auto-init",
+            "--json-response",
+        ])
+        .current_dir(&dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            serde_json::json!({
+                "session_id": "sess_gemini",
+                "event": "AfterTool",
+                "cwd": dir,
+                "tool_name": "write_file",
+                "tool_input": {"file_path": "src/lib.rs"}
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "{}");
+
+    let storage = RepoStorage::from_git_root(&dir).unwrap();
+    let index = TraceIndex::open(&storage.index_path).unwrap();
+    let events = index.get_session_events("sess_gemini").unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|event| event.event_type == EventType::ToolPostCall)
     );
 
     let _ = fs::remove_dir_all(&dir);

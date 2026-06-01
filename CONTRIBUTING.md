@@ -5,6 +5,8 @@ Thanks for your interest in contributing! Tellur is an open-source AI code prove
 ## Development Setup
 
 Tellur's core and CLI are written in **Rust**; the editor extension is TypeScript.
+Agents should also read [`AGENTS.md`](./AGENTS.md) before making changes. It
+defines repo-wide requirements for keeping documentation aligned with behavior.
 
 ```bash
 # Clone the repo
@@ -32,7 +34,8 @@ Tellur/
 │   ├── core/          # Schemas, attribution engine, storage, policy, redaction,
 │   │                  #   capture pipeline, export, daemon, MCP server
 │   ├── cli/           # CLI binary (the `tellur` command)
-│   └── adapters/      # AI tool adapters (Claude Code, Aider, Cursor, Codex, Copilot, Generic)
+│   └── adapters/      # AI tool adapters (Claude Code, Aider, Cursor, Codex,
+│                      #   Copilot, Gemini CLI, Antigravity, Generic)
 ├── schemas/           # JSON Schema definitions
 ├── editor/            # VS Code extension (TypeScript)
 ├── dist/              # Packaging: npm wrapper, Homebrew formula
@@ -57,6 +60,8 @@ Global editor setup is configured through:
 tellur setup agents      # Codex, Claude Code, Cursor, and VS Code
 tellur setup cursor      # Cursor MCP/settings only
 tellur setup vscode      # VS Code settings only
+tellur setup gemini-cli  # Gemini CLI hooks only
+tellur setup antigravity # Antigravity hooks/MCP only
 ```
 
 ## Code Style

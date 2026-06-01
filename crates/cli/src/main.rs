@@ -101,7 +101,7 @@ enum Commands {
 
     /// Import events from an external source
     Import {
-        /// Adapter to import from: claude-code | aider | cursor | generic | codex | copilot
+        /// Adapter to import from: claude-code | aider | cursor | generic | codex | copilot | gemini-cli | antigravity
         adapter: String,
         /// Source path
         source: PathBuf,
@@ -274,12 +274,15 @@ enum HookActions {
     /// Internal: ingest a supported agent hook payload from stdin
     #[command(hide = true)]
     Ingest {
-        /// Hook source: claude-code | codex
+        /// Hook source: claude-code | codex | gemini-cli | antigravity | vscode | cursor
         #[arg(long)]
         source: String,
         /// Initialize Tellur automatically when inside a Git repository
         #[arg(long)]
         auto_init: bool,
+        /// Print an empty JSON object for hook systems that require JSON stdout
+        #[arg(long, hide = true)]
+        json_response: bool,
     },
 }
 
@@ -311,6 +314,18 @@ enum SetupActions {
     },
     /// Install global VS Code integration
     Vscode {
+        /// Override home directory, intended for tests and portable installs
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
+    /// Install global Gemini CLI integration
+    GeminiCli {
+        /// Override home directory, intended for tests and portable installs
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
+    /// Install global Google Antigravity 2.0 integration
+    Antigravity {
         /// Override home directory, intended for tests and portable installs
         #[arg(long)]
         home: Option<PathBuf>,
@@ -404,7 +419,11 @@ async fn main() -> Result<()> {
         Commands::Hooks { action } => match action {
             HookActions::Install { tool } => cmd_hooks_install(&tool),
             HookActions::Claude => cmd_hooks_claude(),
-            HookActions::Ingest { source, auto_init } => cmd_hooks_ingest(&source, auto_init),
+            HookActions::Ingest {
+                source,
+                auto_init,
+                json_response,
+            } => cmd_hooks_ingest(&source, auto_init, json_response),
         },
         Commands::Setup { action } => match action {
             SetupActions::Agents { home } => cmd_setup_agents(home.as_deref()),
@@ -412,6 +431,8 @@ async fn main() -> Result<()> {
             SetupActions::ClaudeCode { home } => cmd_setup_claude_code(home.as_deref()),
             SetupActions::Cursor { home } => cmd_setup_cursor(home.as_deref()),
             SetupActions::Vscode { home } => cmd_setup_vscode(home.as_deref()),
+            SetupActions::GeminiCli { home } => cmd_setup_gemini_cli(home.as_deref()),
+            SetupActions::Antigravity { home } => cmd_setup_antigravity(home.as_deref()),
             SetupActions::Status { home } => cmd_setup_status(home.as_deref()),
             SetupActions::Uninstall { home } => cmd_setup_uninstall(home.as_deref()),
         },
@@ -908,9 +929,17 @@ async fn cmd_import(adapter: &str, source: &std::path::Path) -> Result<()> {
             let a = tellur_adapters::CopilotAdapter::new();
             a.parse_metadata_file(source, "imported")?
         }
+        "gemini" | "gemini-cli" => {
+            let a = tellur_adapters::GeminiAdapter::new();
+            a.parse_jsonl(source, "imported")?
+        }
+        "antigravity" | "google-antigravity" => {
+            let a = tellur_adapters::AntigravityAdapter::new();
+            a.parse_jsonl(source, "imported")?
+        }
         _ => {
             println!(
-                "Unknown adapter: {}. Supported: claude-code, aider, cursor, generic, codex, copilot",
+                "Unknown adapter: {}. Supported: claude-code, aider, cursor, generic, codex, copilot, gemini-cli, antigravity",
                 adapter
             );
             return Ok(());
@@ -1760,6 +1789,8 @@ const TELLUR_CODEX_HOOK_SOURCE: &str = "codex";
 const TELLUR_CLAUDE_HOOK_SOURCE: &str = "claude-code";
 const TELLUR_CURSOR_HOOK_SOURCE: &str = "cursor";
 const TELLUR_VSCODE_HOOK_SOURCE: &str = "vscode";
+const TELLUR_GEMINI_HOOK_SOURCE: &str = "gemini-cli";
+const TELLUR_ANTIGRAVITY_HOOK_SOURCE: &str = "antigravity";
 
 fn home_dir_override(home: Option<&Path>) -> Result<PathBuf> {
     if let Some(home) = home {
@@ -1780,7 +1811,11 @@ fn cmd_setup_agents(home: Option<&Path>) -> Result<()> {
     install_codex_personal_plugin(&home, &codex_command)?;
     install_cursor_integration(&home, &tellur_exe)?;
     install_vscode_integration(&home, &tellur_exe)?;
-    println!("✓ Installed Tellur global integrations for Claude Code, Codex, Cursor, and VS Code");
+    install_gemini_cli_integration(&home)?;
+    install_antigravity_integration(&home, &tellur_exe)?;
+    println!(
+        "✓ Installed Tellur global integrations for Claude Code, Codex, Cursor, VS Code, Gemini CLI, and Antigravity"
+    );
     println!(
         "  Claude Code hooks: {}",
         home.join(".claude/settings.json").display()
@@ -1800,6 +1835,14 @@ fn cmd_setup_agents(home: Option<&Path>) -> Result<()> {
     println!(
         "  VS Code settings: {}",
         vscode_user_settings_path(&home).display()
+    );
+    println!(
+        "  Gemini CLI settings: {}",
+        gemini_settings_path(&home).display()
+    );
+    println!(
+        "  Antigravity hooks: {}",
+        antigravity_hooks_path(&home).display()
     );
     println!("  Restart Codex/Claude Code and review/trust hooks once when prompted.");
     Ok(())
@@ -1847,6 +1890,28 @@ fn cmd_setup_vscode(home: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
+fn cmd_setup_gemini_cli(home: Option<&Path>) -> Result<()> {
+    let home = home_dir_override(home)?;
+    install_gemini_cli_integration(&home)?;
+    println!("✓ Installed Tellur global Gemini CLI integration");
+    println!("  Settings: {}", gemini_settings_path(&home).display());
+    Ok(())
+}
+
+fn cmd_setup_antigravity(home: Option<&Path>) -> Result<()> {
+    let home = home_dir_override(home)?;
+    let tellur_exe = tellur_executable_path()?;
+    install_antigravity_integration(&home, &tellur_exe)?;
+    println!("✓ Installed Tellur global Antigravity integration");
+    println!("  Hooks: {}", antigravity_hooks_path(&home).display());
+    println!(
+        "  MCP: {}, {}",
+        antigravity_mcp_path(&home).display(),
+        antigravity_cli_mcp_path(&home).display()
+    );
+    Ok(())
+}
+
 fn cmd_setup_status(home: Option<&Path>) -> Result<()> {
     let home = home_dir_override(home)?;
     let claude = hook_config_has_tellur_source(
@@ -1858,6 +1923,8 @@ fn cmd_setup_status(home: Option<&Path>) -> Result<()> {
     let plugin = codex_plugin_status(&home);
     let cursor = cursor_integration_status(&home);
     let vscode = vscode_integration_status(&home);
+    let gemini = gemini_integration_status(&home);
+    let antigravity = antigravity_integration_status(&home);
     println!(
         "Claude Code global hooks: {}",
         if claude { "installed" } else { "missing" }
@@ -1878,6 +1945,14 @@ fn cmd_setup_status(home: Option<&Path>) -> Result<()> {
         "VS Code global integration: {}",
         if vscode { "installed" } else { "missing" }
     );
+    println!(
+        "Gemini CLI global integration: {}",
+        if gemini { "installed" } else { "missing" }
+    );
+    println!(
+        "Antigravity global integration: {}",
+        if antigravity { "installed" } else { "missing" }
+    );
     Ok(())
 }
 
@@ -1892,6 +1967,8 @@ fn cmd_setup_uninstall(home: Option<&Path>) -> Result<()> {
     remove_codex_marketplace_entry(&home)?;
     uninstall_cursor_integration(&home)?;
     uninstall_vscode_integration(&home)?;
+    uninstall_gemini_cli_integration(&home)?;
+    uninstall_antigravity_integration(&home)?;
     println!("✓ Removed Tellur global integrations where present");
     Ok(())
 }
@@ -2031,6 +2108,22 @@ fn vscode_user_settings_path(home: &Path) -> PathBuf {
     editor_user_settings_path(home, "Code")
 }
 
+fn gemini_settings_path(home: &Path) -> PathBuf {
+    home.join(".gemini/settings.json")
+}
+
+fn antigravity_hooks_path(home: &Path) -> PathBuf {
+    home.join(".gemini/config/hooks.json")
+}
+
+fn antigravity_mcp_path(home: &Path) -> PathBuf {
+    home.join(".gemini/antigravity/mcp_config.json")
+}
+
+fn antigravity_cli_mcp_path(home: &Path) -> PathBuf {
+    home.join(".gemini/antigravity-cli/mcp_config.json")
+}
+
 fn editor_user_settings_path(home: &Path, app_name: &str) -> PathBuf {
     #[cfg(target_os = "macos")]
     {
@@ -2129,6 +2222,9 @@ fn read_json_object_or_empty(path: &Path) -> Result<serde_json::Map<String, serd
         return Ok(serde_json::Map::new());
     }
     let content = std::fs::read_to_string(path)?;
+    if content.trim().is_empty() {
+        return Ok(serde_json::Map::new());
+    }
     let value = serde_json::from_str::<serde_json::Value>(&content)
         .with_context(|| format!("invalid JSON in {}; refusing to overwrite", path.display()))?;
     value
@@ -2242,6 +2338,293 @@ fn remove_cursor_mcp(home: &Path) -> Result<()> {
         servers.remove("tellur");
     }
     write_json_object(&path, config)
+}
+
+fn install_gemini_cli_integration(home: &Path) -> Result<()> {
+    let command = tellur_hook_command_with_json_response(TELLUR_GEMINI_HOOK_SOURCE)?;
+    install_gemini_hooks_json(&gemini_settings_path(home), &command)
+}
+
+fn tellur_hook_command_with_json_response(source: &str) -> Result<String> {
+    let exe = tellur_executable_path()?;
+    Ok(format!(
+        "{} hooks ingest --source {} --auto-init --json-response",
+        shell_quote(&exe.to_string_lossy()),
+        source
+    ))
+}
+
+fn install_gemini_hooks_json(path: &Path, command: &str) -> Result<()> {
+    let mut settings = read_json_object_or_empty(path)?;
+    let hooks = settings
+        .entry("hooks".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !hooks.is_object() {
+        *hooks = serde_json::json!({});
+    }
+    let hooks = hooks.as_object_mut().unwrap();
+    for (event, matcher) in [
+        ("SessionStart", "startup|resume"),
+        ("BeforeAgent", "*"),
+        (
+            "BeforeTool",
+            "write_file|replace|edit|run_command|run_shell_command|shell",
+        ),
+        (
+            "AfterTool",
+            "write_file|replace|edit|run_command|run_shell_command|shell",
+        ),
+        ("SessionEnd", "exit|shutdown"),
+    ] {
+        merge_named_setup_hook(
+            hooks,
+            event,
+            matcher,
+            "tellur-provenance",
+            command,
+            TELLUR_GEMINI_HOOK_SOURCE,
+        );
+    }
+    let hooks_config = settings
+        .entry("hooksConfig".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !hooks_config.is_object() {
+        *hooks_config = serde_json::json!({});
+    }
+    hooks_config
+        .as_object_mut()
+        .unwrap()
+        .insert("enabled".to_string(), serde_json::Value::Bool(true));
+    write_json_object(path, settings)
+}
+
+fn merge_named_setup_hook(
+    hooks: &mut serde_json::Map<String, serde_json::Value>,
+    event: &str,
+    matcher: &str,
+    name: &str,
+    command: &str,
+    source: &str,
+) {
+    let arr = hooks
+        .entry(event.to_string())
+        .or_insert_with(|| serde_json::json!([]));
+    if !arr.is_array() {
+        *arr = serde_json::json!([]);
+    }
+    if let Some(entries) = arr.as_array_mut() {
+        for entry in entries {
+            if let Some(handlers) = entry
+                .get_mut("hooks")
+                .and_then(|hooks| hooks.as_array_mut())
+            {
+                for handler in handlers {
+                    let name_matches =
+                        handler.get("name").and_then(|value| value.as_str()) == Some(name);
+                    if name_matches || hook_command_matches_source(handler, source) {
+                        *handler = serde_json::json!({
+                            "name": name,
+                            "type": "command",
+                            "command": command,
+                            "timeout": 30
+                        });
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    arr.as_array_mut().unwrap().push(serde_json::json!({
+        "matcher": matcher,
+        "hooks": [
+            {
+                "name": name,
+                "type": "command",
+                "command": command,
+                "timeout": 30
+            }
+        ]
+    }));
+}
+
+fn install_antigravity_integration(home: &Path, tellur_exe: &Path) -> Result<()> {
+    let command = tellur_hook_command_with_json_response(TELLUR_ANTIGRAVITY_HOOK_SOURCE)?;
+    install_antigravity_hooks_json(&antigravity_hooks_path(home), &command)?;
+    install_antigravity_mcp(&antigravity_mcp_path(home), tellur_exe)?;
+    install_antigravity_mcp(&antigravity_cli_mcp_path(home), tellur_exe)?;
+    Ok(())
+}
+
+fn install_antigravity_hooks_json(path: &Path, command: &str) -> Result<()> {
+    let mut root = read_json_object_or_empty(path)?;
+    let hook = root
+        .entry("tellur-provenance".to_string())
+        .or_insert_with(|| serde_json::json!({ "enabled": true }));
+    if !hook.is_object() {
+        *hook = serde_json::json!({ "enabled": true });
+    }
+    let hook = hook.as_object_mut().unwrap();
+    hook.insert("enabled".to_string(), serde_json::Value::Bool(true));
+    for (event, matcher) in [
+        ("SessionStart", "startup|resume"),
+        (
+            "PreToolUse",
+            "write_file|replace|edit|run_command|run_shell_command|shell",
+        ),
+        (
+            "PostToolUse",
+            "write_file|replace|edit|run_command|run_shell_command|shell",
+        ),
+        ("SessionEnd", "exit|shutdown"),
+    ] {
+        merge_named_setup_hook(
+            hook,
+            event,
+            matcher,
+            "tellur-provenance",
+            command,
+            TELLUR_ANTIGRAVITY_HOOK_SOURCE,
+        );
+    }
+    write_json_object(path, root)
+}
+
+fn install_antigravity_mcp(path: &Path, tellur_exe: &Path) -> Result<()> {
+    let mut config = read_json_object_or_empty(path)?;
+    let servers = config
+        .entry("mcpServers".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !servers.is_object() {
+        *servers = serde_json::json!({});
+    }
+    servers.as_object_mut().unwrap().insert(
+        "tellur".to_string(),
+        serde_json::json!({
+            "command": tellur_exe.to_string_lossy(),
+            "args": ["mcp"]
+        }),
+    );
+    write_json_object(path, config)
+}
+
+fn gemini_integration_status(home: &Path) -> bool {
+    hook_config_has_tellur_source(&gemini_settings_path(home), TELLUR_GEMINI_HOOK_SOURCE)
+}
+
+fn antigravity_integration_status(home: &Path) -> bool {
+    antigravity_hook_status(home)
+        && antigravity_mcp_status(&antigravity_mcp_path(home))
+        && antigravity_mcp_status(&antigravity_cli_mcp_path(home))
+}
+
+fn antigravity_hook_status(home: &Path) -> bool {
+    let Ok(root) = read_json_object_or_empty(&antigravity_hooks_path(home)) else {
+        return false;
+    };
+    root.get("tellur-provenance")
+        .and_then(|hook| hook.as_object())
+        .is_some_and(|hook| {
+            hook.values().any(|entries| {
+                entries.as_array().is_some_and(|entries| {
+                    entries.iter().any(|entry| {
+                        entry
+                            .get("hooks")
+                            .and_then(|hooks| hooks.as_array())
+                            .is_some_and(|handlers| {
+                                handlers.iter().any(|handler| {
+                                    hook_command_matches_source(
+                                        handler,
+                                        TELLUR_ANTIGRAVITY_HOOK_SOURCE,
+                                    ) && hook_command_executable_exists(handler)
+                                })
+                            })
+                    })
+                })
+            })
+        })
+}
+
+fn antigravity_mcp_status(path: &Path) -> bool {
+    let Ok(config) = read_json_object_or_empty(path) else {
+        return false;
+    };
+    let Some(server) = config
+        .get("mcpServers")
+        .and_then(|v| v.get("tellur"))
+        .and_then(|v| v.as_object())
+    else {
+        return false;
+    };
+    let Some(command) = server.get("command").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    Path::new(command).exists()
+        && server
+            .get("args")
+            .and_then(|v| v.as_array())
+            .is_some_and(|args| args.iter().any(|arg| arg.as_str() == Some("mcp")))
+}
+
+fn uninstall_gemini_cli_integration(home: &Path) -> Result<()> {
+    remove_gemini_hooks(&gemini_settings_path(home), TELLUR_GEMINI_HOOK_SOURCE)
+}
+
+fn uninstall_antigravity_integration(home: &Path) -> Result<()> {
+    remove_antigravity_hooks(home)?;
+    remove_antigravity_mcp(&antigravity_mcp_path(home))?;
+    remove_antigravity_mcp(&antigravity_cli_mcp_path(home))
+}
+
+fn remove_gemini_hooks(path: &Path, source: &str) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut settings = read_json_object_or_empty(path)?;
+    if let Some(hooks) = settings.get_mut("hooks").and_then(|v| v.as_object_mut()) {
+        remove_matching_named_hooks(hooks, source);
+    }
+    write_json_object(path, settings)
+}
+
+fn remove_matching_named_hooks(
+    hooks: &mut serde_json::Map<String, serde_json::Value>,
+    source: &str,
+) {
+    for entries in hooks.values_mut() {
+        if let Some(arr) = entries.as_array_mut() {
+            arr.retain(|entry| {
+                !entry
+                    .get("hooks")
+                    .and_then(|hooks| hooks.as_array())
+                    .is_some_and(|handlers| {
+                        handlers
+                            .iter()
+                            .any(|handler| hook_command_matches_source(handler, source))
+                    })
+            });
+        }
+    }
+}
+
+fn remove_antigravity_hooks(home: &Path) -> Result<()> {
+    let path = antigravity_hooks_path(home);
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut root = read_json_object_or_empty(&path)?;
+    root.remove("tellur-provenance");
+    write_json_object(&path, root)
+}
+
+fn remove_antigravity_mcp(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut config = read_json_object_or_empty(path)?;
+    if let Some(servers) = config.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
+        servers.remove("tellur");
+    }
+    write_json_object(path, config)
 }
 
 fn install_claude_global_hooks(home: &Path, command: &str) -> Result<()> {
@@ -2794,7 +3177,7 @@ fn find_first_string_key<'a>(
 /// Generic hook ingestion entrypoint used by user-level Codex and Claude Code
 /// hooks. It is deliberately no-op friendly so global hooks can be installed
 /// once and safely run in unrelated directories.
-fn cmd_hooks_ingest(source: &str, auto_init: bool) -> Result<()> {
+fn cmd_hooks_ingest(source: &str, auto_init: bool, json_response: bool) -> Result<()> {
     use std::io::Read;
 
     let mut input = String::new();
@@ -2803,6 +3186,9 @@ fn cmd_hooks_ingest(source: &str, auto_init: bool) -> Result<()> {
         Ok(payload) => payload,
         Err(err) => {
             eprintln!("tellur hook ingest ignored invalid payload: {err:#}");
+            if json_response {
+                println!("{{}}");
+            }
             return Ok(());
         }
     };
@@ -2813,15 +3199,26 @@ fn cmd_hooks_ingest(source: &str, auto_init: bool) -> Result<()> {
 
     let storage = match RepoStorage::discover() {
         Ok(storage) => storage,
-        Err(_) => return Ok(()),
+        Err(_) => {
+            if json_response {
+                println!("{{}}");
+            }
+            return Ok(());
+        }
     };
     if storage.tellur_dir.join("disable").exists() {
+        if json_response {
+            println!("{{}}");
+        }
         return Ok(());
     }
     if !storage.is_initialized() {
         if auto_init {
             storage.init()?;
         } else {
+            if json_response {
+                println!("{{}}");
+            }
             return Ok(());
         }
     }
@@ -2863,6 +3260,7 @@ fn cmd_hooks_ingest(source: &str, auto_init: bool) -> Result<()> {
     let hook_event_owned = payload
         .event_name()
         .unwrap_or_else(|| "unknown".to_string());
+    let hook_event_owned = normalize_hook_event_name(&hook_event_owned).to_string();
     let hook_event = hook_event_owned.as_str();
     match hook_event {
         "SessionStart" => {
@@ -2951,6 +3349,9 @@ fn cmd_hooks_ingest(source: &str, auto_init: bool) -> Result<()> {
         }
     }
     writer.close();
+    if json_response {
+        println!("{{}}");
+    }
     Ok(())
 }
 
@@ -2958,6 +3359,18 @@ fn normalize_hook_source(source: &str) -> &str {
     match source {
         "claude" | "claude-code" => "claude-code",
         "codex" | "codex-cli" => "codex",
+        "gemini" | "gemini-cli" => "gemini-cli",
+        "antigravity" | "google-antigravity" => "antigravity",
+        other => other,
+    }
+}
+
+fn normalize_hook_event_name(event: &str) -> &str {
+    match event {
+        "BeforeTool" => "PreToolUse",
+        "AfterTool" => "PostToolUse",
+        "BeforeAgent" | "BeforeModel" => "UserPromptSubmit",
+        "AfterAgent" => "SessionEnd",
         other => other,
     }
 }

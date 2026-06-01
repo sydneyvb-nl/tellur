@@ -54,11 +54,12 @@ Tellur is in beta. The local pipeline is functional end to end:
 capture -> attribution -> event log -> SQLite index -> CLI/editor/reports
 ```
 
-Implemented surfaces include the CLI, global Codex/Claude Code hooks, Cursor
-MCP/settings, VS Code/Cursor extension capture, importers for Cursor, Aider,
-Codex CLI, and GitHub Copilot, a local token-authenticated daemon, an MCP stdio
-server, provenance export, Git notes interop, and a static session replay
-dashboard backed by daemon data.
+Implemented surfaces include the CLI, global Codex/Claude Code/Gemini
+CLI/Antigravity hooks, Cursor MCP/settings, VS Code/Cursor extension capture,
+importers for Cursor, Aider, Codex CLI, Gemini CLI, Antigravity, and GitHub
+Copilot, a local token-authenticated daemon, an MCP stdio server, provenance
+export, Git notes interop, and a static session replay dashboard backed by
+daemon data.
 
 Team/server mode is not implemented yet.
 
@@ -158,6 +159,8 @@ tellur mcp                          # Run MCP server over stdio
 tellur setup agents                 # Install one-time global agent/editor integrations
 tellur setup cursor                 # Install Cursor MCP/settings integration
 tellur setup vscode                 # Install VS Code extension settings
+tellur setup gemini-cli             # Install Gemini CLI hooks
+tellur setup antigravity            # Install Antigravity hooks/MCP integration
 tellur setup status                 # Check global agent integration status
 tellur gc --dry-run                 # Garbage-collect expired events
 tellur redact                       # Redact secrets from stored events
@@ -172,6 +175,8 @@ tellur verify                       # Verify hash-chain integrity
 | --- | --- | --- |
 | Claude Code | User/project lifecycle hooks + transcript import | Working |
 | Codex CLI/App | User lifecycle hooks, local personal plugin, JSONL import | Working |
+| Gemini CLI | User lifecycle hooks, JSONL import | Working |
+| Google Antigravity 2.0 | User hooks, MCP config, JSONL import | Working |
 | Cursor IDE/CLI | Cursor MCP/settings, VS Code-compatible extension save/watch capture, JSON/JSONL import | Working |
 | VS Code/Copilot | VS Code extension auto-init, watch, save capture, explicit prompt hashing, metadata import | Working with VS Code API limits |
 | Aider | Git commit attribution import | Working |
@@ -195,8 +200,9 @@ known limits, and the adoption roadmap.
 
 ## One-Time Agent Setup
 
-For Codex, Claude Code, Cursor, and VS Code, Tellur supports user-level
-installation so users do not need to invoke a skill or plugin in every project:
+For Codex, Claude Code, Gemini CLI, Antigravity, Cursor, and VS Code, Tellur
+supports user-level installation so users do not need to invoke a skill or
+plugin in every project:
 
 ```bash
 tellur setup agents
@@ -206,15 +212,18 @@ This installs global hooks for Claude Code (`~/.claude/settings.json`) and Codex
 (`~/.codex/hooks.json`). It publishes a local Codex personal plugin under
 `~/.codex/plugins/tellur-provenance` with a marketplace entry in
 `~/.agents/plugins/marketplace.json` for manual workflows such as status,
-verification, and PR reporting. It also writes Cursor MCP/settings
-(`~/.cursor/mcp.json` plus Cursor user settings) and VS Code user settings so
+verification, and PR reporting. It writes Gemini CLI hooks to
+`~/.gemini/settings.json`, Antigravity hooks to `~/.gemini/config/hooks.json`,
+Antigravity MCP config to `~/.gemini/antigravity/mcp_config.json` and
+`~/.gemini/antigravity-cli/mcp_config.json`, Cursor MCP/settings
+(`~/.cursor/mcp.json` plus Cursor user settings), and VS Code user settings so
 the Tellur extension can auto-init, watch, and capture saved files in every Git
 workspace.
 
 Global hooks call the absolute path of the installed `tellur` executable:
 
 ```bash
-/absolute/path/to/tellur hooks ingest --source <codex|claude-code> --auto-init
+/absolute/path/to/tellur hooks ingest --source <agent> --auto-init
 ```
 
 When a hook runs outside a Git repository it no-ops. When it runs inside a Git
@@ -238,6 +247,8 @@ policy checks, and import adapters.
 | --- | --- | --- | --- |
 | Claude Code | `tellur setup claude-code` or `tellur setup agents` | `~/.claude/settings.json` | Lifecycle hooks call `tellur hooks ingest --source claude-code --auto-init`; project hooks remain available via `tellur hooks install claude-code`. |
 | Codex CLI/App | `tellur setup codex` or `tellur setup agents` | `~/.codex/hooks.json`, `~/.codex/plugins/tellur-provenance`, `~/.agents/plugins/marketplace.json` | User hooks call `tellur hooks ingest --source codex --auto-init`; local plugin exposes manual Tellur workflows through Codex's plugin directory. |
+| Gemini CLI | `tellur setup gemini-cli` or `tellur setup agents` | `~/.gemini/settings.json` | Gemini `BeforeTool`/`AfterTool`/agent/session hooks call `tellur hooks ingest --source gemini-cli --auto-init --json-response`. |
+| Antigravity 2.0 | `tellur setup antigravity` or `tellur setup agents` | `~/.gemini/config/hooks.json`, `~/.gemini/antigravity/mcp_config.json`, `~/.gemini/antigravity-cli/mcp_config.json` | Antigravity lifecycle hooks call `tellur hooks ingest --source antigravity --auto-init --json-response`; MCP exposes Tellur tools to Antigravity agents. |
 | Cursor | `tellur setup cursor` or `tellur setup agents` | `~/.cursor/mcp.json`, Cursor user `settings.json` | Cursor can call Tellur MCP tools; the installed Tellur extension uses auto-init, watch, and save capture with source `cursor`. |
 | VS Code | `tellur setup vscode` or `tellur setup agents` | VS Code user `settings.json` | The installed extension auto-inits Git workspaces, starts `tellur watch`, and captures saved files through safe hook ingestion with source `vscode`. |
 
@@ -368,8 +379,7 @@ metadata, not the raw prompt text.
 
 - Team/server mode for shared organizational visibility
 - More first-party adapters for emerging AI coding tools, prioritized as:
-  Gemini CLI / Google Antigravity, Windsurf/Cascade, JetBrains AI Assistant /
-  Junie, Devin, Continue, and Cline/Roo Code
+  Windsurf/Cascade, JetBrains AI Assistant / Junie, Devin, Continue, and Cline/Roo Code
 - Richer policy templates for security-sensitive repositories
 - Packaged releases for npm, Homebrew, and GitHub Releases
 

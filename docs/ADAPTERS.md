@@ -4,9 +4,9 @@ Last updated: 2026-06-01
 
 ## Current Guarantees
 
-- `tellur setup agents` installs user-level Codex and Claude Code hooks, Cursor
-  MCP/settings, and VS Code settings once so capture can work automatically in
-  new Git repositories.
+- `tellur setup agents` installs user-level Codex, Claude Code, Gemini CLI, and
+  Antigravity hooks, Cursor MCP/settings, and VS Code settings once so capture
+  can work automatically in new Git repositories.
 - Global hooks use an absolute path to the installed `tellur` executable and
   run `hooks ingest --source <agent> --auto-init`. Outside a Git repository
   they no-op; inside a Git repository they initialize `.tellur/` when needed.
@@ -33,6 +33,8 @@ Last updated: 2026-06-01
 | --- | --- | --- |
 | Claude Code | User/project hooks and transcript import | Highest-fidelity first-party integration. User-level hooks can be installed once with `tellur setup agents`; project hooks remain available through `tellur hooks install claude-code`. |
 | Codex CLI/App | User hooks, personal plugin, JSONL import | User-level hooks can be installed once with `tellur setup agents`. A local Codex plugin is also generated for manual workflows and marketplace discovery. |
+| Gemini CLI | User hooks and JSONL import | `tellur setup gemini-cli` writes Gemini's documented `~/.gemini/settings.json` hooks for `BeforeTool`, `AfterTool`, agent, and session events. Hook commands return `{}` on stdout as Gemini requires. |
+| Google Antigravity 2.0 | User hooks, MCP, JSONL import | `tellur setup antigravity` writes Antigravity hooks under `~/.gemini/config/hooks.json` and MCP configs under `~/.gemini/antigravity*/mcp_config.json`. |
 | Cursor IDE/CLI | VS Code-compatible extension capture, global MCP, JSON/JSONL import | `tellur setup cursor` writes Cursor user settings and `~/.cursor/mcp.json`. Cursor does not currently expose a documented local IDE lifecycle hook equivalent to Codex hooks, so live capture is handled by the extension save/watch path and Cursor CLI traces can still be imported. |
 | VS Code/Copilot | VS Code extension save/watch capture, metadata JSON/JSONL import | `tellur setup vscode` writes user settings so the installed extension can auto-init, watch, and capture saved files in every Git workspace. Prompt capture remains explicit because VS Code does not expose arbitrary Copilot prompts to extensions. |
 | GitHub Copilot | Metadata JSON/JSONL import | Import-only. Does not intercept Copilot prompts directly because VS Code does not expose that API to extensions. |
@@ -46,24 +48,22 @@ model every editor as if it had Codex-style hooks.
 
 | Mechanism | Used by | Strength | Implementation |
 | --- | --- | --- | --- |
-| User lifecycle hooks | Codex, Claude Code | Strongest local live capture when hook payloads include concrete file paths. | Global setup writes `~/.codex/hooks.json` and `~/.claude/settings.json` with absolute `tellur hooks ingest --source <agent> --auto-init` commands. |
+| User lifecycle hooks | Codex, Claude Code, Gemini CLI, Antigravity | Strongest local live capture when hook payloads include concrete file paths. | Global setup writes each tool's documented hook config with absolute `tellur hooks ingest --source <agent> --auto-init` commands; Gemini/Antigravity use `--json-response` because their hooks require JSON stdout. |
 | Personal plugin / marketplace | Codex | Manual workflow discovery, not required per project. | Setup writes `~/.codex/plugins/tellur-provenance` and `~/.agents/plugins/marketplace.json`. |
-| MCP server | Cursor, external agents | Tool access for status, explain, blame, verify, and policy checks. | Setup writes `~/.cursor/mcp.json` pointing to the absolute `tellur mcp` command. |
+| MCP server | Cursor, Antigravity, external agents | Tool access for status, explain, blame, verify, and policy checks. | Setup writes `~/.cursor/mcp.json` and Antigravity MCP configs pointing to the absolute `tellur mcp` command. |
 | VS Code-compatible extension | VS Code, Cursor | Best available editor-level live capture where lifecycle hooks are not documented. | User settings enable `autoInit`, `autoWatch`, and `captureOnSave`; save capture routes through `hooks ingest` with source `vscode` or `cursor`. |
-| Import adapters | Cursor, Codex, Copilot, Aider, Generic | Historical or metadata-based evidence. | `tellur import <adapter> <source>` normalizes external event streams while preserving source identity and timestamps. |
+| Import adapters | Cursor, Codex, Copilot, Aider, Gemini CLI, Antigravity, Generic | Historical or metadata-based evidence. | `tellur import <adapter> <source>` normalizes external event streams while preserving source identity and timestamps. |
 | Git/policy fallback | All editors | Enforcement at review/commit time. | `tellur policy check`, PR reports, Git notes, and future pre-commit/CI wiring catch gaps in editor APIs. |
 
 ## Adoption Adapter Roadmap
 
-1. Gemini CLI / Google Antigravity: high leverage because it covers Google's
-   terminal and IDE agent workflows.
-2. Windsurf/Cascade: important peer to Cursor for AI-first editor adoption.
-3. JetBrains AI Assistant / Junie: important for enterprise teams using
+1. Windsurf/Cascade: important peer to Cursor for AI-first editor adoption.
+2. JetBrains AI Assistant / Junie: important for enterprise teams using
    IntelliJ, PyCharm, WebStorm, GoLand, and related IDEs.
-4. Devin: useful for async/cloud agent PR provenance and enterprise audit.
-5. Continue: valuable for open-source and self-hosted/local-model teams across
+3. Devin: useful for async/cloud agent PR provenance and enterprise audit.
+4. Continue: valuable for open-source and self-hosted/local-model teams across
    VS Code and JetBrains.
-6. Cline/Roo Code: useful for VS Code agent users who bring their own model or
+5. Cline/Roo Code: useful for VS Code agent users who bring their own model or
    provider.
 
 ## Known Limits
@@ -77,6 +77,12 @@ model every editor as if it had Codex-style hooks.
 - Codex hook interception is not a complete enforcement boundary. Tellur uses
   `PostToolUse` plus working-tree capture for provenance and keeps `watch` and
   imports as fallbacks.
+- Gemini CLI hooks are configured in `~/.gemini/settings.json` using the
+  documented `hooks` object. Tellur writes only command hooks and does not alter
+  model/tool policy settings.
+- Antigravity 2.0 is split between hook capture and MCP tool access. Hook
+  capture goes through `~/.gemini/config/hooks.json`; MCP access is configured
+  separately for Antigravity app/CLI.
 - Cursor IDE integration is deliberately built through documented surfaces:
   global MCP configuration plus the VS Code-compatible Tellur extension. Cursor
   background-agent webhooks are server/API notifications and are not a local IDE
