@@ -56,10 +56,18 @@ impl CaptureContext {
     /// confidence — the `evidence_strength`/`confidence` fields communicate that
     /// this is weaker than a recorded hook/transcript capture.
     pub fn inferred_watch(session_id: impl Into<String>) -> Self {
+        Self::inferred_watch_with_metadata(session_id, "watch", None)
+    }
+
+    pub fn inferred_watch_with_metadata(
+        session_id: impl Into<String>,
+        agent_id: impl Into<String>,
+        model_id: Option<String>,
+    ) -> Self {
         Self {
             session_id: session_id.into(),
-            agent_id: "watch".to_string(),
-            model_id: None,
+            agent_id: agent_id.into(),
+            model_id: model_id.map(Into::into),
             prompt_hash: None,
             origin: Origin::Ai,
             evidence_strength: EvidenceStrength::Inferred,
@@ -230,6 +238,22 @@ mod tests {
         assert!(!attrs.is_empty(), "attribution should be indexed");
         assert_eq!(attrs[0].1.origin, Origin::Ai);
         assert_eq!(attrs[0].1.agent_id, "claude-code");
+    }
+
+    #[test]
+    fn test_inferred_watch_accepts_agent_and_model_metadata() {
+        let ctx = CaptureContext::inferred_watch_with_metadata(
+            "sess_vscode",
+            "vscode-copilot",
+            Some("openai:gpt-5".to_string()),
+        );
+
+        assert_eq!(ctx.session_id, "sess_vscode");
+        assert_eq!(ctx.agent_id, "vscode-copilot");
+        assert_eq!(ctx.model_id.as_deref(), Some("openai:gpt-5"));
+        assert_eq!(ctx.origin, Origin::Ai);
+        assert_eq!(ctx.evidence_strength, EvidenceStrength::Inferred);
+        assert_eq!(ctx.confidence, 0.6);
     }
 
     #[test]

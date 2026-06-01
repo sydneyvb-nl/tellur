@@ -6,6 +6,9 @@ import { AttributionProvider } from './providers/attribution';
 import { SessionProvider } from './providers/sessions';
 import { InlineDecorationManager } from './decorations';
 import { registerCommands } from './commands';
+import { resolveConfiguredVSCodeModel } from './vscodeModels';
+import { resolveModelSelection } from './modelMetadata';
+import { listVSCodeLanguageModels } from './vscodeModels';
 
 let client: TellurClient;
 let sessionProvider: SessionProvider;
@@ -36,7 +39,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Auto-watch
     if (config.get('autoWatch', false)) {
-        client.startWatch();
+        startVSCodeWatch(config);
     }
 
     // Status bar
@@ -45,8 +48,26 @@ export function activate(context: vscode.ExtensionContext) {
     statusItem.command = 'tellur.sessions';
     statusItem.show();
     context.subscriptions.push(statusItem);
+    updateStatusItem(statusItem);
 }
 
 export function deactivate() {
     client?.stopWatch();
+}
+
+async function startVSCodeWatch(config: vscode.WorkspaceConfiguration): Promise<void> {
+    client.startWatch({
+        agentId: config.get('vscodeAgentId', 'vscode-ai'),
+        agentName: config.get('vscodeAgentName', 'VS Code AI'),
+        modelId: await resolveConfiguredVSCodeModel(),
+    });
+}
+
+async function updateStatusItem(statusItem: vscode.StatusBarItem): Promise<void> {
+    const config = vscode.workspace.getConfiguration('tellur');
+    const selection = resolveModelSelection(
+        await listVSCodeLanguageModels(),
+        config.get('vscodeModelId', ''),
+    );
+    statusItem.tooltip = `Tellur\n${selection.message}`;
 }

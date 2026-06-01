@@ -20,7 +20,7 @@ use std::path::PathBuf;
 
 use tellur_core::capture::{CaptureContext, capture_working_changes};
 use tellur_core::policy::PolicyEngine;
-use tellur_core::schema::types::{Actor, AgentInfo, EventActor, Session};
+use tellur_core::schema::types::{Actor, AgentInfo, EventActor, ModelInfo, Session};
 use tellur_core::storage::{EventWriter, RepoStorage, TraceIndex};
 
 #[derive(Parser)]
@@ -106,7 +106,17 @@ enum Commands {
     },
 
     /// Start watching for AI development activity
-    Watch,
+    Watch {
+        /// Agent/tool identifier to attach to inferred file changes
+        #[arg(long, default_value = "watch")]
+        agent_id: String,
+        /// Human-readable agent/tool name for the session list
+        #[arg(long, default_value = "Tellur Watch")]
+        agent_name: String,
+        /// Optional model identifier, for example openai:gpt-5 or copilot:gpt-4.1
+        #[arg(long)]
+        model_id: Option<String>,
+    },
 
     /// Emit a single event (for generic adapter / CI)
     Event {
@@ -125,6 +135,9 @@ enum Commands {
         /// Exit code (for command events)
         #[arg(long)]
         exit_code: Option<i32>,
+        /// Structured JSON payload to merge into the event payload
+        #[arg(long)]
+        payload_json: Option<String>,
     },
 
     /// Garbage collect expired data
@@ -280,19 +293,25 @@ async fn main() -> Result<()> {
         },
         Commands::Export { format, output } => cmd_export(&format, output.as_deref()),
         Commands::Import { adapter, source } => cmd_import(&adapter, &source).await,
-        Commands::Watch => cmd_watch().await,
+        Commands::Watch {
+            agent_id,
+            agent_name,
+            model_id,
+        } => cmd_watch(&agent_id, &agent_name, model_id).await,
         Commands::Event {
             event_type,
             session,
             file,
             command,
             exit_code,
+            payload_json,
         } => cmd_event(
             &event_type,
             &session,
             file.as_deref(),
             command.as_deref(),
             exit_code,
+            payload_json.as_deref(),
         ),
         Commands::Gc { dry_run } => cmd_gc(dry_run),
         Commands::Verify => cmd_verify(),
@@ -851,7 +870,7 @@ async fn cmd_import(adapter: &str, source: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_watch() -> Result<()> {
+async fn cmd_watch(agent_id: &str, agent_name: &str, model_id: Option<String>) -> Result<()> {
     use notify::{RecursiveMode, Watcher};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -876,11 +895,26 @@ async fn cmd_watch() -> Result<()> {
         repo_id,
         current_actor(),
         AgentInfo {
-            id: "watch".to_string(),
-            name: "Tellur Watch".to_string(),
+            id: agent_id.to_string(),
+            name: agent_name.to_string(),
             version: Some(env!("CARGO_PKG_VERSION").to_string()),
         },
     );
+    let session = if let Some(model_id) = model_id.as_deref() {
+        let mut parts = model_id.splitn(2, ':');
+        let provider = parts.next().unwrap_or("unknown").to_string();
+        let name = parts.next().unwrap_or(model_id).to_string();
+        Session {
+            model: Some(ModelInfo {
+                provider,
+                name,
+                version: None,
+            }),
+            ..session
+        }
+    } else {
+        session
+    };
     let session_id = session.id.clone();
     let index = TraceIndex::open(&storage.index_path)?;
     index.index_session(&session)?;
@@ -893,12 +927,17 @@ async fn cmd_watch() -> Result<()> {
         &session_id,
         "session.start",
         "agent",
-        serde_json::json!({"mode": "watch", "tool": "tellur-cli"}),
+        serde_json::json!({
+            "mode": "watch",
+            "tool": "tellur-cli",
+            "agent_id": agent_id,
+            "model_id": model_id,
+        }),
         None,
     )?;
 
     let policy = load_policy(&storage);
-    let ctx = CaptureContext::inferred_watch(&session_id);
+    let ctx = CaptureContext::inferred_watch_with_metadata(&session_id, agent_id, model_id.clone());
 
     // Filesystem watcher → debounce → capture.
     let (tx, rx) = channel();
@@ -986,6 +1025,7 @@ fn cmd_event(
     file: Option<&str>,
     command: Option<&str>,
     exit_code: Option<i32>,
+    payload_json: Option<&str>,
 ) -> Result<()> {
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
@@ -1007,6 +1047,19 @@ fn cmd_event(
     }
     if let Some(ec) = exit_code {
         payload["exit_code"] = serde_json::json!(ec);
+    }
+    if let Some(raw_payload) = payload_json {
+        let extra: serde_json::Value =
+            serde_json::from_str(raw_payload).context("Invalid --payload-json")?;
+        let Some(extra_obj) = extra.as_object() else {
+            anyhow::bail!("--payload-json must be a JSON object");
+        };
+        let Some(payload_obj) = payload.as_object_mut() else {
+            anyhow::bail!("Internal payload error");
+        };
+        for (key, value) in extra_obj {
+            payload_obj.insert(key.clone(), value.clone());
+        }
     }
 
     let mut writer = EventWriter::new(&storage.traces_dir);

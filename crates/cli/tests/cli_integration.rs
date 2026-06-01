@@ -118,6 +118,50 @@ fn test_notes_help_lists_git_ai_commands() {
 }
 
 #[test]
+fn test_watch_help_lists_vscode_agent_model_metadata_options() {
+    let output = tellur().args(["watch", "--help"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("--agent-id"));
+    assert!(stdout.contains("--agent-name"));
+    assert!(stdout.contains("--model-id"));
+}
+
+#[test]
+fn test_event_accepts_structured_payload_json() {
+    let dir = temp_repo();
+    require_binary()
+        .arg("init")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    let output = require_binary()
+        .args([
+            "event",
+            "--event-type",
+            "prompt.submitted",
+            "--session",
+            "sess_vscode",
+            "--payload-json",
+            r#"{"prompt_hash":"sha256:abc","model_id":"openai:gpt-5"}"#,
+        ])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let storage = RepoStorage::from_git_root(&dir).unwrap();
+    let index = TraceIndex::open(&storage.index_path).unwrap();
+    let events = index.get_session_events("sess_vscode").unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].payload["prompt_hash"], "sha256:abc");
+    assert_eq!(events[0].payload["model_id"], "openai:gpt-5");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn test_notes_export_prints_and_writes_git_ai_note() {
     let dir = temp_repo();
     fs::write(dir.join("src.rs"), "fn main() {}\n").unwrap();

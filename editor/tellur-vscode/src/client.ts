@@ -115,17 +115,45 @@ export class TellurClient {
         return this.exec(['policy', 'check']);
     }
 
+    /** Record structured event payload */
+    async event(eventType: string, session: string, payload: Record<string, unknown>): Promise<string> {
+        return this.exec([
+            'event',
+            '--event-type',
+            eventType,
+            '--session',
+            session,
+            '--payload-json',
+            JSON.stringify(payload),
+        ]);
+    }
+
     /** Start watching for changes */
-    startWatch(): void {
+    startWatch(options?: { agentId?: string; agentName?: string; modelId?: string }): void {
         const workDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (!workDir) return;
+        if (this.watchProcess) return;
 
-        this.watchProcess = execFile(this.binaryPath, ['watch'], { cwd: workDir });
+        const args = ['watch'];
+        if (options?.agentId) {
+            args.push('--agent-id', options.agentId);
+        }
+        if (options?.agentName) {
+            args.push('--agent-name', options.agentName);
+        }
+        if (options?.modelId) {
+            args.push('--model-id', options.modelId);
+        }
+
+        this.watchProcess = execFile(this.binaryPath, args, { cwd: workDir });
         this.watchProcess.stdout?.on('data', (data: Buffer) => {
             this.outputChannel.append(data.toString());
         });
         this.watchProcess.stderr?.on('data', (data: Buffer) => {
             this.outputChannel.append(data.toString());
+        });
+        this.watchProcess.on('exit', () => {
+            this.watchProcess = null;
         });
     }
 

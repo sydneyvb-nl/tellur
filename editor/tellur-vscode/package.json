@@ -61,6 +61,18 @@
       {
         "command": "tellur.stopWatch",
         "title": "Tellur: Stop Watching"
+      },
+      {
+        "command": "tellur.selectVSCodeModel",
+        "title": "Tellur: Select VS Code AI Model"
+      },
+      {
+        "command": "tellur.diagnoseVSCodeModels",
+        "title": "Tellur: Diagnose VS Code AI Models"
+      },
+      {
+        "command": "tellur.recordPrompt",
+        "title": "Tellur: Record AI Prompt"
       }
     ],
     "viewsContainers": {
@@ -111,6 +123,26 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically start watching when opening a workspace"
+        },
+        "tellur.vscodeAgentId": {
+          "type": "string",
+          "default": "vscode-ai",
+          "description": "Agent/tool identifier used for VS Code AI/BYOK watch sessions"
+        },
+        "tellur.vscodeAgentName": {
+          "type": "string",
+          "default": "VS Code AI",
+          "description": "Human-readable agent/tool name used for VS Code AI/BYOK watch sessions"
+        },
+        "tellur.vscodeModelId": {
+          "type": "string",
+          "default": "",
+          "description": "Optional VS Code language model identifier to attach to watch sessions, for example openai:gpt-5"
+        },
+        "tellur.vscodePromptSessionId": {
+          "type": "string",
+          "default": "vscode-ai",
+          "description": "Session ID used when recording VS Code AI prompt hashes manually"
         }
       }
     }
@@ -119,11 +151,20 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "lint": "eslint src --ext ts"
+    "lint": "eslint src --ext ts",
+    "test:unit": "npm run compile && node ./out/test/unit.js",
+    "test:extension": "npm run compile && node ./out/test/runTest.js",
+    "test": "npm run test:unit && npm run test:extension",
+    "package": "npm run compile && vsce package --no-dependencies"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
     "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.6.0",
     "typescript": "^5.4.0"
+  },
+  "overrides": {
+    "cheerio": "1.0.0"
   }
 }

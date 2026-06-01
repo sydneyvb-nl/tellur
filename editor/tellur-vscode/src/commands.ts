@@ -1,10 +1,18 @@
 // Command registration
 
 import * as vscode from 'vscode';
+import { createHash } from 'crypto';
 import { TellurClient } from './client';
 import { SessionProvider } from './providers/sessions';
 import { AttributionProvider } from './providers/attribution';
 import { InlineDecorationManager } from './decorations';
+import { formatModelDiagnostics } from './modelMetadata';
+import {
+    hasLanguageModelApi,
+    listVSCodeLanguageModels,
+    modelKey,
+    resolveConfiguredVSCodeModel,
+} from './vscodeModels';
 
 export function registerCommands(
     context: vscode.ExtensionContext,
@@ -116,9 +124,17 @@ export function registerCommands(
 
     // Start watch
     context.subscriptions.push(
-        vscode.commands.registerCommand('tellur.startWatch', () => {
-            client.startWatch();
-            vscode.window.showInformationMessage('Tellur: Watching started');
+        vscode.commands.registerCommand('tellur.startWatch', async () => {
+            const config = vscode.workspace.getConfiguration('tellur');
+            const modelId = await resolveConfiguredVSCodeModel();
+            client.startWatch({
+                agentId: config.get('vscodeAgentId', 'vscode-ai'),
+                agentName: config.get('vscodeAgentName', 'VS Code AI'),
+                modelId,
+            });
+            vscode.window.showInformationMessage(
+                modelId ? `Tellur: Watching started (${modelId})` : 'Tellur: Watching started'
+            );
         })
     );
 
@@ -127,6 +143,84 @@ export function registerCommands(
         vscode.commands.registerCommand('tellur.stopWatch', () => {
             client.stopWatch();
             vscode.window.showInformationMessage('Tellur: Watching stopped');
+        })
+    );
+
+    // Select VS Code/Copilot/BYOK model metadata for watch sessions
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tellur.selectVSCodeModel', async () => {
+            const models = await listVSCodeLanguageModels();
+            if (models.length === 0) {
+                vscode.window.showWarningMessage(
+                    'No VS Code language models are available. Configure BYOK with "Chat: Manage Language Models" first.'
+                );
+                return;
+            }
+
+            const picked = await vscode.window.showQuickPick(
+                models.map(model => ({
+                    label: model.name,
+                    description: modelKey(model),
+                    detail: [model.family, model.version].filter(Boolean).join(' · '),
+                    model,
+                })),
+                { placeHolder: 'Select the VS Code AI model Tellur should attach to watch sessions' }
+            );
+            if (!picked) return;
+
+            const value = modelKey(picked.model);
+            await vscode.workspace
+                .getConfiguration('tellur')
+                .update('vscodeModelId', value, vscode.ConfigurationTarget.Workspace);
+            vscode.window.showInformationMessage(`Tellur: VS Code AI model set to ${value}`);
+        })
+    );
+
+    // Diagnose VS Code/Copilot/BYOK model visibility and platform limits
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tellur.diagnoseVSCodeModels', async () => {
+            const config = vscode.workspace.getConfiguration('tellur');
+            const models = await listVSCodeLanguageModels();
+            const diagnostics = formatModelDiagnostics(
+                models,
+                config.get('vscodeModelId', ''),
+                hasLanguageModelApi(),
+            );
+            const doc = await vscode.workspace.openTextDocument({
+                content: diagnostics,
+                language: 'markdown',
+            });
+            await vscode.window.showTextDocument(doc);
+        })
+    );
+
+    // Explicit prompt hash recording. VS Code does not expose arbitrary chat
+    // prompts from other participants, so Tellur records only a hash here.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tellur.recordPrompt', async () => {
+            const prompt = await vscode.window.showInputBox({
+                prompt: 'Prompt to hash and record',
+                placeHolder: 'Paste the prompt text. Tellur stores only a SHA-256 hash.',
+                ignoreFocusOut: true,
+            });
+            if (!prompt) return;
+
+            const config = vscode.workspace.getConfiguration('tellur');
+            const modelId = await resolveConfiguredVSCodeModel();
+            const promptHash = `sha256:${createHash('sha256').update(prompt).digest('hex')}`;
+            const session = config.get('vscodePromptSessionId', 'vscode-ai');
+
+            try {
+                await client.event('prompt.submitted', session, {
+                    prompt_hash: promptHash,
+                    model_id: modelId,
+                    tool: 'vscode',
+                    source: 'manual-vscode-command',
+                });
+                vscode.window.showInformationMessage(`Tellur: Recorded prompt ${promptHash.slice(0, 19)}...`);
+            } catch (e: any) {
+                vscode.window.showErrorMessage(`Record prompt failed: ${e.message}`);
+            }
         })
     );
 

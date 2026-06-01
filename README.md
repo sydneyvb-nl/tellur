@@ -278,7 +278,21 @@ VS Code extension:
 cd editor/tellur-vscode
 npm install
 npm run compile
+npm test
+npm run package
 ```
+
+Tellur's VS Code extension supports VS Code/Copilot Bring Your Own Key model
+metadata for watch sessions. Configure BYOK in VS Code with
+`Chat: Manage Language Models`, then run `Tellur: Select VS Code AI Model` if
+more than one model is available. `Tellur: Diagnose VS Code AI Models` shows
+which models VS Code exposes to extensions and what Tellur will attach to new
+watch sessions.
+
+VS Code does not expose a public API that lets one extension intercept arbitrary
+Copilot/BYOK chat prompts from other chat participants. For prompt provenance,
+use `Tellur: Record AI Prompt`; Tellur records a SHA-256 prompt hash plus model
+metadata, not the raw prompt text.
 
 ## Roadmap
 
