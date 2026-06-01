@@ -176,6 +176,9 @@ fn test_setup_agents_installs_user_level_agent_editor_integrations() {
         marketplace["plugins"][0]["source"]["path"],
         "./.codex/plugins/tellur-provenance"
     );
+    let codex_config = fs::read_to_string(home.join(".codex/config.toml")).unwrap();
+    assert!(codex_config.contains(r#"[plugins."tellur-provenance@tellur-local"]"#));
+    assert!(codex_config.contains("enabled = true"));
     let cursor_mcp: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(home.join(".cursor/mcp.json")).unwrap()).unwrap();
     assert_eq!(cursor_mcp["mcpServers"]["tellur"]["args"][0], "mcp");
@@ -298,6 +301,8 @@ fn test_setup_agents_installs_user_level_agent_editor_integrations() {
     assert!(status_stdout.contains("VS Code global integration: missing"));
     assert!(status_stdout.contains("Gemini CLI global integration: missing"));
     assert!(status_stdout.contains("Antigravity global integration: missing"));
+    let codex_config = fs::read_to_string(home.join(".codex/config.toml")).unwrap();
+    assert!(!codex_config.contains(r#"[plugins."tellur-provenance@tellur-local"]"#));
 
     let _ = fs::remove_dir_all(&home);
 }

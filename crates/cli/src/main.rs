@@ -2078,6 +2078,26 @@ fn codex_plugin_status(home: &Path) -> bool {
         && marketplace_plugin_path(&marketplace)
             .as_deref()
             .is_some_and(|path| path == "./.codex/plugins/tellur-provenance")
+        && codex_config_plugin_enabled(home)
+}
+
+fn codex_config_path(home: &Path) -> PathBuf {
+    home.join(".codex/config.toml")
+}
+
+fn codex_config_plugin_enabled(home: &Path) -> bool {
+    std::fs::read_to_string(codex_config_path(home)).is_ok_and(|content| {
+        content
+            .lines()
+            .position(|line| line.trim() == r#"[plugins."tellur-provenance@tellur-local"]"#)
+            .is_some_and(|idx| {
+                content
+                    .lines()
+                    .skip(idx + 1)
+                    .take_while(|line| !line.trim_start().starts_with('['))
+                    .any(|line| line.trim() == "enabled = true")
+            })
+    })
 }
 
 fn marketplace_plugin_path(path: &Path) -> Option<String> {
@@ -2843,6 +2863,27 @@ Do not store raw prompts. Tellur records prompt hashes and sanitized metadata.
         marketplace_path,
         serde_json::to_string_pretty(&marketplace)?,
     )?;
+    enable_codex_plugin_in_config(home)?;
+    Ok(())
+}
+
+fn enable_codex_plugin_in_config(home: &Path) -> Result<()> {
+    let path = codex_config_path(home);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = std::fs::read_to_string(&path).unwrap_or_default();
+    let content = remove_toml_section(&content, r#"[plugins."tellur-provenance@tellur-local"]"#);
+    let mut content = content.trim_end().to_string();
+    if !content.is_empty() {
+        content.push_str("\n\n");
+    }
+    content.push_str(
+        r#"[plugins."tellur-provenance@tellur-local"]
+enabled = true
+"#,
+    );
+    std::fs::write(path, content)?;
     Ok(())
 }
 
@@ -2890,6 +2931,7 @@ fn tellur_hooks_json(command: &str, codex: bool) -> serde_json::Value {
 fn remove_codex_marketplace_entry(home: &Path) -> Result<()> {
     let marketplace_path = home.join(".agents/plugins/marketplace.json");
     if !marketplace_path.exists() {
+        disable_codex_plugin_in_config(home)?;
         return Ok(());
     }
     let content = std::fs::read_to_string(&marketplace_path)?;
@@ -2910,7 +2952,38 @@ fn remove_codex_marketplace_entry(home: &Path) -> Result<()> {
         marketplace_path,
         serde_json::to_string_pretty(&marketplace)?,
     )?;
+    disable_codex_plugin_in_config(home)?;
     Ok(())
+}
+
+fn disable_codex_plugin_in_config(home: &Path) -> Result<()> {
+    let path = codex_config_path(home);
+    if !path.exists() {
+        return Ok(());
+    }
+    let content = std::fs::read_to_string(&path)?;
+    let content = remove_toml_section(&content, r#"[plugins."tellur-provenance@tellur-local"]"#);
+    std::fs::write(path, content.trim_end())?;
+    Ok(())
+}
+
+fn remove_toml_section(content: &str, section: &str) -> String {
+    let mut output = Vec::new();
+    let mut skipping = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == section {
+            skipping = true;
+            continue;
+        }
+        if skipping && trimmed.starts_with('[') {
+            skipping = false;
+        }
+        if !skipping {
+            output.push(line);
+        }
+    }
+    output.join("\n")
 }
 
 fn cmd_hooks_install(tool: &str) -> Result<()> {
