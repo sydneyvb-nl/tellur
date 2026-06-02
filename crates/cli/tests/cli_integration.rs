@@ -198,6 +198,23 @@ fn test_setup_agents_installs_user_level_agent_editor_integrations() {
     assert_eq!(vscode_settings["tellur.vscodeAgentId"], "vscode");
     assert_eq!(vscode_settings["tellur.autoInit"], true);
     assert_eq!(vscode_settings["tellur.captureOnSave"], true);
+    let windsurf_mcp: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(home.join(".codeium/windsurf/mcp_config.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(windsurf_mcp["mcpServers"]["tellur"]["args"][0], "mcp");
+    assert!(
+        PathBuf::from(
+            windsurf_mcp["mcpServers"]["tellur"]["command"]
+                .as_str()
+                .unwrap()
+        )
+        .is_absolute()
+    );
+    let windsurf_settings = read_editor_settings(&home, "Windsurf");
+    assert_eq!(windsurf_settings["tellur.vscodeAgentId"], "windsurf");
+    assert_eq!(windsurf_settings["tellur.autoInit"], true);
+    assert_eq!(windsurf_settings["tellur.captureOnSave"], true);
     let gemini_settings: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(home.join(".gemini/settings.json")).unwrap())
             .unwrap();
@@ -280,6 +297,7 @@ fn test_setup_agents_installs_user_level_agent_editor_integrations() {
     assert!(status_stdout.contains("Codex personal plugin: installed"));
     assert!(status_stdout.contains("Cursor global integration: installed"));
     assert!(status_stdout.contains("VS Code global integration: installed"));
+    assert!(status_stdout.contains("Windsurf global integration: installed"));
     assert!(status_stdout.contains("Gemini CLI global integration: installed"));
     assert!(status_stdout.contains("Antigravity global integration: installed"));
 
@@ -299,10 +317,62 @@ fn test_setup_agents_installs_user_level_agent_editor_integrations() {
     assert!(status_stdout.contains("Codex personal plugin: missing"));
     assert!(status_stdout.contains("Cursor global integration: missing"));
     assert!(status_stdout.contains("VS Code global integration: missing"));
+    assert!(status_stdout.contains("Windsurf global integration: missing"));
     assert!(status_stdout.contains("Gemini CLI global integration: missing"));
     assert!(status_stdout.contains("Antigravity global integration: missing"));
     let codex_config = fs::read_to_string(home.join(".codex/config.toml")).unwrap();
     assert!(!codex_config.contains(r#"[plugins."tellur-provenance@tellur-local"]"#));
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn test_setup_windsurf_installs_editor_and_mcp_config() {
+    let home = std::env::temp_dir().join(format!(
+        "tellur-windsurf-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&home).unwrap();
+
+    let output = require_binary()
+        .args(["setup", "windsurf", "--home", home.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let mcp: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(home.join(".codeium/windsurf/mcp_config.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(mcp["mcpServers"]["tellur"]["args"][0], "mcp");
+    assert!(PathBuf::from(mcp["mcpServers"]["tellur"]["command"].as_str().unwrap()).is_absolute());
+
+    let settings = read_editor_settings(&home, "Windsurf");
+    assert_eq!(settings["tellur.vscodeAgentId"], "windsurf");
+    assert_eq!(settings["tellur.captureOnSave"], true);
+
+    let status = require_binary()
+        .args(["setup", "status", "--home", home.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(status_stdout.contains("Windsurf global integration: installed"));
+
+    let uninstall = require_binary()
+        .args(["setup", "uninstall", "--home", home.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(uninstall.status.success());
+    let status = require_binary()
+        .args(["setup", "status", "--home", home.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(status_stdout.contains("Windsurf global integration: missing"));
 
     let _ = fs::remove_dir_all(&home);
 }

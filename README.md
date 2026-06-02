@@ -188,6 +188,7 @@ tellur mcp                          # Run MCP server over stdio
 tellur setup agents                 # Install one-time global agent/editor integrations
 tellur setup cursor                 # Install Cursor MCP/settings integration
 tellur setup vscode                 # Install VS Code extension settings
+tellur setup windsurf               # Install Windsurf MCP/settings integration
 tellur setup gemini-cli             # Install Gemini CLI hooks
 tellur setup antigravity            # Install Antigravity hooks/MCP integration
 tellur setup status                 # Check global agent integration status
@@ -210,11 +211,11 @@ tellur verify                       # Verify hash-chain integrity
 | VS Code/Copilot | VS Code extension auto-init, watch, save capture, explicit prompt hashing, metadata import | Working with VS Code API limits |
 | Aider | Git commit attribution import | Working |
 | GitHub Copilot | Metadata JSON/JSONL import | Working |
-| Windsurf / Cascade | Cascade agent session JSONL/JSON import | Working |
-| JetBrains AI Assistant / Junie | Action-log JSON/JSONL import | Working |
-| Devin | Cloud agent run/session export import | Working |
-| Continue | `dev_data` JSONL import (VS Code and JetBrains) | Working |
-| Cline / Roo Code | VS Code agent task-history import | Working |
+| Windsurf / Cascade | Windsurf MCP/settings, VS Code-compatible extension save/watch capture, Cascade session JSON/JSONL import | Working |
+| JetBrains AI Assistant / Junie | Action-log JSON/JSONL import (live MCP configured in-IDE) | Working |
+| Devin | Cloud agent run/session export import (live capture via authenticated daemon `POST /events`) | Working |
+| Continue | `dev_data` JSONL import; live save/watch capture when running in a VS Code-family editor | Working |
+| Cline / Roo Code | Task-history JSON/JSONL import; live save/watch capture when running in a VS Code-family editor | Working |
 | Generic | CLI events, JSONL, local HTTP daemon | Working |
 
 Import adapters preserve source event IDs, source timestamps, session IDs, actor,
@@ -234,9 +235,9 @@ known limits, and the adoption roadmap.
 
 ## One-Time Agent Setup
 
-For Codex, Claude Code, Gemini CLI, Antigravity, Cursor, and VS Code, Tellur
-supports user-level installation so users do not need to invoke a skill or
-plugin in every project:
+For Codex, Claude Code, Gemini CLI, Antigravity, Cursor, VS Code, and Windsurf,
+Tellur supports user-level installation so users do not need to invoke a skill
+or plugin in every project:
 
 ```bash
 tellur setup agents
@@ -250,9 +251,10 @@ verification, and PR reporting. It writes Gemini CLI hooks to
 `~/.gemini/settings.json`, Antigravity hooks to `~/.gemini/config/hooks.json`,
 Antigravity MCP config to `~/.gemini/antigravity/mcp_config.json` and
 `~/.gemini/antigravity-cli/mcp_config.json`, Cursor MCP/settings
-(`~/.cursor/mcp.json` plus Cursor user settings), and VS Code user settings so
-the Tellur extension can auto-init, watch, and capture saved files in every Git
-workspace.
+(`~/.cursor/mcp.json` plus Cursor user settings), VS Code user settings, and
+Windsurf MCP/settings (`~/.codeium/windsurf/mcp_config.json` plus Windsurf user
+settings) so the Tellur extension can auto-init, watch, and capture saved files
+in every Git workspace.
 
 Global hooks call the absolute path of the installed `tellur` executable:
 
@@ -268,12 +270,14 @@ working-tree changes when the hook payload includes a concrete file path.
 
 Use `tellur setup status` to inspect installed global integrations and
 `tellur setup uninstall` to remove Tellur-installed global hooks and the local
-Codex plugin, Cursor MCP/settings, and VS Code settings.
+Codex plugin, Cursor MCP/settings, VS Code settings, and Windsurf MCP/settings.
 
-Cursor and VS Code do not have the same documented local lifecycle hook model as
-Codex. Tellur therefore uses the durable editor surfaces they do expose:
-extension save/watch capture, Cursor MCP tools, explicit prompt hashing, Git
-policy checks, and import adapters.
+Cursor, VS Code, and Windsurf do not have the same documented local lifecycle
+hook model as Codex. Tellur therefore uses the durable editor surfaces they do
+expose: extension save/watch capture, MCP tools, explicit prompt hashing, Git
+policy checks, and import adapters. Because Windsurf is a VS Code-compatible
+editor, the same Tellur extension capture also records edits made by agents that
+run inside it, including Cline / Roo Code and Continue.
 
 ### Integration Mechanisms
 
@@ -285,6 +289,7 @@ policy checks, and import adapters.
 | Antigravity 2.0 | `tellur setup antigravity` or `tellur setup agents` | `~/.gemini/config/hooks.json`, `~/.gemini/antigravity/mcp_config.json`, `~/.gemini/antigravity-cli/mcp_config.json` | Antigravity lifecycle hooks call `tellur hooks ingest --source antigravity --auto-init --json-response`; MCP exposes Tellur tools to Antigravity agents. |
 | Cursor | `tellur setup cursor` or `tellur setup agents` | `~/.cursor/mcp.json`, Cursor user `settings.json` | Cursor can call Tellur MCP tools; the installed Tellur extension uses auto-init, watch, and save capture with source `cursor`. |
 | VS Code | `tellur setup vscode` or `tellur setup agents` | VS Code user `settings.json` | The installed extension auto-inits Git workspaces, starts `tellur watch`, and captures saved files through safe hook ingestion with source `vscode`. |
+| Windsurf / Cascade | `tellur setup windsurf` or `tellur setup agents` | `~/.codeium/windsurf/mcp_config.json`, Windsurf user `settings.json` | Windsurf can call Tellur MCP tools; the installed VS Code-compatible extension uses auto-init, watch, and save capture with source `windsurf`. |
 
 All setup commands write absolute `tellur` executable paths. Existing malformed
 JSON settings are not overwritten; setup fails so the user can repair or back up

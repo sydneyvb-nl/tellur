@@ -1,11 +1,27 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-02 (adoption import adapters)
+**Last updated:** 2026-06-02 (Windsurf live capture wiring)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0
 
+> **2026-06-02 — Windsurf live capture.** Started roadmap item #7 ("live capture
+> beyond import") for the adoption tools. Windsurf/Cascade now has live capture,
+> not just import: `tellur setup windsurf` (and `tellur setup agents`) writes
+> Windsurf user settings plus `~/.codeium/windsurf/mcp_config.json`, so the
+> VS Code-compatible Tellur extension captures saves with source `windsurf` and
+> Windsurf agents can call Tellur MCP tools — mirroring the Cursor integration.
+> The same extension capture also records edits made by Continue and Cline/Roo
+> Code when they run inside any VS Code-family editor (VS Code, Cursor, Windsurf).
+> JetBrains stays import-only (MCP is configured in-IDE, no stable global config);
+> Devin stays import-only with live capture available by posting events to the
+> authenticated daemon (`POST /events`). Added `windsurf`/`cascade`,
+> `jetbrains`/`junie`, `devin`, `continue`, and `cline`/`roo` source
+> normalization for `hooks ingest`. Cursor/Windsurf MCP writing is now a shared
+> helper. Covered by a new `setup windsurf` CLI test plus extended `setup agents`
+> assertions.
+>
 > **2026-06-01 — Global agent setup.** Added one-time user-level setup for
 > Codex, Claude Code, Gemini CLI, Antigravity, Cursor, and VS Code:
 > `tellur setup agents` installs global hooks/settings with an absolute `tellur`
@@ -167,7 +183,7 @@ Tellur/
 | 16 | Cursor adapter implementation | 8.2 | ✅ Done | Cursor MCP/settings setup, VS Code-compatible extension capture, JSON/JSONL trace parsing, workspace detection, adapter tests |
 | 16a | Codex CLI adapter implementation | 8.2 | ✅ Done | JSONL event stream/session transcript import via `tellur import codex <file>`, command/prompt/file-write normalization, prompt hashing, strict JSONL errors |
 | 16b | GitHub Copilot adapter implementation | 8.2 | ✅ Done | Metadata JSON/JSONL import via `tellur import copilot <file>`, accepted suggestion + prompt metadata normalization, prompt hashing, no raw metadata payload |
-| 16c | Global agent/editor setup | 8.1/8.3/10/23 | ✅ Done | `tellur setup agents/status/uninstall/cursor/vscode/gemini-cli/antigravity`, user-level Codex/Claude/Gemini/Antigravity hooks, Codex personal plugin scaffold, Antigravity MCP, Cursor MCP/settings, VS Code settings, extension save capture, generic hook ingest with auto-init |
+| 16c | Global agent/editor setup | 8.1/8.3/10/23 | ✅ Done | `tellur setup agents/status/uninstall/cursor/vscode/windsurf/gemini-cli/antigravity`, user-level Codex/Claude/Gemini/Antigravity hooks, Codex personal plugin scaffold, Antigravity MCP, Cursor MCP/settings, VS Code settings, Windsurf MCP/settings, extension save capture, generic hook ingest with auto-init |
 | 16d | Gemini CLI adapter implementation | 8.2 | ✅ Done | `tellur setup gemini-cli`, `~/.gemini/settings.json` hooks, JSONL import via `tellur import gemini-cli <file>`, prompt hashing and metadata sanitization |
 | 16e | Antigravity 2.0 adapter implementation | 8.2/23 | ✅ Done | `tellur setup antigravity`, `~/.gemini/config/hooks.json`, Antigravity app/CLI MCP configs, JSONL import via `tellur import antigravity <file>` |
 | 16f | Shared import loop | 8.2 | ✅ Done | `crates/adapters/src/import.rs`: tolerant JSONL/array/envelope/single-object reader, line-specific errors, sanitized+prompt-hashed payloads, nested-field extraction, numeric epoch timestamps. Reused by the adoption adapters below |
@@ -176,6 +192,7 @@ Tellur/
 | 16i | Devin adapter | 8.2 | ✅ Done | Import via `tellur import devin <file>`; run/session export (object/array/JSONL) for cloud-agent provenance |
 | 16j | Continue adapter | 8.2 | ✅ Done | Import via `tellur import continue <file>`; `dev_data` JSONL with nested `data` payloads |
 | 16k | Cline / Roo Code adapter | 8.2 | ✅ Done | Import via `tellur import cline <file>`; `ui_messages.json`/`api_conversation_history.json` task history, shared by Roo Code |
+| 16l | Windsurf live capture | 8.1/10/23 | ✅ Done | `tellur setup windsurf` writes Windsurf user settings + `~/.codeium/windsurf/mcp_config.json`; VS Code-compatible extension captures saves with source `windsurf` (mirrors Cursor). Same extension also covers Continue/Cline/Roo running in a VS Code-family editor. `hooks ingest` source normalization for windsurf/jetbrains/devin/continue/cline |
 
 ### Phase 3: CLI (PRD sectie 8.1)
 
@@ -256,7 +273,7 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-135 Rust tests, 0 failures, 0 clippy warnings.
+136 Rust tests, 0 failures, 0 clippy warnings.
 - core:      65 tests (schema/event-type round-trip, glob matcher, storage,
              hash-chain verify + reseal, index session/attribution round-trip,
              capture pipeline end-to-end, block_ai_read, attribution, redaction,
@@ -265,7 +282,7 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
              Antigravity, Windsurf, JetBrains, Devin, Continue, Cline/Roo Code,
              Generic, and the shared import loop incl. envelope inheritance,
              content-block extraction, and command-text recovery)
-- cli:       23 integration tests (version/help/init/doctor/status/sessions/verify/import/setup/hooks ingest)
+- cli:       24 integration tests (version/help/init/doctor/status/sessions/verify/import/setup incl. windsurf/hooks ingest)
 - editor:    TypeScript compile, 5 unit tests, VS Code extension integration tests
 ```
 
@@ -314,7 +331,13 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
 4. ~~**Codex CLI adapter**~~ — ✅ Done
 5. ~~**GitHub Copilot adapter**~~ — ✅ Done
 6. ~~**Next first-party adapters for adoption**~~ — ✅ Done as import adapters (Windsurf/Cascade, JetBrains AI / Junie, Devin, Continue, Cline/Roo Code)
-7. **Live capture beyond import** — add lifecycle-hook or daemon-webhook capture for these tools as they expose durable local surfaces
+7. **Live capture beyond import** — in progress. ✅ Windsurf/Cascade live via
+   `tellur setup windsurf` (VS Code-compatible extension + MCP); Continue and
+   Cline/Roo covered by the same extension inside any VS Code-family editor.
+   Remaining: JetBrains needs a dedicated plugin (no stable global MCP config);
+   Devin needs a first-class daemon webhook that normalizes its native payload
+   (today: post pre-shaped events to `POST /events`); lifecycle-hook capture for
+   Windsurf/JetBrains if/when they document a local hook API.
 8. **Team/server mode** — decide architecture after local dashboard settles
 9. **Plugin SDK** — requires stable adapter/event API
 

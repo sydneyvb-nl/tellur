@@ -318,6 +318,12 @@ enum SetupActions {
         #[arg(long)]
         home: Option<PathBuf>,
     },
+    /// Install global Windsurf / Cascade integration
+    Windsurf {
+        /// Override home directory, intended for tests and portable installs
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
     /// Install global Gemini CLI integration
     GeminiCli {
         /// Override home directory, intended for tests and portable installs
@@ -431,6 +437,7 @@ async fn main() -> Result<()> {
             SetupActions::ClaudeCode { home } => cmd_setup_claude_code(home.as_deref()),
             SetupActions::Cursor { home } => cmd_setup_cursor(home.as_deref()),
             SetupActions::Vscode { home } => cmd_setup_vscode(home.as_deref()),
+            SetupActions::Windsurf { home } => cmd_setup_windsurf(home.as_deref()),
             SetupActions::GeminiCli { home } => cmd_setup_gemini_cli(home.as_deref()),
             SetupActions::Antigravity { home } => cmd_setup_antigravity(home.as_deref()),
             SetupActions::Status { home } => cmd_setup_status(home.as_deref()),
@@ -1809,6 +1816,7 @@ const TELLUR_CODEX_HOOK_SOURCE: &str = "codex";
 const TELLUR_CLAUDE_HOOK_SOURCE: &str = "claude-code";
 const TELLUR_CURSOR_HOOK_SOURCE: &str = "cursor";
 const TELLUR_VSCODE_HOOK_SOURCE: &str = "vscode";
+const TELLUR_WINDSURF_HOOK_SOURCE: &str = "windsurf";
 const TELLUR_GEMINI_HOOK_SOURCE: &str = "gemini-cli";
 const TELLUR_ANTIGRAVITY_HOOK_SOURCE: &str = "antigravity";
 
@@ -1831,10 +1839,11 @@ fn cmd_setup_agents(home: Option<&Path>) -> Result<()> {
     install_codex_personal_plugin(&home, &codex_command)?;
     install_cursor_integration(&home, &tellur_exe)?;
     install_vscode_integration(&home, &tellur_exe)?;
+    install_windsurf_integration(&home, &tellur_exe)?;
     install_gemini_cli_integration(&home)?;
     install_antigravity_integration(&home, &tellur_exe)?;
     println!(
-        "✓ Installed Tellur global integrations for Claude Code, Codex, Cursor, VS Code, Gemini CLI, and Antigravity"
+        "✓ Installed Tellur global integrations for Claude Code, Codex, Cursor, VS Code, Windsurf, Gemini CLI, and Antigravity"
     );
     println!(
         "  Claude Code hooks: {}",
@@ -1855,6 +1864,10 @@ fn cmd_setup_agents(home: Option<&Path>) -> Result<()> {
     println!(
         "  VS Code settings: {}",
         vscode_user_settings_path(&home).display()
+    );
+    println!(
+        "  Windsurf MCP/settings: {}",
+        windsurf_mcp_path(&home).display()
     );
     println!(
         "  Gemini CLI settings: {}",
@@ -1910,6 +1923,19 @@ fn cmd_setup_vscode(home: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
+fn cmd_setup_windsurf(home: Option<&Path>) -> Result<()> {
+    let home = home_dir_override(home)?;
+    let tellur_exe = tellur_executable_path()?;
+    install_windsurf_integration(&home, &tellur_exe)?;
+    println!("✓ Installed Tellur global Windsurf integration");
+    println!("  MCP: {}", windsurf_mcp_path(&home).display());
+    println!(
+        "  Settings: {}",
+        windsurf_user_settings_path(&home).display()
+    );
+    Ok(())
+}
+
 fn cmd_setup_gemini_cli(home: Option<&Path>) -> Result<()> {
     let home = home_dir_override(home)?;
     install_gemini_cli_integration(&home)?;
@@ -1943,6 +1969,7 @@ fn cmd_setup_status(home: Option<&Path>) -> Result<()> {
     let plugin = codex_plugin_status(&home);
     let cursor = cursor_integration_status(&home);
     let vscode = vscode_integration_status(&home);
+    let windsurf = windsurf_integration_status(&home);
     let gemini = gemini_integration_status(&home);
     let antigravity = antigravity_integration_status(&home);
     println!(
@@ -1966,6 +1993,10 @@ fn cmd_setup_status(home: Option<&Path>) -> Result<()> {
         if vscode { "installed" } else { "missing" }
     );
     println!(
+        "Windsurf global integration: {}",
+        if windsurf { "installed" } else { "missing" }
+    );
+    println!(
         "Gemini CLI global integration: {}",
         if gemini { "installed" } else { "missing" }
     );
@@ -1987,6 +2018,7 @@ fn cmd_setup_uninstall(home: Option<&Path>) -> Result<()> {
     remove_codex_marketplace_entry(&home)?;
     uninstall_cursor_integration(&home)?;
     uninstall_vscode_integration(&home)?;
+    uninstall_windsurf_integration(&home)?;
     uninstall_gemini_cli_integration(&home)?;
     uninstall_antigravity_integration(&home)?;
     println!("✓ Removed Tellur global integrations where present");
@@ -2148,6 +2180,14 @@ fn vscode_user_settings_path(home: &Path) -> PathBuf {
     editor_user_settings_path(home, "Code")
 }
 
+fn windsurf_user_settings_path(home: &Path) -> PathBuf {
+    editor_user_settings_path(home, "Windsurf")
+}
+
+fn windsurf_mcp_path(home: &Path) -> PathBuf {
+    home.join(".codeium/windsurf/mcp_config.json")
+}
+
 fn gemini_settings_path(home: &Path) -> PathBuf {
     home.join(".gemini/settings.json")
 }
@@ -2239,8 +2279,14 @@ fn install_editor_settings(
 }
 
 fn install_cursor_mcp(home: &Path, tellur_exe: &Path) -> Result<()> {
-    let path = cursor_mcp_path(home);
-    let mut config = read_json_object_or_empty(&path)?;
+    install_tellur_mcp_server(&cursor_mcp_path(home), tellur_exe)
+}
+
+/// Write a `tellur mcp` server entry into an `mcpServers` JSON config, preserving
+/// any other servers already configured. Shared by Cursor and Windsurf, which
+/// both use the standard `mcpServers` config shape.
+fn install_tellur_mcp_server(path: &Path, tellur_exe: &Path) -> Result<()> {
+    let mut config = read_json_object_or_empty(path)?;
     let servers = config
         .entry("mcpServers".to_string())
         .or_insert_with(|| serde_json::json!({}));
@@ -2254,7 +2300,7 @@ fn install_cursor_mcp(home: &Path, tellur_exe: &Path) -> Result<()> {
             "args": ["mcp"]
         }),
     );
-    write_json_object(&path, config)
+    write_json_object(path, config)
 }
 
 fn read_json_object_or_empty(path: &Path) -> Result<serde_json::Map<String, serde_json::Value>> {
@@ -2319,7 +2365,11 @@ fn editor_settings_status(path: &Path, agent_id: &str) -> bool {
 }
 
 fn cursor_mcp_status(home: &Path) -> bool {
-    let Ok(config) = read_json_object_or_empty(&cursor_mcp_path(home)) else {
+    tellur_mcp_server_status(&cursor_mcp_path(home))
+}
+
+fn tellur_mcp_server_status(path: &Path) -> bool {
+    let Ok(config) = read_json_object_or_empty(path) else {
         return false;
     };
     let Some(server) = config
@@ -2369,15 +2419,41 @@ fn remove_editor_settings(path: &Path) -> Result<()> {
 }
 
 fn remove_cursor_mcp(home: &Path) -> Result<()> {
-    let path = cursor_mcp_path(home);
+    remove_tellur_mcp_server(&cursor_mcp_path(home))
+}
+
+fn remove_tellur_mcp_server(path: &Path) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    let mut config = read_json_object_or_empty(&path)?;
+    let mut config = read_json_object_or_empty(path)?;
     if let Some(servers) = config.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
         servers.remove("tellur");
     }
-    write_json_object(&path, config)
+    write_json_object(path, config)
+}
+
+fn install_windsurf_integration(home: &Path, tellur_exe: &Path) -> Result<()> {
+    install_editor_settings(
+        &windsurf_user_settings_path(home),
+        tellur_exe,
+        TELLUR_WINDSURF_HOOK_SOURCE,
+        "Windsurf / Cascade",
+    )?;
+    install_tellur_mcp_server(&windsurf_mcp_path(home), tellur_exe)?;
+    Ok(())
+}
+
+fn windsurf_integration_status(home: &Path) -> bool {
+    editor_settings_status(
+        &windsurf_user_settings_path(home),
+        TELLUR_WINDSURF_HOOK_SOURCE,
+    ) && tellur_mcp_server_status(&windsurf_mcp_path(home))
+}
+
+fn uninstall_windsurf_integration(home: &Path) -> Result<()> {
+    remove_editor_settings(&windsurf_user_settings_path(home))?;
+    remove_tellur_mcp_server(&windsurf_mcp_path(home))
 }
 
 fn install_gemini_cli_integration(home: &Path) -> Result<()> {
@@ -3324,6 +3400,11 @@ fn cmd_hooks_ingest(source: &str, auto_init: bool, json_response: bool) -> Resul
     let agent_name = match source {
         "codex" => "Codex",
         "claude-code" => "Claude Code",
+        "windsurf" => "Windsurf / Cascade",
+        "jetbrains" => "JetBrains AI / Junie",
+        "devin" => "Devin",
+        "continue" => "Continue",
+        "cline" => "Cline / Roo Code",
         other => other,
     };
 
@@ -3454,6 +3535,11 @@ fn normalize_hook_source(source: &str) -> &str {
         "codex" | "codex-cli" => "codex",
         "gemini" | "gemini-cli" => "gemini-cli",
         "antigravity" | "google-antigravity" => "antigravity",
+        "windsurf" | "cascade" => "windsurf",
+        "jetbrains" | "junie" | "jetbrains-ai" => "jetbrains",
+        "devin" => "devin",
+        "continue" | "continue-dev" => "continue",
+        "cline" | "roo" | "roo-code" => "cline",
         other => other,
     }
 }
