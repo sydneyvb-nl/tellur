@@ -1,6 +1,6 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-02 (README discoverability refresh)
+**Last updated:** 2026-06-02 (adoption import adapters)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
@@ -16,6 +16,19 @@
 > without per-project plugin invocation. Hook ingest now ignores invalid JSON,
 > refuses malformed setup config instead of overwriting it, and never falls back
 > to whole-tree capture when a tool hook lacks a file path.
+>
+> **2026-06-02 — Adoption import adapters.** Added five import adapters from the
+> roadmap: Windsurf/Cascade, JetBrains AI Assistant / Junie, Devin, Continue, and
+> Cline/Roo Code (the latter covers Roo Code via the shared task format). To keep
+> these maintainable, the tolerant JSONL/array/envelope parsing loop, payload
+> sanitization, prompt hashing, and field extraction now live in one shared
+> module `crates/adapters/src/import.rs`; each new adapter only defines its
+> tool-specific event-type mapping. `import.rs` also reads single JSON objects,
+> envelope objects (`events`/`messages` arrays), and numeric epoch timestamps
+> (Cline). `first_string`/`json_path` moved out of the Gemini adapter into the
+> shared module. All five are wired into `tellur import <adapter> <source>`,
+> registered as built-in adapters, and covered by unit + CLI integration tests.
+> They are import-only because none expose a documented local lifecycle hook.
 >
 > **2026-06-02 — README discoverability refresh.** Updated the public README
 > with a generated social/hero image, `https://tellur.dev`, clearer value
@@ -150,6 +163,12 @@ Tellur/
 | 16c | Global agent/editor setup | 8.1/8.3/10/23 | ✅ Done | `tellur setup agents/status/uninstall/cursor/vscode/gemini-cli/antigravity`, user-level Codex/Claude/Gemini/Antigravity hooks, Codex personal plugin scaffold, Antigravity MCP, Cursor MCP/settings, VS Code settings, extension save capture, generic hook ingest with auto-init |
 | 16d | Gemini CLI adapter implementation | 8.2 | ✅ Done | `tellur setup gemini-cli`, `~/.gemini/settings.json` hooks, JSONL import via `tellur import gemini-cli <file>`, prompt hashing and metadata sanitization |
 | 16e | Antigravity 2.0 adapter implementation | 8.2/23 | ✅ Done | `tellur setup antigravity`, `~/.gemini/config/hooks.json`, Antigravity app/CLI MCP configs, JSONL import via `tellur import antigravity <file>` |
+| 16f | Shared import loop | 8.2 | ✅ Done | `crates/adapters/src/import.rs`: tolerant JSONL/array/envelope/single-object reader, line-specific errors, sanitized+prompt-hashed payloads, nested-field extraction, numeric epoch timestamps. Reused by the adoption adapters below |
+| 16g | Windsurf/Cascade adapter | 8.2 | ✅ Done | Import via `tellur import windsurf <file>`; Cascade tool calls, file edits, commands, chat turns |
+| 16h | JetBrains AI Assistant / Junie adapter | 8.2 | ✅ Done | Import via `tellur import jetbrains <file>`; AI Assistant + Junie action logs (JSON/array/JSONL) |
+| 16i | Devin adapter | 8.2 | ✅ Done | Import via `tellur import devin <file>`; run/session export (object/array/JSONL) for cloud-agent provenance |
+| 16j | Continue adapter | 8.2 | ✅ Done | Import via `tellur import continue <file>`; `dev_data` JSONL with nested `data` payloads |
+| 16k | Cline / Roo Code adapter | 8.2 | ✅ Done | Import via `tellur import cline <file>`; `ui_messages.json`/`api_conversation_history.json` task history, shared by Roo Code |
 
 ### Phase 3: CLI (PRD sectie 8.1)
 
@@ -230,13 +249,15 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-106 Rust tests, 0 failures, 0 clippy warnings.
+128 Rust tests, 0 failures, 0 clippy warnings.
 - core:      65 tests (schema/event-type round-trip, glob matcher, storage,
              hash-chain verify + reseal, index session/attribution round-trip,
              capture pipeline end-to-end, block_ai_read, attribution, redaction,
              policy, export, PR report, dashboard daemon endpoints)
-- adapters:  20 tests (Claude Code, Aider, Cursor, Codex, Copilot, Gemini CLI, Antigravity, Generic)
-- cli:       21 integration tests (version/help/init/doctor/status/sessions/verify/import/setup/hooks ingest)
+- adapters:  40 tests (Claude Code, Aider, Cursor, Codex, Copilot, Gemini CLI,
+             Antigravity, Windsurf, JetBrains, Devin, Continue, Cline/Roo Code,
+             Generic, and the shared import loop)
+- cli:       23 integration tests (version/help/init/doctor/status/sessions/verify/import/setup/hooks ingest)
 - editor:    TypeScript compile, 5 unit tests, VS Code extension integration tests
 ```
 
@@ -284,9 +305,10 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
 3. ~~**VS Code/Cursor-compatible extension**~~ — ✅ Done
 4. ~~**Codex CLI adapter**~~ — ✅ Done
 5. ~~**GitHub Copilot adapter**~~ — ✅ Done
-6. **Next first-party adapters for adoption** — Windsurf/Cascade, JetBrains AI Assistant / Junie, Devin, Continue, Cline/Roo Code
-7. **Team/server mode** — decide architecture after local dashboard settles
-8. **Plugin SDK** — requires stable adapter/event API
+6. ~~**Next first-party adapters for adoption**~~ — ✅ Done as import adapters (Windsurf/Cascade, JetBrains AI / Junie, Devin, Continue, Cline/Roo Code)
+7. **Live capture beyond import** — add lifecycle-hook or daemon-webhook capture for these tools as they expose durable local surfaces
+8. **Team/server mode** — decide architecture after local dashboard settles
+9. **Plugin SDK** — requires stable adapter/event API
 
 ---
 

@@ -61,4 +61,34 @@ pub const BUILTIN_ADAPTERS: &[BuiltinAdapter] = &[
         description: "GitHub Copilot metadata import",
         supports_hooks: false,
     },
+    BuiltinAdapter {
+        id: "windsurf",
+        name: "Windsurf",
+        description: "Windsurf / Cascade agent session JSONL import",
+        supports_hooks: false,
+    },
+    BuiltinAdapter {
+        id: "jetbrains",
+        name: "JetBrains AI / Junie",
+        description: "JetBrains AI Assistant and Junie action-log import",
+        supports_hooks: false,
+    },
+    BuiltinAdapter {
+        id: "devin",
+        name: "Devin",
+        description: "Devin cloud agent run/session export import",
+        supports_hooks: false,
+    },
+    BuiltinAdapter {
+        id: "continue",
+        name: "Continue",
+        description: "Continue dev_data JSONL import",
+        supports_hooks: false,
+    },
+    BuiltinAdapter {
+        id: "cline",
+        name: "Cline / Roo Code",
+        description: "Cline and Roo Code task-history import",
+        supports_hooks: false,
+    },
 ];

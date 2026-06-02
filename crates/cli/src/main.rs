@@ -101,7 +101,7 @@ enum Commands {
 
     /// Import events from an external source
     Import {
-        /// Adapter to import from: claude-code | aider | cursor | generic | codex | copilot | gemini-cli | antigravity
+        /// Adapter to import from: claude-code | aider | cursor | generic | codex | copilot | gemini-cli | antigravity | windsurf | jetbrains | devin | continue | cline
         adapter: String,
         /// Source path
         source: PathBuf,
@@ -937,9 +937,29 @@ async fn cmd_import(adapter: &str, source: &std::path::Path) -> Result<()> {
             let a = tellur_adapters::AntigravityAdapter::new();
             a.parse_jsonl(source, "imported")?
         }
+        "windsurf" | "cascade" => {
+            let a = tellur_adapters::WindsurfAdapter::new();
+            a.parse_jsonl(source, "imported")?
+        }
+        "jetbrains" | "jetbrains-ai" | "junie" => {
+            let a = tellur_adapters::JetBrainsAdapter::new();
+            a.parse_export(source, "imported")?
+        }
+        "devin" => {
+            let a = tellur_adapters::DevinAdapter::new();
+            a.parse_export(source, "imported")?
+        }
+        "continue" | "continue-dev" => {
+            let a = tellur_adapters::ContinueAdapter::new();
+            a.parse_jsonl(source, "imported")?
+        }
+        "cline" | "roo" | "roo-code" => {
+            let a = tellur_adapters::ClineAdapter::new();
+            a.parse_task(source, "imported")?
+        }
         _ => {
             println!(
-                "Unknown adapter: {}. Supported: claude-code, aider, cursor, generic, codex, copilot, gemini-cli, antigravity",
+                "Unknown adapter: {}. Supported: claude-code, aider, cursor, generic, codex, copilot, gemini-cli, antigravity, windsurf, jetbrains, devin, continue, cline",
                 adapter
             );
             return Ok(());
