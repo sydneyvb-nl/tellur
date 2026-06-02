@@ -1,50 +1,73 @@
+<p align="center">
+  <a href="https://tellur.dev">
+    <img src="docs/assets/tellur-readme-hero.jpg" alt="Tellur local-first AI code provenance" width="100%" />
+  </a>
+</p>
+
 # Tellur
 
-**Local-first AI code provenance for software teams.**
+**Local-first AI code provenance for teams shipping AI-assisted software.**
 
-Tellur records how AI participated in a codebase: which agent changed which
-lines, what model and prompt context were involved, whether tests ran, and
-whether sensitive changes were reviewed.
+[![Website](https://img.shields.io/badge/website-tellur.dev-69d3a5)](https://tellur.dev)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-2024-f46623.svg)](Cargo.toml)
+[![Adapters](https://img.shields.io/badge/adapters-Codex%20%7C%20Claude%20%7C%20Cursor%20%7C%20Copilot-111827)](docs/ADAPTERS.md)
 
-Git tells you what changed. Tellur tells you how AI participated.
+Git tells you **what** changed. Tellur tells you **how AI participated**.
 
-Tellur is open source, runs locally, and stores provenance data inside your
-repository. Your source code does not need to leave your machine.
+Tellur records AI-assisted development evidence in your repository: which agent
+changed which lines, what model and prompt hash were involved, whether tests
+ran, and whether sensitive changes need human review. It is open source,
+local-first, and built for developers, maintainers, security reviewers, and
+teams that need an audit trail for AI-generated code.
 
-## Why Tellur
+**Website:** [tellur.dev](https://tellur.dev)
 
-AI coding agents are now part of everyday development, but most teams still
-review AI-assisted changes with standard Git metadata only. That leaves
+## Why Developers Star Tellur
+
+- **AI code attribution:** explain whether a line was human-written,
+  AI-generated, or mixed.
+- **Local-first provenance:** store evidence in `.tellur/`; source code does not
+  need to leave your machine.
+- **Tamper-evident audit trail:** append-only JSONL events are sealed with a
+  SHA-256 hash chain.
+- **PR risk reports:** surface AI involvement, sensitive paths, test evidence,
+  and review gaps before merge.
+- **Multi-agent adapters:** capture or import evidence from Codex, Claude Code,
+  Cursor, VS Code/Copilot, Gemini CLI, Antigravity, Aider, and generic tools.
+- **Policy-as-code:** define rules for auth, payments, secrets, infra, blocked
+  AI reads, required tests, and required human review.
+
+If Tellur helps you make AI-assisted code review safer, star the repo so other
+developers can find it.
+
+## The Problem
+
+AI coding agents are now part of everyday software development, but most teams
+still review AI-assisted changes with standard Git metadata only. That leaves
 important questions unanswered:
 
 - Which lines were AI-generated, human-written, or mixed?
-- Which model, tool, prompt, and session produced a change?
-- Did the agent touch sensitive files such as auth, payments, secrets, or infra?
+- Which model, tool, prompt hash, and session produced a change?
+- Did the agent touch security-sensitive code such as auth, payments, secrets,
+  or infrastructure?
 - Were tests run before the change was merged?
 - Does a PR need extra review because of AI involvement?
 
-Tellur turns those questions into local, queryable evidence for developers,
-reviewers, maintainers, and compliance workflows.
+Tellur turns those questions into local, queryable evidence for code review,
+compliance, supply-chain provenance, and engineering governance.
 
-## What It Does
+## What Tellur Does
 
-- **Line-level attribution** maps code ranges to an agent, model, session,
-  prompt hash, evidence strength, and confidence score.
-- **Session capture** records AI-assisted activity from CLI commands, editor
-  hooks, importers, and the local daemon.
-- **PR risk reports** summarize AI involvement, sensitive paths, tests, review
-  gaps, and policy warnings.
-- **Policy-as-code** lets teams define YAML rules for sensitive paths, required
-  tests, human review, and blocked AI reads.
-- **Tamper-evident logs** store events as JSONL with a SHA-256 hash chain.
-- **Fast local queries** use a SQLite index for CLI, VS Code, MCP, and dashboard
-  views.
-- **Provenance export** produces portable bundles for developer, OSS,
-  corporate, audit, release, and CI workflows.
-- **Git notes interop** can publish compact Git AI-compatible authorship notes
-  under `refs/notes/ai` so commit-level attribution travels with Git history.
-- **Secret redaction** detects and sanitizes common keys, tokens, passwords, and
-  private key material.
+| Capability | What you get |
+| --- | --- |
+| Line-level attribution | Code ranges mapped to agent, model, session, prompt hash, evidence strength, and confidence score. |
+| Session capture | AI-assisted activity from CLI commands, editor hooks, importers, MCP, and the local daemon. |
+| PR risk reports | AI involvement, sensitive paths, test evidence, review gaps, and policy warnings. |
+| Tamper-evident logs | Append-only JSONL with a SHA-256 hash chain for local verification. |
+| Fast local queries | SQLite index powering CLI, VS Code/Cursor extension, MCP tools, daemon, and dashboard views. |
+| Portable exports | Provenance bundles for developer, OSS, corporate, audit, release, and CI workflows. |
+| Secret redaction | Cleanup for common keys, tokens, passwords, and private key material. |
 
 ## Status
 

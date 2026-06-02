@@ -1,6 +1,6 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-01 (global agent/editor integrations)
+**Last updated:** 2026-06-02 (README discoverability refresh)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
@@ -16,6 +16,11 @@
 > without per-project plugin invocation. Hook ingest now ignores invalid JSON,
 > refuses malformed setup config instead of overwriting it, and never falls back
 > to whole-tree capture when a tool hook lacks a file path.
+>
+> **2026-06-02 — README discoverability refresh.** Updated the public README
+> with a generated social/hero image, `https://tellur.dev`, clearer value
+> proposition, badges, search-friendly AI code provenance language, and a
+> stronger star/discovery prompt. No adapter behavior changed.
 >
 > **2026-06-01 — Adapter hardening.** Tightened adapter imports after review:
 > imported events now preserve source IDs, timestamps, session IDs, actors, and
