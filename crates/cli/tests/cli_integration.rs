@@ -935,3 +935,73 @@ fn test_import_copilot_jsonl() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn test_import_windsurf_jsonl() {
+    let dir = temp_repo();
+    require_binary()
+        .arg("init")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let events = dir.join("cascade.jsonl");
+    let lines = [
+        serde_json::json!({
+            "cascadeId": "cascade-1",
+            "type": "user_message",
+            "message": "add a CLI flag"
+        }),
+        serde_json::json!({
+            "cascadeId": "cascade-1",
+            "type": "write_file",
+            "file_path": "src/cli.rs"
+        }),
+    ]
+    .iter()
+    .map(serde_json::Value::to_string)
+    .collect::<Vec<_>>()
+    .join("\n");
+    fs::write(&events, lines).unwrap();
+
+    let output = require_binary()
+        .args(["import", "windsurf"])
+        .arg(&events)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Imported 2 events from windsurf"));
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_import_cline_json_array_task() {
+    let dir = temp_repo();
+    require_binary()
+        .arg("init")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let events = dir.join("ui_messages.json");
+    let doc = serde_json::json!([
+        {"ts": 1_700_000_000_000_i64, "type": "say", "say": "user_feedback", "text": "ship it"},
+        {"ts": 1_700_000_001_000_i64, "type": "ask", "ask": "command", "text": "cargo test"}
+    ]);
+    fs::write(&events, doc.to_string()).unwrap();
+
+    let output = require_binary()
+        .args(["import", "cline"])
+        .arg(&events)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Imported 2 events from cline"));
+
+    let _ = fs::remove_dir_all(&dir);
+}

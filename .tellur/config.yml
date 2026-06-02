@@ -1,0 +1,26 @@
+# Tellur Configuration
+version: 1
+
+storage:
+  mode: local
+  traces_dir: traces
+  index_type: sqlite
+
+redaction:
+  mode: automatic
+  hash_prompts: true
+  store_prompt_excerpt: false
+  redact_patterns:
+    - "(?i)api[_-]?key\\s*=\\s*.+"
+    - "(?i)password\\s*=\\s*.+"
+    - "(?i)token\\s*=\\s*.+"
+
+retention:
+  keep_days: 90
+  keep_release_related: true
+  delete_prompts_after_days: 30
+
+attribution:
+  confidence_threshold: 0.7
+  range_fingerprint_window: 5
+  semantic_anchors: true

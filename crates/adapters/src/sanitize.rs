@@ -1,7 +1,18 @@
 use tellur_core::redaction::RedactionEngine;
 use tellur_core::schema::ids::hash_content;
 
-const TEXT_CONTENT_KEYS: &[&str] = &["message", "prompt", "text", "content"];
+// Prompt-like fields hashed rather than stored as raw text. Kept in sync with
+// `import::PROMPT_LEAF_KEYS` so adapters that use the shared import loop hash the
+// same fields here inside `raw_payload`.
+const TEXT_CONTENT_KEYS: &[&str] = &[
+    "message",
+    "prompt",
+    "text",
+    "content",
+    "user_response",
+    "user_message",
+    "question",
+];
 
 pub fn prompt_hash(value: &serde_json::Value) -> Option<String> {
     value.as_str().map(hash_content)

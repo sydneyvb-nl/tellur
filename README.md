@@ -79,8 +79,9 @@ capture -> attribution -> event log -> SQLite index -> CLI/editor/reports
 
 Implemented surfaces include the CLI, global Codex/Claude Code/Gemini
 CLI/Antigravity hooks, Cursor MCP/settings, VS Code/Cursor extension capture,
-importers for Cursor, Aider, Codex CLI, Gemini CLI, Antigravity, and GitHub
-Copilot, a local token-authenticated daemon, an MCP stdio server, provenance
+importers for Cursor, Aider, Codex CLI, Gemini CLI, Antigravity, GitHub
+Copilot, Windsurf/Cascade, JetBrains AI/Junie, Devin, Continue, and
+Cline/Roo Code, a local token-authenticated daemon, an MCP stdio server, provenance
 export, Git notes interop, and a static session replay dashboard backed by
 daemon data.
 
@@ -137,6 +138,11 @@ tellur import cursor path/to/agent-trace.json
 tellur import aider path/to/repo
 tellur import codex path/to/codex-events.jsonl
 tellur import copilot path/to/copilot-metadata.jsonl
+tellur import windsurf path/to/cascade-session.jsonl
+tellur import jetbrains path/to/ai-assistant-export.json
+tellur import devin path/to/devin-run.json
+tellur import continue path/to/.continue/dev_data/chat.jsonl
+tellur import cline path/to/tasks/<id>/ui_messages.json
 ```
 
 Query attribution:
@@ -204,6 +210,11 @@ tellur verify                       # Verify hash-chain integrity
 | VS Code/Copilot | VS Code extension auto-init, watch, save capture, explicit prompt hashing, metadata import | Working with VS Code API limits |
 | Aider | Git commit attribution import | Working |
 | GitHub Copilot | Metadata JSON/JSONL import | Working |
+| Windsurf / Cascade | Cascade agent session JSONL/JSON import | Working |
+| JetBrains AI Assistant / Junie | Action-log JSON/JSONL import | Working |
+| Devin | Cloud agent run/session export import | Working |
+| Continue | `dev_data` JSONL import (VS Code and JetBrains) | Working |
+| Cline / Roo Code | VS Code agent task-history import | Working |
 | Generic | CLI events, JSONL, local HTTP daemon | Working |
 
 Import adapters preserve source event IDs, source timestamps, session IDs, actor,
@@ -339,7 +350,7 @@ Tellur/
 ├── crates/
 │   ├── core/          # Schemas, attribution, storage, policy, export, daemon, MCP
 │   ├── cli/           # tellur command
-│   └── adapters/      # Claude Code, Cursor, Aider, Codex, Copilot, Generic
+│   └── adapters/      # Claude Code, Cursor, Aider, Codex, Copilot, Gemini, Antigravity, Windsurf, JetBrains, Devin, Continue, Cline, Generic
 ├── editor/            # VS Code extension
 ├── schemas/           # JSON Schema definitions
 ├── dist/              # npm wrapper and Homebrew formula
@@ -401,8 +412,7 @@ metadata, not the raw prompt text.
 ## Roadmap
 
 - Team/server mode for shared organizational visibility
-- More first-party adapters for emerging AI coding tools, prioritized as:
-  Windsurf/Cascade, JetBrains AI Assistant / Junie, Devin, Continue, and Cline/Roo Code
+- Live lifecycle-hook capture (beyond import) for editors that expose it
 - Richer policy templates for security-sensitive repositories
 - Packaged releases for npm, Homebrew, and GitHub Releases
 

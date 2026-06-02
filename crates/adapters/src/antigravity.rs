@@ -39,7 +39,7 @@ impl AntigravityAdapter {
             }
             let raw = serde_json::from_str::<serde_json::Value>(line)
                 .with_context(|| format!("invalid Antigravity JSONL at line {}", idx + 1))?;
-            if let Some(id) = crate::gemini::first_string(
+            if let Some(id) = crate::import::first_string(
                 &raw,
                 &[
                     &["conversationId"],
@@ -53,11 +53,11 @@ impl AntigravityAdapter {
             }
             events.push(TraceEvent {
                 schema: "tellur.event.v1".to_string(),
-                id: crate::gemini::first_string(&raw, &[&["id"], &["event_id"], &["eventId"]])
+                id: crate::import::first_string(&raw, &[&["id"], &["event_id"], &["eventId"]])
                     .map(ToString::to_string)
                     .unwrap_or_else(tellur_core::schema::ids::generate_event_id),
                 session_id: session_id.clone(),
-                timestamp: crate::gemini::first_string(
+                timestamp: crate::import::first_string(
                     &raw,
                     &[&["timestamp"], &["time"], &["created_at"]],
                 )

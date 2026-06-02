@@ -1,0 +1,18 @@
+# Tellur Default Policy
+version: 1
+
+sensitive_paths:
+  - path: "src/auth/**"
+    tags: ["auth", "security-sensitive"]
+    require_human_review: true
+    require_tests: true
+
+  - path: "**/.env*"
+    tags: ["secrets"]
+    block_ai_read: true
+
+  - path: "infra/**"
+    tags: ["infrastructure"]
+    block_ai_automerge: true
+
+rules: []

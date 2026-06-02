@@ -6,6 +6,8 @@ use anyhow::{Context, Result};
 use tellur_core::adapter::{AdapterCapabilities, AdapterInfo, AgentAdapter};
 use tellur_core::schema::types::*;
 
+use crate::import::first_string;
+
 pub struct GeminiAdapter {
     info: AdapterInfo,
 }
@@ -147,20 +149,6 @@ pub(crate) fn google_agent_payload(raw: &serde_json::Value, tool_name: &str) -> 
         out["file_path"] = crate::sanitize::sanitized_value(&serde_json::json!(file_path));
     }
     out
-}
-
-pub(crate) fn first_string<'a>(value: &'a serde_json::Value, paths: &[&[&str]]) -> Option<&'a str> {
-    paths
-        .iter()
-        .filter_map(|path| json_path(value, path))
-        .find_map(|value| value.as_str())
-}
-
-fn json_path<'a>(mut value: &'a serde_json::Value, path: &[&str]) -> Option<&'a serde_json::Value> {
-    for key in path {
-        value = value.get(*key)?;
-    }
-    Some(value)
 }
 
 #[async_trait::async_trait]
