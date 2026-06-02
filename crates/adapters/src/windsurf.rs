@@ -76,20 +76,21 @@ fn event_type(raw: &Value) -> EventType {
     match kind.or(tool) {
         Some("session_start" | "start" | "cascade_start") => EventType::SessionStart,
         Some("session_end" | "end" | "cascade_end") => EventType::SessionEnd,
-        Some("user_message" | "user_prompt" | "prompt" | "prompt_submitted" | "message") => {
-            EventType::UserPrompt
-        }
+        Some(
+            "user_message" | "user_prompt" | "user_input" | "prompt" | "prompt_submitted"
+            | "message",
+        ) => EventType::UserPrompt,
         Some("tool_call_start" | "pre_tool" | "before_tool") => EventType::ToolPreCall,
         Some("tool_call_end" | "post_tool" | "after_tool") => EventType::ToolPostCall,
         Some(
-            "write_file" | "edit_file" | "edit" | "file_edit" | "propose_code" | "apply_diff"
-            | "write_to_file" | "write",
+            "write_file" | "edit_file" | "edit" | "file_edit" | "code_action" | "propose_code"
+            | "apply_diff" | "write_to_file" | "write",
         ) => EventType::FileWrite,
         Some("read_file" | "view_file" | "view_code_item" | "read") => EventType::FileRead,
         Some("run_command" | "run_terminal_cmd" | "terminal" | "command") => {
             EventType::CommandExecution
         }
-        Some("assistant_message" | "cascade_response" | "agent_message") => {
+        Some("assistant_message" | "cascade_response" | "planner_response" | "agent_message") => {
             EventType::Custom("windsurf.response".to_string())
         }
         Some(other) => EventType::Custom(format!("windsurf.{other}")),
@@ -179,5 +180,39 @@ mod tests {
         assert_eq!(events[1].payload["file_path"], "src/parser.rs");
         assert_eq!(events[2].event_type, EventType::CommandExecution);
         assert_eq!(events[2].payload["command"], "cargo build");
+    }
+
+    #[test]
+    fn test_parse_windsurf_transcript_event_names() {
+        // Mirrors Cascade's transcript export, where prompts and edits use
+        // `user_input`/`code_action` with nested fields.
+        let adapter = WindsurfAdapter::new();
+        let dir = std::env::temp_dir().join("tellur_test_windsurf_transcript");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("transcript.jsonl");
+        let lines = [
+            serde_json::json!({
+                "cascadeId": "cascade-2",
+                "type": "user_input",
+                "user_input": {"user_response": "rename the module"}
+            }),
+            serde_json::json!({
+                "cascadeId": "cascade-2",
+                "type": "code_action",
+                "code_action": {"path": "src/module.rs"}
+            }),
+        ]
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+        std::fs::write(&path, lines).unwrap();
+
+        let events = adapter.parse_jsonl(&path, "fallback").unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event_type, EventType::UserPrompt);
+        assert!(events[0].payload.get("prompt_hash").is_some());
+        assert_eq!(events[1].event_type, EventType::FileWrite);
+        assert_eq!(events[1].payload["file_path"], "src/module.rs");
     }
 }

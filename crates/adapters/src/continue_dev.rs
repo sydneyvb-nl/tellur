@@ -70,8 +70,14 @@ fn event_type(raw: &Value) -> EventType {
             EventType::Custom("continue.autocomplete".to_string())
         }
         Some(
-            "editInteraction" | "editOutcome" | "applyToFile" | "acceptEdit" | "quickEdit"
-            | "nextEdit" | "nextEditOutcome",
+            "editInteraction"
+            | "editOutcome"
+            | "applyToFile"
+            | "acceptEdit"
+            | "quickEdit"
+            | "nextEdit"
+            | "nextEditOutcome"
+            | "nextEditWithHistory",
         ) => EventType::FileWrite,
         Some("tokensGenerated") => EventType::Custom("continue.tokens".to_string()),
         Some("command" | "runCommand" | "toolUse" | "tool_call") => EventType::CommandExecution,
@@ -154,5 +160,27 @@ mod tests {
         assert_eq!(events[1].event_type, EventType::FileWrite);
         assert_eq!(events[1].payload["file_path"], "lib/util.py");
         assert_eq!(events[1].payload["model"], "claude-3.7-sonnet");
+    }
+
+    #[test]
+    fn test_parse_continue_next_edit_with_history() {
+        let adapter = ContinueAdapter::new();
+        let dir = std::env::temp_dir().join("tellur_test_continue_nextedit");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("nextEditWithHistory.jsonl");
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "name": "nextEditWithHistory",
+                "data": {"sessionId": "cont-2", "fileURI": "file:///repo/src/app.ts"}
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let events = adapter.parse_jsonl(&path, "fallback").unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, EventType::FileWrite);
+        assert_eq!(events[0].payload["file_path"], "file:///repo/src/app.ts");
     }
 }

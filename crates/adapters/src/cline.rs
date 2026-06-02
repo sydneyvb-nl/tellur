@@ -84,8 +84,13 @@ fn event_type(raw: &Value) -> EventType {
             other => EventType::Custom(format!("cline.ask.{other}")),
         };
     }
-    // `api_conversation_history.json` carries a role instead.
+    // `api_conversation_history.json` carries a role and Anthropic Messages
+    // `content` blocks; a `tool_use` block (file write/read, command) is more
+    // specific than the surrounding role, so it wins.
     if let Some(role) = first_string(raw, &[&["role"]]) {
+        if let Some(tool_event) = tool_use_event_type(raw) {
+            return tool_event;
+        }
         return match role {
             "user" => EventType::UserPrompt,
             "assistant" => EventType::Custom("cline.response".to_string()),
@@ -100,6 +105,32 @@ fn event_type(raw: &Value) -> EventType {
     }
 }
 
+/// Map the first `tool_use` block in an Anthropic Messages `content` array to a
+/// Tellur event type. Cline and Roo Code drive edits, reads, and commands
+/// through named tools, so this recovers file/command provenance that a
+/// role-only classification would record as a generic response.
+fn tool_use_event_type(raw: &Value) -> Option<EventType> {
+    let blocks = raw.get("content")?.as_array()?;
+    for block in blocks {
+        if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+            continue;
+        }
+        let name = block.get("name").and_then(Value::as_str).unwrap_or("");
+        return Some(match name {
+            "write_to_file" | "replace_in_file" | "apply_diff" | "insert_content" | "edit_file"
+            | "new_file" => EventType::FileWrite,
+            "read_file" | "list_files" | "search_files" | "list_code_definition_names" => {
+                EventType::FileRead
+            }
+            "execute_command" => EventType::CommandExecution,
+            "use_mcp_tool" | "access_mcp_resource" => EventType::ToolPostCall,
+            other if !other.is_empty() => EventType::Custom(format!("cline.tool.{other}")),
+            _ => EventType::Custom("cline.tool".to_string()),
+        });
+    }
+    None
+}
+
 #[async_trait::async_trait]
 impl AgentAdapter for ClineAdapter {
     fn info(&self) -> &AdapterInfo {
@@ -108,7 +139,7 @@ impl AgentAdapter for ClineAdapter {
 
     fn capabilities(&self) -> AdapterCapabilities {
         AdapterCapabilities {
-            can_capture_file_writes: false,
+            can_capture_file_writes: true,
             can_capture_commands: true,
             can_capture_prompts: true,
             can_replay_session: true,
@@ -160,10 +191,36 @@ mod tests {
         assert!(events[0].payload.get("prompt_hash").is_some());
         assert!(events[0].timestamp.starts_with("2023-11-"));
         assert_eq!(events[1].event_type, EventType::CommandExecution);
+        // The command text lives in `text` for Cline command messages.
+        assert_eq!(events[1].payload["command"], "npm run build");
         assert_eq!(
             events[2].event_type,
             EventType::Custom("cline.response".to_string())
         );
+    }
+
+    #[test]
+    fn test_parse_cline_api_history_tool_use_write() {
+        let adapter = ClineAdapter::new();
+        let dir = std::env::temp_dir().join("tellur_test_cline_tooluse");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("api_conversation_history.json");
+        let doc = serde_json::json!([
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "I'll update the file"},
+                    {"type": "tool_use", "name": "write_to_file", "input": {"path": "src/lib.rs"}}
+                ]
+            }
+        ]);
+        std::fs::write(&path, doc.to_string()).unwrap();
+
+        let events = adapter.parse_task(&path, "task-11").unwrap();
+        assert_eq!(events.len(), 1);
+        // The tool_use block is more specific than the assistant role.
+        assert_eq!(events[0].event_type, EventType::FileWrite);
+        assert_eq!(events[0].payload["file_path"], "src/lib.rs");
     }
 
     #[test]

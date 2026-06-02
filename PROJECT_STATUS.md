@@ -29,6 +29,13 @@
 > shared module. All five are wired into `tellur import <adapter> <source>`,
 > registered as built-in adapters, and covered by unit + CLI integration tests.
 > They are import-only because none expose a documented local lifecycle hook.
+> Hardened after Codex review: envelope wrappers now propagate session/run
+> identity onto child events; field extraction is a bounded recursive scan that
+> reaches nested objects and Anthropic Messages `content`-block arrays (so Cline/
+> Roo `tool_use` writes, Windsurf transcript `code_action`/`user_input`, and
+> Continue `nextEditWithHistory`/`fileURI` are recognized); command events
+> recover the command from a generic `text` field; and the prompt-hash key set is
+> kept in sync with the redaction key set.
 >
 > **2026-06-02 — README discoverability refresh.** Updated the public README
 > with a generated social/hero image, `https://tellur.dev`, clearer value
@@ -249,14 +256,15 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-128 Rust tests, 0 failures, 0 clippy warnings.
+135 Rust tests, 0 failures, 0 clippy warnings.
 - core:      65 tests (schema/event-type round-trip, glob matcher, storage,
              hash-chain verify + reseal, index session/attribution round-trip,
              capture pipeline end-to-end, block_ai_read, attribution, redaction,
              policy, export, PR report, dashboard daemon endpoints)
-- adapters:  40 tests (Claude Code, Aider, Cursor, Codex, Copilot, Gemini CLI,
+- adapters:  47 tests (Claude Code, Aider, Cursor, Codex, Copilot, Gemini CLI,
              Antigravity, Windsurf, JetBrains, Devin, Continue, Cline/Roo Code,
-             Generic, and the shared import loop)
+             Generic, and the shared import loop incl. envelope inheritance,
+             content-block extraction, and command-text recovery)
 - cli:       23 integration tests (version/help/init/doctor/status/sessions/verify/import/setup/hooks ingest)
 - editor:    TypeScript compile, 5 unit tests, VS Code extension integration tests
 ```
