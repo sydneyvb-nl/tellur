@@ -134,7 +134,7 @@ De PRD bevindt zich op een locatie die Sydney bepaalt. Als je de PRD niet hebt, 
 
 1. **Altijd `PROJECT_STATUS.md` updaten** na elke wijziging — dit is het single source of truth
 2. **Build moet groen zijn** voor je commit: `cargo build && cargo test`
-3. **Rust code** in `crates/` — TypeScript alleen in `editor/`
+3. **Rust code** in `crates/` — editor-integraties in `editor/` (VS Code: TypeScript, JetBrains: Kotlin)
 4. **Commits** in het Engels, conventional commits format (`feat:`, `fix:`, `docs:`)
 5. **Push altijd** na commit — `git push origin main`
 6. **Als je een module afmaakt**, update dan de checklist hieronder met ✅
@@ -151,6 +151,8 @@ cd editor/tellur-vscode
 npm run compile
 npm run test:unit
 npm run test:extension
+# JetBrains plugin (Kotlin/Gradle, niet via cargo/CI gebouwd):
+cd ../tellur-jetbrains && ./gradlew buildPlugin
 ```
 
 ### Structuur
@@ -160,13 +162,19 @@ Tellur/
 ├── PROJECT_STATUS.md        ← DIT BESTAND
 ├── Cargo.toml               ← Rust workspace root
 ├── crates/
-│   ├── core/                ← Core library (schemas, attribution, storage, policy, redaction, export)
+│   ├── core/                ← Core library (schema, storage, attribution, policy,
+│   │                          redaction, export, reports, notes, remap, daemon, mcp)
 │   ├── cli/                 ← CLI binary (tellur command)
-│   └── adapters/            ← AI tool adapters
+│   └── adapters/            ← AI tool adapters (import + hook/payload normalization)
 ├── schemas/                 ← JSON Schema definities
+├── web/                     ← Static session-replay dashboard
 ├── .github/workflows/       ← GitHub Actions
-└── editor/                  ← VS Code/Cursor-compatible extension
+└── editor/
+    ├── tellur-vscode/       ← VS Code / Cursor / Windsurf extension (TypeScript)
+    └── tellur-jetbrains/    ← JetBrains IDE plugin (Kotlin/Gradle)
 ```
+
+> Authoritative architecture map: zie [`AGENTS.md`](AGENTS.md) ("Start Here" + Architecture Map).
 
 ---
 

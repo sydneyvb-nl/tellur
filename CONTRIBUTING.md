@@ -4,9 +4,12 @@ Thanks for your interest in contributing! Tellur is an open-source AI code prove
 
 ## Development Setup
 
-Tellur's core and CLI are written in **Rust**; the editor extension is TypeScript.
-Agents should also read [`AGENTS.md`](./AGENTS.md) before making changes. It
-defines repo-wide requirements for keeping documentation aligned with behavior.
+Tellur's core and CLI are written in **Rust**; the VS Code extension is
+TypeScript and the JetBrains plugin is Kotlin.
+Agents should also read [`AGENTS.md`](./AGENTS.md) before making changes — start
+with its "Start Here" orientation and Architecture Map. It defines repo-wide
+requirements for keeping documentation aligned with behavior, and is the fastest
+way to learn where each layer lives.
 
 ```bash
 # Clone the repo
@@ -32,17 +35,26 @@ Rust toolchain: stable (edition 2024). Install via [rustup](https://rustup.rs).
 Tellur/
 ├── crates/
 │   ├── core/          # Schemas, attribution engine, storage, policy, redaction,
-│   │                  #   capture pipeline, export, daemon, MCP server
+│   │                  #   capture pipeline, export, reports, git notes, remap,
+│   │                  #   daemon (incl. webhook), MCP server
 │   ├── cli/           # CLI binary (the `tellur` command)
 │   └── adapters/      # AI tool adapters (Claude Code, Aider, Cursor, Codex,
-│                      #   Copilot, Gemini CLI, Antigravity, Generic)
+│                      #   Copilot, Gemini CLI, Antigravity, Windsurf, JetBrains,
+│                      #   Devin, Continue, Cline/Roo, Generic)
 ├── schemas/           # JSON Schema definitions
-├── editor/            # VS Code extension (TypeScript)
+├── editor/
+│   ├── tellur-vscode/    # VS Code / Cursor / Windsurf extension (TypeScript)
+│   └── tellur-jetbrains/ # JetBrains IDE plugin (Kotlin/Gradle)
+├── web/               # Static session-replay dashboard
 ├── dist/              # Packaging: npm wrapper, Homebrew formula
-└── docs/              # Documentation (incl. FINDINGS.md)
+└── docs/              # Documentation (ADAPTERS.md, FINDINGS.md)
 ```
 
-## Editor Extension
+The authoritative, more detailed map lives in [`AGENTS.md`](./AGENTS.md).
+
+## Editor Integrations
+
+### VS Code extension (also Cursor and Windsurf)
 
 ```bash
 cd editor/tellur-vscode
@@ -52,22 +64,43 @@ npm run compile
 
 The extension shells out to the `tellur` binary and consumes its `--json`
 output (`explain --json`, `blame --json`, `sessions --json`). It also uses
-`tellur hooks ingest --source <vscode|cursor> --auto-init` for save capture.
+`tellur hooks ingest --source <vscode|cursor|windsurf> --auto-init` for save
+capture. The same extension serves VS Code, Cursor, and Windsurf, which are all
+VS Code-compatible.
 
-Global editor setup is configured through:
+### JetBrains plugin
 
 ```bash
-tellur setup agents      # Codex, Claude Code, Cursor, and VS Code
+cd editor/tellur-jetbrains
+gradle wrapper        # one-time
+./gradlew buildPlugin  # or: ./gradlew runIde
+```
+
+This plugin is Kotlin and built with Gradle + the IntelliJ Platform SDK (JDK 17,
+network download). It is **not** built by `cargo`/the Rust CI, so verify plugin
+changes by building/running it with Gradle. See the Verification section of
+[`AGENTS.md`](./AGENTS.md) for details.
+
+Global editor/agent setup is configured through:
+
+```bash
+tellur setup agents      # Codex, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI, Antigravity
 tellur setup cursor      # Cursor MCP/settings only
 tellur setup vscode      # VS Code settings only
+tellur setup windsurf    # Windsurf MCP/settings only
 tellur setup gemini-cli  # Gemini CLI hooks only
 tellur setup antigravity # Antigravity hooks/MCP only
 ```
 
+Devin (cloud agent) has no local editor surface; capture it live by POSTing its
+webhook to the local daemon's `POST /webhook/devin` endpoint. JetBrains live
+capture uses the plugin above.
+
 ## Code Style
 
 - Rust: keep `cargo clippy --workspace --all-targets -- -D warnings` clean; run `cargo fmt`.
-- Editor: run `npm run compile`, `npm run test:unit`, and when practical `npm run test:extension` from `editor/tellur-vscode`.
+- VS Code extension: run `npm run compile`, `npm run test:unit`, and when practical `npm run test:extension` from `editor/tellur-vscode`.
+- JetBrains plugin: build with `./gradlew buildPlugin` from `editor/tellur-jetbrains` (Gradle, not cargo).
 - No `unwrap()`/`panic!` on user-reachable paths — return `anyhow::Result`.
 - Match the surrounding code's naming and comment density.
 
