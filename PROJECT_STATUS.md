@@ -1,11 +1,21 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-03 (Devin webhook + JetBrains plugin live capture)
+**Last updated:** 2026-06-03 (Team/server mode design proposal)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0
 
+> **2026-06-03 — Team/server mode proposal.** Researched roadmap item #8 against
+> the existing local-first primitives (Git notes, per-repo hash chain, daemon,
+> export profiles, policy) and the target segments (independent/OSS, SMB,
+> corporate). Wrote a phased design proposal at
+> `docs/proposals/TEAM_SERVER_MODE.md`: keep local-first as default, use Git
+> notes as the zero-infra team transport, and add an optional self-hostable
+> `tellur serve` hub. Decided MVP path: **Tier 0 (`tellur team report`, no
+> server) first, then Tier 1 (self-hosted hub)**. Proposal only — no code yet;
+> reconcile with PRD §24 before Tier 1.
+>
 > **2026-06-03 — Devin webhook + JetBrains plugin.** Continued roadmap item #7
 > ("live capture beyond import") for the remaining adoption tools.
 > **Devin** now has a first-class daemon webhook: `POST /webhook/{source}`
@@ -289,7 +299,9 @@ Tellur/
 Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney's beslissing:
 
 1. **Pricing / Business model** (PRD sectie 27-31) — niet relevant voor dev, Sydney beslist
-2. **Team/server mode** (PRD sectie 24) — later, eerst local-first afmaken
+2. **Team/server mode** (PRD sectie 24) — design proposal klaar
+   ([`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md));
+   MVP = Tier 0 (Git-native) → Tier 1 (self-host hub). Nog niet geïmplementeerd.
 3. **SOC 2 compliance** (PRD sectie 26) — far future
 4. **Plugin SDK** (PRD sectie 25) — API stabiliteit eerst nodig
 5. **Release signing** (PRD sectie 20) — na v1.0 (SLSA/SPDX *export* is wel klaar)
@@ -371,7 +383,11 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
    `POST /webhook/devin` endpoint. Remaining (optional): lifecycle-hook capture
    for Windsurf/JetBrains if/when they document a local hook API; publish the
    JetBrains plugin to the Marketplace.
-8. **Team/server mode** — decide architecture after local dashboard settles
+8. **Team/server mode** — design proposal written:
+   [`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md).
+   Decided MVP path: **Tier 0 (Git-native `tellur team report`, no server) first,
+   then Tier 1 (`tellur serve` self-hosted hub)**. Not yet implemented; align
+   with PRD §24 before Tier 1.
 9. **Plugin SDK** — requires stable adapter/event API
 
 ---

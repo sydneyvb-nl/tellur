@@ -21,6 +21,8 @@ Read these in order before acting; they are the source of truth:
    extension vs MCP vs daemon webhook vs import), guarantees, and known limits.
 5. **`CONTRIBUTING.md`** — dev workflow and repo structure.
 6. **`docs/FINDINGS.md`** — historical review/remediation notes.
+7. **`docs/proposals/`** — design proposals for not-yet-built features (e.g.
+   `TEAM_SERVER_MODE.md`). Read before working on the matching roadmap item.
 
 One-glance repository layout:
 
