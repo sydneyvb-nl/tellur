@@ -11,7 +11,7 @@ use super::{AuditEntry, IngestEvent, Org, Repo, Store};
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
-const SCHEMA_VERSION: &str = "3";
+const SCHEMA_VERSION: &str = "4";
 
 /// A SQLite-backed store. The connection is behind a `Mutex` so the store is
 /// `Send + Sync` and usable as `Arc<dyn Store>`.
@@ -128,7 +128,14 @@ impl Store for SqliteStore {
                  prev_hash  TEXT NOT NULL,
                  entry_hash TEXT NOT NULL
              );
-             CREATE INDEX IF NOT EXISTS idx_event_repo ON event(repo_id, seq);",
+             CREATE INDEX IF NOT EXISTS idx_event_repo ON event(repo_id, seq);
+             -- Per-repo chain head + length checkpoint, so tail truncation /
+             -- rollback of a repo's event log is detectable.
+             CREATE TABLE IF NOT EXISTS event_head (
+                 repo_id     TEXT PRIMARY KEY REFERENCES repo(id),
+                 head_hash   TEXT NOT NULL,
+                 entry_count INTEGER NOT NULL
+             );",
         )
         .context("failed to create schema")?;
         conn.execute(
@@ -283,14 +290,15 @@ impl Store for SqliteStore {
             bail!("repo {repo_id} not found in org {org_id}");
         }
 
-        let mut prev: String = tx
+        // The head checkpoint is the authoritative chain tip + length.
+        let (mut prev, mut count): (String, i64) = tx
             .query_row(
-                "SELECT entry_hash FROM event WHERE repo_id = ?1 ORDER BY seq DESC LIMIT 1",
+                "SELECT head_hash, entry_count FROM event_head WHERE repo_id = ?1",
                 [repo_id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?
-            .unwrap_or_default();
+            .unwrap_or_else(|| (String::new(), 0));
 
         let mut new_ids = Vec::with_capacity(events.len());
         for ev in events {
@@ -331,8 +339,16 @@ impl Store for SqliteStore {
             )
             .context("failed to insert event")?;
             prev = entry_hash;
+            count += 1;
             new_ids.push(id);
         }
+        tx.execute(
+            "INSERT INTO event_head (repo_id, head_hash, entry_count) VALUES (?1, ?2, ?3)
+             ON CONFLICT(repo_id) DO UPDATE SET head_hash = excluded.head_hash,
+                                                entry_count = excluded.entry_count",
+            params![repo_id, prev, count],
+        )
+        .context("failed to update event head")?;
         tx.commit().context("failed to commit events")?;
         Ok(new_ids)
     }
@@ -367,6 +383,7 @@ impl Store for SqliteStore {
         })?;
 
         let mut expected_prev = String::new();
+        let mut counted: i64 = 0;
         for row in rows {
             let (id, session_id, ts, event_type, actor, payload, prev_hash, entry_hash) = row?;
             if prev_hash != expected_prev {
@@ -391,8 +408,24 @@ impl Store for SqliteStore {
                 return Ok(false);
             }
             expected_prev = entry_hash;
+            counted += 1;
         }
-        Ok(true)
+
+        // Compare against the persisted head checkpoint so tail truncation /
+        // rollback to an earlier prefix is detected.
+        let head: Option<(String, i64)> = conn
+            .query_row(
+                "SELECT head_hash, entry_count FROM event_head WHERE repo_id = ?1",
+                [repo_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        match head {
+            Some((head_hash, entry_count)) => {
+                Ok(counted == entry_count && expected_prev == head_hash)
+            }
+            None => Ok(counted == 0),
+        }
     }
 
     fn append_audit(&self, entry: &AuditEntry) -> Result<()> {
@@ -614,6 +647,33 @@ mod tests {
         // Wrong org for this repo id → rejected.
         let err = s.append_events("org_other", &repo.id, &[ingest_event("x")]);
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn event_chain_detects_tail_truncation() {
+        let s = store();
+        let org = s.create_org("Acme").unwrap();
+        let repo = s.ensure_repo(&org.id, "app").unwrap();
+        s.append_events(
+            &org.id,
+            &repo.id,
+            &[ingest_event("a"), ingest_event("b"), ingest_event("c")],
+        )
+        .unwrap();
+        assert!(s.verify_event_chain(&org.id, &repo.id).unwrap());
+        // Delete the newest event but leave the head checkpoint intact.
+        {
+            let conn = s.conn().unwrap();
+            conn.execute(
+                "DELETE FROM event WHERE seq = (SELECT MAX(seq) FROM event WHERE repo_id = ?1)",
+                [&repo.id],
+            )
+            .unwrap();
+        }
+        assert!(
+            !s.verify_event_chain(&org.id, &repo.id).unwrap(),
+            "tail truncation of events must be detected"
+        );
     }
 
     #[test]

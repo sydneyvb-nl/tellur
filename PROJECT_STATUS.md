@@ -18,6 +18,12 @@
 > tests (incl. ingest BOLA/role/caps/rate-limit + chain tamper) + live smoke;
 > workspace fmt/clippy/test (182) + deny green. Next: B3 (read & report).
 >
+> **2026-06-03 — B2 review fixes (Codex).** Addressed 2 findings on PR #3: the
+> per-repo event chain now persists an `event_head` checkpoint (head-hash +
+> count) so tail truncation is detected by `verify_event_chain` (P1, mirrors
+> `audit_head`); and `docs/THREAT_MODEL.md` is updated for the new ingest trust
+> boundary (P2). 39 server tests; 183 workspace.
+>
 > **2026-06-03 — Tier 1 B1 (identity & tenancy).** On branch
 > `feat/server-b1-identity-tenancy`. Added to `crates/server`: an `auth` module
 > (viewer/contributor/admin roles; API tokens `tlr_<id>_<secret>` with the secret
@@ -398,8 +404,8 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-182 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
-- server:    38 tests (B0 config/health/errors; B1 Argon2id tokens, org/member
+183 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
+- server:    39 tests (B0 config/health/errors; B1 Argon2id tokens, org/member
              auth, hash-chained audit append/verify/tamper/tail-truncation/
              two-connection, authn + BOLA + auth-denied auditing; B2 repo
              get-or-create, per-repo event chain verify/tamper, tenant scoping,
