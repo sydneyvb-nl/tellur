@@ -72,14 +72,14 @@ VS Code-compatible.
 
 ```bash
 cd editor/tellur-jetbrains
-gradle wrapper        # one-time
-./gradlew buildPlugin  # or: ./gradlew runIde
+./gradlew buildPlugin  # or: ./gradlew runIde   (use JAVA_HOME=<jdk-17> if your default JDK is newer)
 ```
 
 This plugin is Kotlin and built with Gradle + the IntelliJ Platform SDK (JDK 17,
-network download). It is **not** built by `cargo`/the Rust CI, so verify plugin
-changes by building/running it with Gradle. See the Verification section of
-[`AGENTS.md`](./AGENTS.md) for details.
+network download on first run). The Gradle wrapper is committed (pinned to 8.9),
+so no global Gradle is needed. It is **not** built by `cargo`/the Rust CI, so
+verify plugin changes by building/running it with Gradle. See the Verification
+section of [`AGENTS.md`](./AGENTS.md) for details.
 
 Global editor/agent setup is configured through:
 

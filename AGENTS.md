@@ -131,6 +131,12 @@ Cross-layer rules:
 
 ## Verification
 
+**Always build and test what you change** — in the toolchain that owns it. Do
+not claim something works unless you compiled/ran it. Rust changes go through
+`cargo`; the VS Code extension through `npm`; the JetBrains plugin through
+Gradle. If a toolchain is genuinely unavailable in your environment, say so
+explicitly rather than implying it was verified.
+
 For Rust changes, run:
 
 ```bash
@@ -152,19 +158,24 @@ settings, or VS Code runtime behavior.
 ### JetBrains plugin (`editor/tellur-jetbrains`)
 
 This plugin is Kotlin built with **Gradle + the IntelliJ Platform SDK**, which
-the Rust `cargo` toolchain and the Rust CI do **not** build. Building it requires
-JDK 17 and downloads the IntelliJ SDK over the network, so it is verified
-separately, not by `cargo test`:
+the Rust `cargo` toolchain and the Rust CI do **not** build. The Gradle wrapper
+is committed (pinned to 8.9), so building requires only **JDK 17** and network
+access (the IntelliJ SDK downloads on first run). Verify plugin changes here, not
+with `cargo test`:
 
 ```bash
 cd editor/tellur-jetbrains
-gradle wrapper          # one-time: generate ./gradlew
-./gradlew buildPlugin    # compile + package the plugin zip
-./gradlew runIde         # launch a sandbox IDE to test capture manually
+JAVA_HOME=/path/to/jdk-17 ./gradlew buildPlugin   # compile + package the plugin zip
+JAVA_HOME=/path/to/jdk-17 ./gradlew runIde        # sandbox IDE for manual capture testing
 ```
 
-"Builds outside Rust CI" means exactly this: changes to the plugin are not
-covered by `cargo test`/clippy and must be compiled/run with Gradle to verify
-them. The plugin itself is normal, working code — only the *verification path*
-differs from the Rust workspace. If you cannot run Gradle in your environment,
-say so explicitly instead of claiming the plugin was compiled.
+`./gradlew buildPlugin` is known-good on JDK 17 (the build's
+`buildSearchableOptions` step boots a headless IDE with the plugin installed,
+exercising `plugin.xml` and the listener/service classes). Plugin versions
+(Kotlin 1.9.24 + IntelliJ Platform Gradle Plugin 2.0.1) target Gradle 8.9 — do
+not bump the wrapper to Gradle 9.x without also bumping those plugins.
+
+"Builds outside Rust CI" means only that the *verification path* differs: plugin
+changes are not covered by `cargo test`/clippy and must be compiled with Gradle.
+**Always build what you change.** If you genuinely cannot run Gradle in your
+environment, say so explicitly instead of claiming the plugin was compiled.

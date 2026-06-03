@@ -140,8 +140,8 @@ Next candidates, when they expose durable capture surfaces:
 - The JetBrains plugin captures any file written through the IDE's VFS, not only
   AI-authored edits; origin (AI vs human) is decided by the core attribution
   layer, the same as the VS Code extension. It builds outside the Rust workspace
-  CI (JDK 17 + IntelliJ SDK via Gradle), so it is verified by manual build/run
-  rather than by `cargo test`.
+  CI (JDK 17 + IntelliJ SDK via Gradle, committed wrapper); verify with
+  `./gradlew buildPlugin` rather than `cargo test`.
 - The daemon webhook (`POST /webhook/{source}`) is a tolerant normalizer, not a
   signed channel: it proves what a caller posted to the local, token-protected
   endpoint, not that Devin's cloud independently attested the events. Validate it

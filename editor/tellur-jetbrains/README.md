@@ -55,19 +55,30 @@ is not installed or not on `PATH`, capture is silently skipped.
 
 ## Building
 
-> **Note:** Building requires JDK 17 and downloads the IntelliJ Platform SDK via
-> Gradle, so it needs network access and is not built as part of the Rust
-> workspace CI.
+The Gradle wrapper is committed (pinned to Gradle 8.9), so no global Gradle
+install is needed. Building requires **JDK 17** and downloads the IntelliJ
+Platform SDK on first run, so it needs network access. It is built with Gradle,
+not the Rust `cargo` CI.
 
 ```bash
 cd editor/tellur-jetbrains
-gradle wrapper            # one-time: generate ./gradlew
 ./gradlew buildPlugin     # produces build/distributions/tellur-jetbrains-<version>.zip
 ./gradlew runIde          # launch a sandbox IDE with the plugin for manual testing
 ```
 
+If your default JDK is newer than 17, point Gradle at a JDK 17, e.g.:
+
+```bash
+JAVA_HOME=/path/to/jdk-17 ./gradlew buildPlugin
+```
+
 Install the resulting zip via **Preferences → Plugins → ⚙ → Install Plugin from
 Disk…**.
+
+> **Verified:** `./gradlew buildPlugin` succeeds on JDK 17 and produces a loadable
+> plugin (the build's `buildSearchableOptions` step boots a headless IDE with the
+> plugin installed, which exercises `plugin.xml` and the listener/service
+> classes).
 
 ## Relationship to the CLI
 

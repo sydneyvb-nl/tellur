@@ -19,7 +19,8 @@
 > routes saved/created files to `tellur hooks ingest --source jetbrains
 > --auto-init`, capturing AI Assistant and Junie edits live; capture is
 > best-effort and off the EDT. The plugin builds outside the Rust workspace CI
-> (JDK 17 + IntelliJ SDK via Gradle), so it is verified by manual build/run.
+> (JDK 17 + IntelliJ SDK via Gradle); the Gradle wrapper is committed and
+> `./gradlew buildPlugin` is verified green on JDK 17 (loadable plugin zip).
 > Added 4 Rust tests (webhook normalization + authenticated route).
 >
 > **2026-06-02 — Windsurf live capture.** Started roadmap item #7 ("live capture
@@ -312,8 +313,9 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
              content-block extraction, and command-text recovery)
 - cli:       24 integration tests (version/help/init/doctor/status/sessions/verify/import/setup incl. windsurf/hooks ingest)
 - editor:    VS Code — TypeScript compile, 5 unit tests, extension integration tests.
-             JetBrains — `editor/tellur-jetbrains` (Kotlin/Gradle) builds outside the
-             Rust workspace CI (JDK 17 + IntelliJ SDK); verified by manual build/run
+             JetBrains — `editor/tellur-jetbrains` (Kotlin/Gradle, committed wrapper
+             pinned to 8.9) builds outside the Rust CI; `./gradlew buildPlugin`
+             verified green on JDK 17 (produces a loadable plugin zip)
 ```
 
 Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && cargo test`, then `cd editor/tellur-vscode && npm run compile && npm run test:unit && npm run test:extension`.
