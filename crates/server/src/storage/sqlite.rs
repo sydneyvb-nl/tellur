@@ -4,14 +4,14 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use anyhow::{Context, Result};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use tellur_core::schema::ids;
 
 use super::{AuditEntry, Org, Store};
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
-const SCHEMA_VERSION: &str = "1";
+const SCHEMA_VERSION: &str = "2";
 
 /// A SQLite-backed store. The connection is behind a `Mutex` so the store is
 /// `Send + Sync` and usable as `Arc<dyn Store>`.
@@ -100,6 +100,13 @@ impl Store for SqliteStore {
                  detail          TEXT NOT NULL,
                  prev_hash       TEXT NOT NULL,
                  entry_hash      TEXT NOT NULL
+             );
+             -- Single-row checkpoint of the audit chain head + length, so tail
+             -- truncation / rollback to an earlier prefix is detectable.
+             CREATE TABLE IF NOT EXISTS audit_head (
+                 id          INTEGER PRIMARY KEY CHECK (id = 1),
+                 head_hash   TEXT NOT NULL,
+                 entry_count INTEGER NOT NULL
              );",
         )
         .context("failed to create schema")?;
@@ -172,9 +179,13 @@ impl Store for SqliteStore {
         let Some((token_id, secret)) = auth::parse_token(token) else {
             return Ok(None);
         };
-        let conn = self.conn()?;
-        let row = conn
-            .query_row(
+
+        // Look up the row, then release the DB lock *before* the (intentionally
+        // expensive) Argon2 verification so it does not serialize other store
+        // work (audits, readiness, other users' auth).
+        let row = {
+            let conn = self.conn()?;
+            conn.query_row(
                 "SELECT t.secret_hash, m.id, m.org_id, m.role
                  FROM api_token t JOIN member m ON m.id = t.member_id
                  WHERE t.token_id = ?1",
@@ -189,7 +200,8 @@ impl Store for SqliteStore {
                 },
             )
             .optional()
-            .context("token lookup failed")?;
+            .context("token lookup failed")?
+        };
 
         let Some((secret_hash, member_id, org_id, role_str)) = row else {
             return Ok(None);
@@ -206,15 +218,25 @@ impl Store for SqliteStore {
 
     fn append_audit(&self, entry: &AuditEntry) -> Result<()> {
         let ts = chrono::Utc::now().to_rfc3339();
-        let conn = self.conn()?;
-        let prev: String = conn
+        let mut guard = self.conn()?;
+        // IMMEDIATE acquires the write lock up front, so the read of the current
+        // head and the insert are atomic even across separate connections to the
+        // same database (e.g. the server and the admin CLI). Without this, two
+        // writers could read the same head and create siblings with identical
+        // `prev_hash`, which would later look like tampering.
+        let tx = guard
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .context("failed to begin audit transaction")?;
+
+        let (prev, count): (String, i64) = tx
             .query_row(
-                "SELECT entry_hash FROM audit_log ORDER BY seq DESC LIMIT 1",
+                "SELECT head_hash, entry_count FROM audit_head WHERE id = 1",
                 [],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?
-            .unwrap_or_default();
+            .unwrap_or_else(|| (String::new(), 0));
+
         let entry_hash = audit_hash(
             &prev,
             &ts,
@@ -223,7 +245,7 @@ impl Store for SqliteStore {
             &entry.action,
             &entry.detail,
         );
-        conn.execute(
+        tx.execute(
             "INSERT INTO audit_log
                  (ts, org_id, actor_member_id, action, detail, prev_hash, entry_hash)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -238,6 +260,14 @@ impl Store for SqliteStore {
             ],
         )
         .context("failed to append audit entry")?;
+        tx.execute(
+            "INSERT INTO audit_head (id, head_hash, entry_count) VALUES (1, ?1, ?2)
+             ON CONFLICT(id) DO UPDATE SET head_hash = excluded.head_hash,
+                                           entry_count = excluded.entry_count",
+            params![entry_hash, count + 1],
+        )
+        .context("failed to update audit head")?;
+        tx.commit().context("failed to commit audit entry")?;
         Ok(())
     }
 
@@ -266,6 +296,7 @@ impl Store for SqliteStore {
         })?;
 
         let mut expected_prev = String::new();
+        let mut counted: i64 = 0;
         for row in rows {
             let (ts, org_id, actor, action, detail, prev_hash, entry_hash) = row?;
             if prev_hash != expected_prev {
@@ -283,8 +314,25 @@ impl Store for SqliteStore {
                 return Ok(false);
             }
             expected_prev = entry_hash;
+            counted += 1;
         }
-        Ok(true)
+
+        // Compare against the persisted head checkpoint so deleting the newest
+        // row(s) — a tail truncation that leaves an internally-consistent prefix
+        // — is detected.
+        let head: Option<(String, i64)> = conn
+            .query_row(
+                "SELECT head_hash, entry_count FROM audit_head WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        match head {
+            Some((head_hash, entry_count)) => {
+                Ok(counted == entry_count && expected_prev == head_hash)
+            }
+            None => Ok(counted == 0),
+        }
     }
 }
 
@@ -355,6 +403,70 @@ mod tests {
         }
         assert_eq!(s.audit_len().unwrap(), 3);
         assert!(s.verify_audit_chain().unwrap());
+    }
+
+    #[test]
+    fn audit_chain_detects_tail_truncation() {
+        let s = store();
+        for i in 0..3 {
+            s.append_audit(&AuditEntry {
+                org_id: None,
+                actor_member_id: None,
+                action: "a".to_string(),
+                detail: format!("{i}"),
+            })
+            .unwrap();
+        }
+        assert!(s.verify_audit_chain().unwrap());
+        // Delete the newest row but leave the head checkpoint intact.
+        {
+            let conn = s.conn().unwrap();
+            conn.execute(
+                "DELETE FROM audit_log WHERE seq = (SELECT MAX(seq) FROM audit_log)",
+                [],
+            )
+            .unwrap();
+        }
+        assert!(
+            !s.verify_audit_chain().unwrap(),
+            "tail truncation must be detected"
+        );
+    }
+
+    #[test]
+    fn audit_chain_across_two_connections_stays_valid() {
+        // Two stores on the same file DB (e.g. server + admin CLI). IMMEDIATE
+        // transactions serialize the appends so the chain stays consistent.
+        let dir = std::env::temp_dir().join(format!(
+            "tellur-audit-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("hub.db");
+
+        let a = SqliteStore::open(&path).unwrap();
+        a.migrate().unwrap();
+        let b = SqliteStore::open(&path).unwrap();
+
+        for i in 0..4 {
+            let s = if i % 2 == 0 { &a } else { &b };
+            s.append_audit(&AuditEntry {
+                org_id: None,
+                actor_member_id: None,
+                action: "x".to_string(),
+                detail: format!("{i}"),
+            })
+            .unwrap();
+        }
+        assert_eq!(a.audit_len().unwrap(), 4);
+        assert!(a.verify_audit_chain().unwrap());
+        assert!(b.verify_audit_chain().unwrap());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

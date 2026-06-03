@@ -77,6 +77,23 @@ async fn unauthenticated_request_is_rejected() {
 }
 
 #[tokio::test]
+async fn invalid_token_is_audited_but_missing_header_is_not() {
+    let s = setup();
+    let before = s.store.audit_len().unwrap();
+
+    // No Authorization header → rejected, NOT audited (avoids anonymous flood).
+    let (status, _) = get(&s.state, "/v1/me", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(s.store.audit_len().unwrap(), before);
+
+    // Presented-but-invalid token → rejected AND audited as a probing signal.
+    let (status, _) = get(&s.state, "/v1/me", Some("tlr_deadbeef_wrong")).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(s.store.audit_len().unwrap(), before + 1);
+    assert!(s.store.verify_audit_chain().unwrap());
+}
+
+#[tokio::test]
 async fn valid_token_returns_identity() {
     let s = setup();
     let (status, json) = get(&s.state, "/v1/me", Some(&s.token_a)).await;

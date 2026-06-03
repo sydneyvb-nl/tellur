@@ -15,8 +15,16 @@
 > (`Principal` from `Authorization: Bearer`), tenant-scoped endpoints
 > `GET /v1/me` and `GET /v1/orgs/{org}/me` (object+tenant authz → **BOLA**
 > blocked), and a `tellur-server admin create-org/create-token` bootstrap CLI.
-> Verified: 22 server tests incl. cross-org BOLA regression; live end-to-end
+> Verified: 25 server tests incl. cross-org BOLA regression; live end-to-end
 > smoke (401/200/403); fmt/clippy/test/deny green. Next: B2 (ingest & verify).
+>
+> **2026-06-03 — B1 review fixes (Codex).** Addressed 4 P2 findings on PR #2:
+> audit appends now run in a `BEGIN IMMEDIATE` transaction (atomic across
+> connections); the audit chain persists a head-hash/length checkpoint so tail
+> truncation is detected by `verify_audit_chain`; Argon2 verification runs off
+> the async worker via `spawn_blocking` and releases the DB lock first; and
+> presented-but-invalid bearer tokens are now audited (`auth_denied`) while
+> header-less requests are not (avoids anonymous audit flooding).
 >
 > **2026-06-03 — CI hardening.** Fixed a clippy failure that only surfaced on
 > the Ubuntu CI (an unnecessary `match` inside a Linux-only `#[cfg]` block that
@@ -378,11 +386,12 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-166 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
-- server:    22 tests (config secure-by-default bind, SQLite store migrate+health,
+169 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
+- server:    25 tests (config secure-by-default bind, SQLite store migrate+health,
              error mapping, /healthz+/readyz+404; B1: Argon2id token roundtrip +
              role rules, org/member/token auth, hash-chained audit append/verify/
-             tamper-detect, and the authn + tenant-scoping/BOLA API tests)
+             tamper-detect + tail-truncation + two-connection chain, authn +
+             tenant-scoping/BOLA API tests + auth-denied auditing)
 - core:      72 tests (schema/event-type round-trip, glob matcher, storage,
              hash-chain verify + reseal, index session/attribution round-trip,
              capture pipeline end-to-end, block_ai_read, attribution, redaction,

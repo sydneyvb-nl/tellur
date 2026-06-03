@@ -24,18 +24,55 @@ impl FromRequestParts<AppState> for Principal {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let token = parts
+        // A presented-but-invalid token is a credential-probing signal worth
+        // auditing; a request with no Authorization header is not (and auditing
+        // it would let anonymous traffic flood the audit log).
+        let Some(token) = parts
             .headers
             .get(AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .and_then(|h| h.strip_prefix("Bearer "))
-            .ok_or(ServerError::Unauthorized)?;
+            .map(str::to_string)
+        else {
+            return Err(ServerError::Unauthorized);
+        };
 
-        match state.store.authenticate(token) {
-            Ok(Some(principal)) => Ok(principal),
-            Ok(None) => Err(ServerError::Unauthorized),
-            Err(e) => Err(ServerError::Internal(e)),
+        // The token id is a public lookup key (not the secret), safe to audit.
+        let token_id = crate::auth::parse_token(&token).map(|(id, _)| id);
+
+        // Run the (deliberately expensive) Argon2 verification off the async
+        // worker thread so it cannot stall the runtime.
+        let store = state.store.clone();
+        let auth = tokio::task::spawn_blocking(move || store.authenticate(&token)).await;
+
+        match auth {
+            Ok(Ok(Some(principal))) => Ok(principal),
+            Ok(Ok(None)) => {
+                record_auth_denied(state, token_id.as_deref());
+                Err(ServerError::Unauthorized)
+            }
+            Ok(Err(e)) => Err(ServerError::Internal(e)),
+            Err(join) => Err(ServerError::Internal(anyhow::anyhow!(
+                "auth task failed: {join}"
+            ))),
         }
+    }
+}
+
+/// Best-effort audit of a rejected authentication attempt. A failure to write
+/// the entry must not turn the 401 into a 500, so it is logged, not propagated.
+fn record_auth_denied(state: &AppState, token_id: Option<&str>) {
+    let detail = match token_id {
+        Some(id) => format!("token_id={id}"),
+        None => "malformed_token".to_string(),
+    };
+    if let Err(e) = state.store.append_audit(&AuditEntry {
+        org_id: None,
+        actor_member_id: None,
+        action: "auth_denied".to_string(),
+        detail,
+    }) {
+        tracing::error!(error = %e, "failed to write auth_denied audit entry");
     }
 }
 
