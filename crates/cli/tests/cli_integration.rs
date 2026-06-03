@@ -1075,3 +1075,116 @@ fn test_import_cline_json_array_task() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn test_team_report_aggregates_notes_over_range() {
+    let dir = temp_repo();
+    // Base commit.
+    fs::write(dir.join("src.rs"), "fn main() {}\n").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "base"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let base = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let base_sha = String::from_utf8_lossy(&base.stdout).trim().to_string();
+
+    // Head commit carrying AI-attributed work.
+    fs::write(dir.join("src.rs"), "fn main() { let x = 1; }\n").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "feature"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    require_binary()
+        .arg("init")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    let storage = RepoStorage::from_git_root(&dir).unwrap();
+    let index = TraceIndex::open(&storage.index_path).unwrap();
+    index
+        .index_attribution(
+            &AttributionRange {
+                range_id: "rng_team".to_string(),
+                start_line: 1,
+                end_line: 5,
+                origin: Origin::Ai,
+                evidence_strength: EvidenceStrength::Recorded,
+                confidence: 1.0,
+                state: AttributionState::Exact,
+                session_id: "sess_team".to_string(),
+                event_ids: vec![],
+                agent_id: "claude-code".to_string(),
+                model_id: Some("claude-opus-4.7".to_string()),
+                prompt_hash: None,
+                context_set_id: None,
+                policy_tags: vec![],
+                risk_tags: vec![],
+                risk_level: None,
+                tests_run: vec![],
+                tests_passed: false,
+                reviewer: Some("alice".to_string()),
+                reviewed_at: None,
+            },
+            "src.rs",
+            "blob",
+            "2026-06-03T00:00:00Z",
+        )
+        .unwrap();
+
+    // Write the authorship note onto HEAD.
+    let exported = require_binary()
+        .args(["notes", "export"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(exported.status.success());
+
+    // Markdown report over base..HEAD.
+    let report = require_binary()
+        .args(["team", "report", "--base", &base_sha, "--head", "HEAD"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(report.status.success());
+    let stdout = String::from_utf8_lossy(&report.stdout);
+    assert!(stdout.contains("Tellur Team AI-Involvement Report"));
+    assert!(stdout.contains("With provenance: 1"));
+    assert!(stdout.contains("AI-assisted lines: 5"));
+    assert!(stdout.contains("claude-code"));
+    assert!(stdout.contains("alice"));
+
+    // JSON report.
+    let json = require_binary()
+        .args([
+            "team", "report", "--base", &base_sha, "--head", "HEAD", "--json",
+        ])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(json.status.success());
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&json.stdout).expect("team report --json must be valid JSON");
+    assert_eq!(parsed["schema"], "tellur.team-report.v1");
+    assert_eq!(parsed["ai_lines"], 5);
+    assert_eq!(parsed["commits_with_provenance"], 1);
+
+    let _ = fs::remove_dir_all(&dir);
+}

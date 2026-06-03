@@ -1,8 +1,10 @@
 //! Report generation module
 
 pub mod pr_report;
+pub mod team_report;
 
 pub use pr_report::PRReportGenerator;
+pub use team_report::{TeamCommitNote, TeamReport, aggregate_team_report};
 
 use anyhow::Result;
 

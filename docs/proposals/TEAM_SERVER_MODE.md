@@ -1,7 +1,7 @@
 # Proposal: Team / Server Mode
 
-**Status:** Proposal (not implemented) · **Roadmap:** PROJECT_STATUS.md #8 ·
-**Last updated:** 2026-06-03
+**Status:** Tier 0 partially shipped (`tellur team report`); Tier 1+ proposed ·
+**Roadmap:** PROJECT_STATUS.md #8 · **Last updated:** 2026-06-03
 
 > This is a design proposal, not shipped behavior. It defines the direction and a
 > phased plan for letting multiple people and repositories share AI code
@@ -143,13 +143,15 @@ Sydney).
 
 ### Phase A — Tier 0 (MVP)
 
-1. **`tellur team report`** — aggregate notes/bundles from multiple contributors
-   over a PR/branch range into one AI-involvement report (reuses pr-report +
-   notes). Pure CLI, no server.
-2. **Aggregation read model** — a function that ingests N contributors'
-   notes/bundles, verifies each chain, and produces per-author / per-tool /
-   per-model rollups.
+1. ✅ **`tellur team report`** — aggregates the `refs/notes/ai` notes of every
+   commit in a `--base..--head` range into one AI-involvement report (lines by
+   tool/model/author + provenance coverage). Pure CLI, no server. Markdown or
+   `--json`. Shipped 2026-06-03 (`crates/core/src/report/team_report.rs`).
+2. ✅ **Aggregation read model** — `aggregate_team_report()` ingests N
+   contributors' notes and produces per-author / per-tool / per-model rollups;
+   tolerant of missing/unparseable notes.
 3. **Docs + example CI** — show a GitHub Action posting the team report on PRs.
+   *(remaining)*
 
 *Exit criteria:* a team using a shared Git remote gets a combined AI-involvement
 view with zero server, and each contribution stays hash-verifiable.

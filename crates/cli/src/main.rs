@@ -183,6 +183,12 @@ enum Commands {
         action: NotesActions,
     },
 
+    /// Team-level reports aggregated from Git AI authorship notes (no server)
+    Team {
+        #[command(subcommand)]
+        action: TeamActions,
+    },
+
     /// Manage editor/agent hook integrations
     Hooks {
         #[command(subcommand)]
@@ -257,6 +263,25 @@ enum NotesActions {
         /// Notes ref to configure
         #[arg(long, default_value = tellur_core::notes::GIT_AI_NOTES_REF)]
         notes_ref: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum TeamActions {
+    /// Aggregate AI involvement across a commit range from Git authorship notes
+    Report {
+        /// Base ref (default: main)
+        #[arg(long, default_value = "main")]
+        base: String,
+        /// Head ref (default: HEAD)
+        #[arg(long, default_value = "HEAD")]
+        head: String,
+        /// Notes ref to read
+        #[arg(long, default_value = tellur_core::notes::GIT_AI_NOTES_REF)]
+        notes_ref: String,
+        /// Output the report as JSON instead of Markdown
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -421,6 +446,14 @@ async fn main() -> Result<()> {
             NotesActions::InstallConfig { remote, notes_ref } => {
                 cmd_notes_install_config(&remote, &notes_ref)
             }
+        },
+        Commands::Team { action } => match action {
+            TeamActions::Report {
+                base,
+                head,
+                notes_ref,
+                json,
+            } => cmd_team_report(&base, &head, &notes_ref, json),
         },
         Commands::Hooks { action } => match action {
             HookActions::Install { tool } => cmd_hooks_install(&tool),
@@ -1728,6 +1761,30 @@ fn cmd_notes_install_config(remote: &str, notes_ref: &str) -> Result<()> {
         "Configured {} fetch and rewrite support for {}",
         remote, notes_ref
     );
+    Ok(())
+}
+
+fn cmd_team_report(base: &str, head: &str, notes_ref: &str, json: bool) -> Result<()> {
+    let storage = RepoStorage::discover()?;
+    let range = format!("{base}..{head}");
+    let revs = git_output(&storage.root, &["rev-list", &range])
+        .with_context(|| format!("failed to list commits in range {range}"))?;
+    let commits: Vec<tellur_core::report::TeamCommitNote> = revs
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|sha| tellur_core::report::TeamCommitNote {
+            note: read_git_note(&storage.root, notes_ref, sha).ok(),
+            sha: sha.to_string(),
+        })
+        .collect();
+
+    let report = tellur_core::report::aggregate_team_report(base, head, &commits);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print!("{}", tellur_core::report::team_report::to_markdown(&report));
+    }
     Ok(())
 }
 

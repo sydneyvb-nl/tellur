@@ -1,11 +1,21 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-03 (Team/server mode design proposal)
+**Last updated:** 2026-06-03 (Team mode Tier 0 — `tellur team report`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0
 
+> **2026-06-03 — Team mode Tier 0 shipped.** First build of roadmap item #8.
+> `tellur team report` aggregates the `refs/notes/ai` authorship notes of every
+> commit in a `--base..--head` range into one team view: AI vs human lines, by
+> tool / model / author, plus provenance coverage (which commits carry a note).
+> Pure Git-native, no server — notes travel over the existing remote. Pure
+> aggregation core in `crates/core/src/report/team_report.rs` (+3 unit tests),
+> CLI `tellur team report [--base --head --notes-ref --json]` (+1 integration
+> test). Tolerant: missing/unparseable notes count as "without provenance"
+> rather than failing.
+>
 > **2026-06-03 — Licensing direction.** Documented the license/structure
 > direction in `docs/proposals/LICENSING.md`: Apache-2.0 for the core
 > (CLI/core/adapters/schemas/editor); the future team/server component
@@ -257,6 +267,7 @@ Tellur/
 | 29 | `tellur sessions` | 8.1 | ✅ Done | Session listing |
 | 30 | `tellur gc` | 8.1 | ✅ Done | Real retention-based deletion (keep_days from config), rewrites logs + rebuilds index; `--dry-run` is truly dry |
 | 31 | `tellur redact` | 14 | ✅ Done | Rewrites stored payloads in place, records RedactionInfo, re-seals hash chain so `verify` stays intact |
+| 31a | `tellur team report` | §6.11/§32 Step 20 | ✅ Done | Tier 0 team mode: aggregates `refs/notes/ai` notes over a `--base..--head` range into AI involvement by tool/model/author + provenance coverage. Markdown/`--json`. No server. `crates/core/src/report/team_report.rs` |
 
 ### Phase 4: Reports & Export (PRD secties 12, 15, 20)
 
@@ -308,8 +319,9 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 1. **Pricing / Business model** (PRD sectie 27-31) — niet relevant voor dev, Sydney beslist
 2. **Team/server mode** (PRD §6.11 / §16.2 Layer 5 / §32 Step 20) — design
    proposal klaar
-   ([`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md));
-   MVP = Tier 0 (Git-native) → Tier 1 (self-host hub). Nog niet geïmplementeerd.
+   ([`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md)).
+   **Tier 0 gestart:** `tellur team report` (Git-native aggregatie, geen server)
+   is geïmplementeerd. Tier 1 (self-host hub) nog niet.
 3. **SOC 2 compliance** (PRD sectie 26) — far future
 4. **Plugin SDK** (PRD sectie 25) — API stabiliteit eerst nodig
 5. **Release signing** (PRD sectie 20) — na v1.0 (SLSA/SPDX *export* is wel klaar)
@@ -321,17 +333,17 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-140 Rust tests, 0 failures, 0 clippy warnings.
-- core:      69 tests (schema/event-type round-trip, glob matcher, storage,
+144 Rust tests, 0 failures, 0 clippy warnings.
+- core:      72 tests (schema/event-type round-trip, glob matcher, storage,
              hash-chain verify + reseal, index session/attribution round-trip,
              capture pipeline end-to-end, block_ai_read, attribution, redaction,
-             policy, export, PR report, dashboard daemon endpoints + webhook
-             normalization & authenticated POST /webhook route)
+             policy, export, PR report, team report aggregation, dashboard daemon
+             endpoints + webhook normalization & authenticated POST /webhook route)
 - adapters:  47 tests (Claude Code, Aider, Cursor, Codex, Copilot, Gemini CLI,
              Antigravity, Windsurf, JetBrains, Devin, Continue, Cline/Roo Code,
              Generic, and the shared import loop incl. envelope inheritance,
              content-block extraction, and command-text recovery)
-- cli:       24 integration tests (version/help/init/doctor/status/sessions/verify/import/setup incl. windsurf/hooks ingest)
+- cli:       25 integration tests (version/help/init/doctor/status/sessions/verify/import/setup incl. windsurf/hooks ingest/team report)
 - editor:    VS Code — TypeScript compile, 5 unit tests, extension integration tests.
              JetBrains — `editor/tellur-jetbrains` (Kotlin/Gradle, committed wrapper
              pinned to 8.9) builds outside the Rust CI; `./gradlew buildPlugin`

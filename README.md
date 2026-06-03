@@ -183,6 +183,7 @@ tellur notes export                 # Write Git AI-compatible refs/notes/ai
 tellur notes import                 # Import refs/notes/ai into the local index
 tellur notes push                   # Push refs/notes/ai to origin
 tellur notes fetch                  # Fetch refs/notes/ai from origin
+tellur team report                  # Aggregate AI involvement across a commit range (no server)
 tellur daemon                       # Run local HTTP ingestion/dashboard API
 tellur mcp                          # Run MCP server over stdio
 tellur setup agents                 # Install one-time global agent/editor integrations
@@ -412,6 +413,25 @@ Git notes are treated as an interoperability and transport layer, not as
 Tellur's primary database. Prompts, transcripts, redaction state, replay data,
 and policy evidence remain in Tellur's local/private storage; notes contain only
 line ranges, lightweight session metadata, and commit-scoped attribution.
+
+## Team Reports (no server)
+
+Because authorship notes travel over your existing Git remote, a whole team can
+share AI provenance without running any server. After contributors push their
+`refs/notes/ai`, anyone can aggregate a PR or branch range into one view:
+
+```bash
+tellur notes fetch                              # get teammates' notes from origin
+tellur team report --base main --head HEAD      # Markdown summary
+tellur team report --base main --head HEAD --json
+```
+
+The report shows AI-assisted vs. human lines, a breakdown by tool / model /
+author, and provenance coverage (which commits in the range carry a note). It is
+tolerant: commits with no note — or an unparseable one — are listed under
+"without provenance" rather than failing the report. This is the no-server
+("Tier 0") slice of the team/server roadmap; see
+[`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md).
 
 ## Development
 
