@@ -14,7 +14,9 @@
 > aggregation core in `crates/core/src/report/team_report.rs` (+3 unit tests),
 > CLI `tellur team report [--base --head --notes-ref --json]` (+1 integration
 > test). Tolerant: missing/unparseable notes count as "without provenance"
-> rather than failing.
+> rather than failing. Phase A is complete: an example PR workflow lives at
+> `docs/examples/github-actions-team-report.yml` (fetch notes → aggregate →
+> upsert one PR comment).
 >
 > **2026-06-03 — Licensing direction.** Documented the license/structure
 > direction in `docs/proposals/LICENSING.md`: Apache-2.0 for the core
@@ -320,8 +322,10 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 2. **Team/server mode** (PRD §6.11 / §16.2 Layer 5 / §32 Step 20) — design
    proposal klaar
    ([`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md)).
-   **Tier 0 gestart:** `tellur team report` (Git-native aggregatie, geen server)
-   is geïmplementeerd. Tier 1 (self-host hub) nog niet.
+   **Tier 0 / Phase A klaar:** `tellur team report` (Git-native aggregatie, geen
+   server) + voorbeeld-PR-workflow
+   ([`docs/examples/github-actions-team-report.yml`](docs/examples/github-actions-team-report.yml)).
+   Tier 1 (self-host hub) nog niet.
 3. **SOC 2 compliance** (PRD sectie 26) — far future
 4. **Plugin SDK** (PRD sectie 25) — API stabiliteit eerst nodig
 5. **Release signing** (PRD sectie 20) — na v1.0 (SLSA/SPDX *export* is wel klaar)

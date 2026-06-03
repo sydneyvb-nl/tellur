@@ -433,6 +433,10 @@ tolerant: commits with no note — or an unparseable one — are listed under
 ("Tier 0") slice of the team/server roadmap; see
 [`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md).
 
+To post the report automatically on pull requests, copy the example workflow in
+[`docs/examples/github-actions-team-report.yml`](docs/examples/github-actions-team-report.yml)
+into `.github/workflows/`.
+
 ## Development
 
 ```bash

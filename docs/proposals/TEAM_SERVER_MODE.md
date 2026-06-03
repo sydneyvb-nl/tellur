@@ -1,7 +1,7 @@
 # Proposal: Team / Server Mode
 
-**Status:** Tier 0 partially shipped (`tellur team report`); Tier 1+ proposed ·
-**Roadmap:** PROJECT_STATUS.md #8 · **Last updated:** 2026-06-03
+**Status:** Tier 0 / Phase A shipped (`tellur team report` + example PR CI);
+Tier 1+ proposed · **Roadmap:** PROJECT_STATUS.md #8 · **Last updated:** 2026-06-03
 
 > This is a design proposal, not shipped behavior. It defines the direction and a
 > phased plan for letting multiple people and repositories share AI code
@@ -150,8 +150,9 @@ Sydney).
 2. ✅ **Aggregation read model** — `aggregate_team_report()` ingests N
    contributors' notes and produces per-author / per-tool / per-model rollups;
    tolerant of missing/unparseable notes.
-3. **Docs + example CI** — show a GitHub Action posting the team report on PRs.
-   *(remaining)*
+3. ✅ **Docs + example CI** — `docs/examples/github-actions-team-report.yml`
+   posts the team report as a PR comment (fetches notes, aggregates, upserts one
+   comment). Shipped 2026-06-03.
 
 *Exit criteria:* a team using a shared Git remote gets a combined AI-involvement
 view with zero server, and each contribution stays hash-verifiable.
