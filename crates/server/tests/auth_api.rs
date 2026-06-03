@@ -40,6 +40,10 @@ fn setup() -> Setup {
     let state = AppState {
         store: store.clone(),
         config: Arc::new(config),
+        rate_limiter: Arc::new(tellur_server::ratelimit::RateLimiter::new(
+            1000,
+            std::time::Duration::from_secs(60),
+        )),
     };
     Setup {
         state,

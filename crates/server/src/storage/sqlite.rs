@@ -3,15 +3,15 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use tellur_core::schema::ids;
 
-use super::{AuditEntry, Org, Store};
+use super::{AuditEntry, IngestEvent, Org, Repo, Store};
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
-const SCHEMA_VERSION: &str = "2";
+const SCHEMA_VERSION: &str = "4";
 
 /// A SQLite-backed store. The connection is behind a `Mutex` so the store is
 /// `Send + Sync` and usable as `Arc<dyn Store>`.
@@ -105,6 +105,34 @@ impl Store for SqliteStore {
              -- truncation / rollback to an earlier prefix is detectable.
              CREATE TABLE IF NOT EXISTS audit_head (
                  id          INTEGER PRIMARY KEY CHECK (id = 1),
+                 head_hash   TEXT NOT NULL,
+                 entry_count INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS repo (
+                 id         TEXT PRIMARY KEY,
+                 org_id     TEXT NOT NULL REFERENCES org(id),
+                 name       TEXT NOT NULL,
+                 created_at TEXT NOT NULL,
+                 UNIQUE (org_id, name)
+             );
+             CREATE TABLE IF NOT EXISTS event (
+                 seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+                 id         TEXT NOT NULL UNIQUE,
+                 org_id     TEXT NOT NULL,
+                 repo_id    TEXT NOT NULL REFERENCES repo(id),
+                 session_id TEXT NOT NULL,
+                 ts         TEXT NOT NULL,
+                 event_type TEXT NOT NULL,
+                 actor      TEXT NOT NULL,
+                 payload    TEXT NOT NULL,
+                 prev_hash  TEXT NOT NULL,
+                 entry_hash TEXT NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_event_repo ON event(repo_id, seq);
+             -- Per-repo chain head + length checkpoint, so tail truncation /
+             -- rollback of a repo's event log is detectable.
+             CREATE TABLE IF NOT EXISTS event_head (
+                 repo_id     TEXT PRIMARY KEY REFERENCES repo(id),
                  head_hash   TEXT NOT NULL,
                  entry_count INTEGER NOT NULL
              );",
@@ -214,6 +242,190 @@ impl Store for SqliteStore {
             member_id,
             role: Role::parse(&role_str)?,
         }))
+    }
+
+    fn ensure_repo(&self, org_id: &str, name: &str) -> Result<Repo> {
+        let conn = self.conn()?;
+        let id = ids::generate_id("repo");
+        // Race-safe get-or-create: insert if absent, then read the canonical id.
+        conn.execute(
+            "INSERT INTO repo (id, org_id, name, created_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(org_id, name) DO NOTHING",
+            params![id, org_id, name, chrono::Utc::now().to_rfc3339()],
+        )
+        .context("failed to create repo")?;
+        let real_id: String = conn.query_row(
+            "SELECT id FROM repo WHERE org_id = ?1 AND name = ?2",
+            params![org_id, name],
+            |r| r.get(0),
+        )?;
+        Ok(Repo {
+            id: real_id,
+            org_id: org_id.to_string(),
+            name: name.to_string(),
+        })
+    }
+
+    fn append_events(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        events: &[IngestEvent],
+    ) -> Result<Vec<String>> {
+        let mut guard = self.conn()?;
+        let tx = guard
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .context("failed to begin ingest transaction")?;
+
+        // Tenant scoping: the repo must belong to the caller's org.
+        let belongs = tx
+            .query_row(
+                "SELECT 1 FROM repo WHERE id = ?1 AND org_id = ?2",
+                params![repo_id, org_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !belongs {
+            bail!("repo {repo_id} not found in org {org_id}");
+        }
+
+        // The head checkpoint is the authoritative chain tip + length.
+        let (mut prev, mut count): (String, i64) = tx
+            .query_row(
+                "SELECT head_hash, entry_count FROM event_head WHERE repo_id = ?1",
+                [repo_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?
+            .unwrap_or_else(|| (String::new(), 0));
+
+        let mut new_ids = Vec::with_capacity(events.len());
+        for ev in events {
+            let id = ids::generate_event_id();
+            let prev_opt = if prev.is_empty() {
+                None
+            } else {
+                Some(prev.as_str())
+            };
+            // Server recomputes the chain hash — client hashes are never trusted.
+            let entry_hash = ids::hash_event(
+                &id,
+                &ev.session_id,
+                &ev.timestamp,
+                &ev.event_type,
+                &ev.actor,
+                &ev.payload,
+                prev_opt,
+            );
+            let payload_str = serde_json::to_string(&ev.payload)?;
+            tx.execute(
+                "INSERT INTO event
+                     (id, org_id, repo_id, session_id, ts, event_type, actor, payload,
+                      prev_hash, entry_hash)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    id,
+                    org_id,
+                    repo_id,
+                    ev.session_id,
+                    ev.timestamp,
+                    ev.event_type,
+                    ev.actor,
+                    payload_str,
+                    prev,
+                    entry_hash
+                ],
+            )
+            .context("failed to insert event")?;
+            prev = entry_hash;
+            count += 1;
+            new_ids.push(id);
+        }
+        tx.execute(
+            "INSERT INTO event_head (repo_id, head_hash, entry_count) VALUES (?1, ?2, ?3)
+             ON CONFLICT(repo_id) DO UPDATE SET head_hash = excluded.head_hash,
+                                                entry_count = excluded.entry_count",
+            params![repo_id, prev, count],
+        )
+        .context("failed to update event head")?;
+        tx.commit().context("failed to commit events")?;
+        Ok(new_ids)
+    }
+
+    fn event_count(&self, org_id: &str, repo_id: &str) -> Result<u64> {
+        let conn = self.conn()?;
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM event WHERE org_id = ?1 AND repo_id = ?2",
+            params![org_id, repo_id],
+            |r| r.get(0),
+        )?;
+        Ok(n as u64)
+    }
+
+    fn verify_event_chain(&self, org_id: &str, repo_id: &str) -> Result<bool> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, ts, event_type, actor, payload, prev_hash, entry_hash
+             FROM event WHERE org_id = ?1 AND repo_id = ?2 ORDER BY seq ASC",
+        )?;
+        let rows = stmt.query_map(params![org_id, repo_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, String>(6)?,
+                r.get::<_, String>(7)?,
+            ))
+        })?;
+
+        let mut expected_prev = String::new();
+        let mut counted: i64 = 0;
+        for row in rows {
+            let (id, session_id, ts, event_type, actor, payload, prev_hash, entry_hash) = row?;
+            if prev_hash != expected_prev {
+                return Ok(false);
+            }
+            let payload_value: serde_json::Value = serde_json::from_str(&payload)?;
+            let prev_opt = if prev_hash.is_empty() {
+                None
+            } else {
+                Some(prev_hash.as_str())
+            };
+            let recomputed = ids::hash_event(
+                &id,
+                &session_id,
+                &ts,
+                &event_type,
+                &actor,
+                &payload_value,
+                prev_opt,
+            );
+            if recomputed != entry_hash {
+                return Ok(false);
+            }
+            expected_prev = entry_hash;
+            counted += 1;
+        }
+
+        // Compare against the persisted head checkpoint so tail truncation /
+        // rollback to an earlier prefix is detected.
+        let head: Option<(String, i64)> = conn
+            .query_row(
+                "SELECT head_hash, entry_count FROM event_head WHERE repo_id = ?1",
+                [repo_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        match head {
+            Some((head_hash, entry_count)) => {
+                Ok(counted == entry_count && expected_prev == head_hash)
+            }
+            None => Ok(counted == 0),
+        }
     }
 
     fn append_audit(&self, entry: &AuditEntry) -> Result<()> {
@@ -387,6 +599,96 @@ mod tests {
         let (id, _) = auth::parse_token(&token.plaintext).unwrap();
         let forged = format!("tlr_{id}_0000");
         assert!(s.authenticate(&forged).unwrap().is_none());
+    }
+
+    fn ingest_event(detail: &str) -> IngestEvent {
+        IngestEvent {
+            session_id: "sess_1".to_string(),
+            timestamp: "2026-06-03T00:00:00Z".to_string(),
+            event_type: "file.write".to_string(),
+            actor: "agent".to_string(),
+            payload: serde_json::json!({ "file_path": detail }),
+        }
+    }
+
+    #[test]
+    fn ensure_repo_is_idempotent() {
+        let s = store();
+        let org = s.create_org("Acme").unwrap();
+        let r1 = s.ensure_repo(&org.id, "app").unwrap();
+        let r2 = s.ensure_repo(&org.id, "app").unwrap();
+        assert_eq!(r1.id, r2.id);
+    }
+
+    #[test]
+    fn events_append_with_verifiable_chain_and_tenant_scope() {
+        let s = store();
+        let org = s.create_org("Acme").unwrap();
+        let repo = s.ensure_repo(&org.id, "app").unwrap();
+        let ids = s
+            .append_events(
+                &org.id,
+                &repo.id,
+                &[ingest_event("a.rs"), ingest_event("b.rs")],
+            )
+            .unwrap();
+        assert_eq!(ids.len(), 2);
+        assert_eq!(s.event_count(&org.id, &repo.id).unwrap(), 2);
+        assert!(s.verify_event_chain(&org.id, &repo.id).unwrap());
+        // Another org sees nothing for this repo id (data-layer scoping).
+        assert_eq!(s.event_count("org_other", &repo.id).unwrap(), 0);
+    }
+
+    #[test]
+    fn append_events_rejects_repo_outside_org() {
+        let s = store();
+        let org = s.create_org("Acme").unwrap();
+        let repo = s.ensure_repo(&org.id, "app").unwrap();
+        // Wrong org for this repo id → rejected.
+        let err = s.append_events("org_other", &repo.id, &[ingest_event("x")]);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn event_chain_detects_tail_truncation() {
+        let s = store();
+        let org = s.create_org("Acme").unwrap();
+        let repo = s.ensure_repo(&org.id, "app").unwrap();
+        s.append_events(
+            &org.id,
+            &repo.id,
+            &[ingest_event("a"), ingest_event("b"), ingest_event("c")],
+        )
+        .unwrap();
+        assert!(s.verify_event_chain(&org.id, &repo.id).unwrap());
+        // Delete the newest event but leave the head checkpoint intact.
+        {
+            let conn = s.conn().unwrap();
+            conn.execute(
+                "DELETE FROM event WHERE seq = (SELECT MAX(seq) FROM event WHERE repo_id = ?1)",
+                [&repo.id],
+            )
+            .unwrap();
+        }
+        assert!(
+            !s.verify_event_chain(&org.id, &repo.id).unwrap(),
+            "tail truncation of events must be detected"
+        );
+    }
+
+    #[test]
+    fn event_chain_detects_tampering() {
+        let s = store();
+        let org = s.create_org("Acme").unwrap();
+        let repo = s.ensure_repo(&org.id, "app").unwrap();
+        s.append_events(&org.id, &repo.id, &[ingest_event("a.rs")])
+            .unwrap();
+        {
+            let conn = s.conn().unwrap();
+            conn.execute("UPDATE event SET payload = '{\"file_path\":\"evil\"}'", [])
+                .unwrap();
+        }
+        assert!(!s.verify_event_chain(&org.id, &repo.id).unwrap());
     }
 
     #[test]

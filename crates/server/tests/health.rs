@@ -20,6 +20,10 @@ fn test_state() -> AppState {
     AppState {
         store: Arc::new(store),
         config: Arc::new(config),
+        rate_limiter: Arc::new(tellur_server::ratelimit::RateLimiter::new(
+            1000,
+            std::time::Duration::from_secs(60),
+        )),
     }
 }
 

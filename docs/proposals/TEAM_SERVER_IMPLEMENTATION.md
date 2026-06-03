@@ -204,8 +204,10 @@ Each phase ships independently, behind config, with its own tests + docs.
   orgs, members, Argon2id API tokens, RBAC roles, deny-by-default `Principal`
   auth extractor, tenant-scoped `/v1/me` + `/v1/orgs/{org}/me`, hash-chained
   audit log, admin bootstrap CLI. BOLA regression tests included.
-- **B2 — Ingest & verify.** Authenticated bundle/notes ingest with hash-chain
-  re-verification; rate limits + size caps; redaction on inbound.
+- **B2 — Ingest & verify.** ✅ Done (branch `feat/server-b2-ingest`).
+  `POST /v1/orgs/{org}/repos/{repo}/events` (contributor+; cross-tenant → 403);
+  hub recomputes the per-repo hash chain (`hash_event`); inbound payloads are
+  secret-redacted; 1 MiB body cap + max-events cap + per-member rate limit (429).
 - **B3 — Read & report.** Repo/session/attribution reads; server-side team
   report across repos; reuse `web/` dashboard against multi-repo endpoints.
 - **B4 — Central policy & export.** `tellur policy pull`; org-level

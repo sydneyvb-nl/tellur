@@ -4,12 +4,13 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 
 use crate::config::Config;
+use crate::ratelimit::RateLimiter;
 use crate::storage::Store;
 
 /// Shared, cheaply-cloneable application state.
@@ -17,16 +18,27 @@ use crate::storage::Store;
 pub struct AppState {
     pub store: Arc<dyn Store>,
     pub config: Arc<Config>,
+    /// Per-principal rate limiter for the ingest endpoint.
+    pub rate_limiter: Arc<RateLimiter>,
 }
 
-/// Build the HTTP router. B0 exposes only operational endpoints (no data, no
-/// tenant access), so none require auth.
+/// Maximum accepted request body size (1 MiB).
+pub const MAX_BODY_BYTES: usize = 1024 * 1024;
+
+/// Build the HTTP router. Operational endpoints (`/healthz`, `/readyz`) need no
+/// auth; `/v1/*` endpoints authenticate and scope to the caller's org.
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/v1/me", get(crate::api::me))
         .route("/v1/orgs/{org_id}/me", get(crate::api::org_me))
+        .route(
+            "/v1/orgs/{org_id}/repos/{repo}/events",
+            post(crate::api::ingest_events),
+        )
+        // Cap request bodies (defense against unrestricted resource consumption).
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)
 }
 

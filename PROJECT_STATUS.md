@@ -1,11 +1,29 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-03 (Tier 1 B1 — identity & tenancy; on feature branch)
+**Last updated:** 2026-06-03 (Tier 1 B2 — ingest & verify; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-03 — Tier 1 B2 (ingest & verify).** On branch
+> `feat/server-b2-ingest`. Added authenticated provenance ingest:
+> `POST /v1/orgs/{org}/repos/{repo}/events` (contributor+ role, cross-tenant →
+> 403/BOLA). The hub get-or-creates the repo, **recomputes the per-repo hash
+> chain** with core's `hash_event` (clients can't forge), and **redacts secrets
+> from inbound payloads** before storage (verified live: a secret lands as
+> `[REDACTED]` in the DB). Guardrails: 1 MiB body limit (router layer), max 1000
+> events/request, and a per-member fixed-window rate limiter → `429`. New
+> `event`/`repo` tables (schema v3) + `verify_event_chain`. Verified: 38 server
+> tests (incl. ingest BOLA/role/caps/rate-limit + chain tamper) + live smoke;
+> workspace fmt/clippy/test (182) + deny green. Next: B3 (read & report).
+>
+> **2026-06-03 — B2 review fixes (Codex).** Addressed 2 findings on PR #3: the
+> per-repo event chain now persists an `event_head` checkpoint (head-hash +
+> count) so tail truncation is detected by `verify_event_chain` (P1, mirrors
+> `audit_head`); and `docs/THREAT_MODEL.md` is updated for the new ingest trust
+> boundary (P2). 39 server tests; 183 workspace.
+>
 > **2026-06-03 — Tier 1 B1 (identity & tenancy).** On branch
 > `feat/server-b1-identity-tenancy`. Added to `crates/server`: an `auth` module
 > (viewer/contributor/admin roles; API tokens `tlr_<id>_<secret>` with the secret
@@ -386,12 +404,13 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-169 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
-- server:    25 tests (config secure-by-default bind, SQLite store migrate+health,
-             error mapping, /healthz+/readyz+404; B1: Argon2id token roundtrip +
-             role rules, org/member/token auth, hash-chained audit append/verify/
-             tamper-detect + tail-truncation + two-connection chain, authn +
-             tenant-scoping/BOLA API tests + auth-denied auditing)
+183 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
+- server:    39 tests (B0 config/health/errors; B1 Argon2id tokens, org/member
+             auth, hash-chained audit append/verify/tamper/tail-truncation/
+             two-connection, authn + BOLA + auth-denied auditing; B2 repo
+             get-or-create, per-repo event chain verify/tamper, tenant scoping,
+             ingest authz/BOLA/role + empty/oversized caps + rate-limit 429 +
+             recursive payload redaction)
 - core:      72 tests (schema/event-type round-trip, glob matcher, storage,
              hash-chain verify + reseal, index session/attribution round-trip,
              capture pipeline end-to-end, block_ai_read, attribution, redaction,
@@ -471,7 +490,10 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
    STRIDE/cargo-deny/CI). **B1 ✅** (branch `feat/server-b1-identity-tenancy`):
    roles + Argon2id API tokens, orgs/members, hash-chained audit log, deny-by-
    default auth extractor, tenant-scoped `/v1/me` + `/v1/orgs/{org}/me` (BOLA
-   blocked), admin bootstrap CLI. Next: **B2 — ingest & verify**.
+   blocked), admin bootstrap CLI. **B2 ✅** (branch `feat/server-b2-ingest`):
+   authenticated `POST .../repos/{repo}/events` with server-recomputed per-repo
+   hash chain, inbound secret redaction, body/size + rate-limit guardrails.
+   Next: **B3 — read & report**.
 9. **Plugin SDK** — requires stable adapter/event API
 
 ---

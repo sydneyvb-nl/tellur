@@ -12,6 +12,10 @@ pub enum ServerError {
     #[error("configuration error: {0}")]
     Config(String),
 
+    /// A client-facing validation error (safe to show the message).
+    #[error("{0}")]
+    BadRequest(String),
+
     #[error("not found")]
     NotFound,
 
@@ -20,6 +24,9 @@ pub enum ServerError {
 
     #[error("forbidden")]
     Forbidden,
+
+    #[error("too many requests")]
+    TooManyRequests,
 
     /// Any internal failure (storage, IO, etc.). Detail is never sent to clients.
     #[error("internal error")]
@@ -30,9 +37,11 @@ impl ServerError {
     fn status(&self) -> StatusCode {
         match self {
             ServerError::Config(_) | ServerError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ServerError::BadRequest(_) => StatusCode::BAD_REQUEST,
             ServerError::NotFound => StatusCode::NOT_FOUND,
             ServerError::Unauthorized => StatusCode::UNAUTHORIZED,
             ServerError::Forbidden => StatusCode::FORBIDDEN,
+            ServerError::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
         }
     }
 
@@ -40,9 +49,11 @@ impl ServerError {
     fn slug(&self) -> &'static str {
         match self {
             ServerError::Config(_) | ServerError::Internal(_) => "internal-error",
+            ServerError::BadRequest(_) => "bad-request",
             ServerError::NotFound => "not-found",
             ServerError::Unauthorized => "unauthorized",
             ServerError::Forbidden => "forbidden",
+            ServerError::TooManyRequests => "too-many-requests",
         }
     }
 }
