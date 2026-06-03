@@ -6,8 +6,16 @@
 > This is a design proposal, not shipped behavior. It defines the direction and a
 > phased plan for letting multiple people and repositories share AI code
 > provenance without giving up Tellur's local-first, Git-native guarantees.
-> PRD §24 ("team/server mode") has not been reconciled with this document yet —
-> align before building Tier 1+.
+>
+> **PRD reference (reconciled 2026-06-03).** The original PRD (working name
+> *TraceLens*) specifies team/server mode in **§6 product surface 11
+> ("Team/server mode")**, **§16.2 storage Layer 5 ("Optional remote sync — team
+> server, object storage or artifact store")**, **§4.1 ("Optional team
+> aggregation can exist later, but the local workflow must be complete")**, and
+> the sequential build plan **§32 Step 20 ("Build team mode")**. Note: PRD §24 is
+> *Architecture Guardian*, not team mode — earlier PROJECT_STATUS entries that
+> cited "§24" for team mode were mislabeled. This proposal is consistent with the
+> PRD; see [§PRD alignment](#prd-alignment) below.
 
 ## 1. Goal
 
@@ -90,6 +98,17 @@ multi-user auth. Repos push their redacted event bundles (or notes) to the hub;
 the hub indexes them, **re-verifies each repo's hash chain**, and serves a team
 dashboard + org-wide policy + compliance export. Storage: SQLite by default,
 Postgres optional for scale.
+
+This is where the PRD §32 Step 20 building blocks land:
+
+- **Central policy distribution** — the hub serves the canonical
+  `.tellur/policies/*.yml`; `tellur policy pull` syncs org policy into each repo
+  so rules are defined once and enforced everywhere (CI + editor).
+- **Metadata aggregation** — multi-repo, multi-contributor rollups for the
+  dashboard and durability metrics (PRD §21).
+- **Audit export portal** — generate org-level provenance/SLSA/SPDX bundles
+  across repos and releases from one place (PRD §20.2, §22.1).
+
 → Covers SMB teams and corporate on-prem/VPC.
 
 ### Tier 2 — Managed / Enterprise (later)
@@ -162,17 +181,47 @@ Phases A–B and Sydney's pricing/hosting decisions.
 - Compliance export (SLSA v1.0, SPDX 2.3) already exists and flows through the
   hub for org-level attestation.
 
-## 10. Open questions (for Sydney)
+## 10. PRD alignment
 
-1. **PRD §24** — share it so this proposal can be reconciled with the original
-   intent before Tier 1 work starts.
+Mapping of PRD §32 Step 20 ("Build team mode") deliverables to this proposal:
+
+| PRD Step 20 deliverable | Where in this proposal |
+| --- | --- |
+| Optional self-hosted server | Tier 1 `tellur serve` (Phase B) |
+| Central policy distribution | Tier 1 — `tellur policy pull` from the hub |
+| Metadata aggregation | Tier 0 `tellur team report` (local) + Tier 1 hub rollups |
+| SSO-ready architecture | Tier 2 (OIDC/SAML/SCIM); auth model designed for it from Tier 1 |
+| Audit export portal | Tier 1 audit export across repos/releases (PRD §20.2, §22.1) |
+| No mandatory cloud | Core principle #3; Tier 0 needs no server at all |
+
+Consistency with other PRD requirements: local-first default (§4.1), privacy &
+redaction first (§4.7, §14), tamper-evident logs (§14.5), export profiles
+(§20.2), corporate policies (§13.5), and the enterprise wedge (§28.3) are all
+honored. The **Git-notes-as-team-transport (Tier 0)** path is an enhancement
+beyond the PRD's Layer 5 ("team server, object storage or artifact store"): it
+adds a zero-infra option that fits the PRD's local-first, no-mandatory-cloud
+spirit and reuses the already-built `refs/notes/ai` support.
+
+### Licensing note (from PRD header)
+
+The PRD targets **Apache-2.0 for the core**, with an **AGPL-3.0-compatible
+license only for an optional hosted/server distribution** if a community server
+edition is created. Practical implication: keep the Tier 1/2 server in a clearly
+separable component (e.g. its own crate / `crates/server` or build feature) so a
+different license can apply to the server without touching the Apache-2.0 core.
+Decide the exact split with Sydney before shipping Tier 1.
+
+## 11. Open questions (for Sydney)
+
+1. ~~PRD reconciliation~~ — done 2026-06-03 (see §PRD alignment).
 2. **Managed cloud: now or later?** Recommendation: self-host first, managed
    after validation.
-3. **Pricing model** (open-core? paid Hub tier?) — determines where the
-   Tier 1/2 line sits.
+3. **Pricing / licensing model** (open-core? paid Hub tier? Apache core +
+   AGPL server per PRD header?) — determines where the Tier 1/2 line and the
+   license boundary sit.
 4. **Decided MVP path:** Tier 0 first, then Tier 1 (per 2026-06-03 review).
 
-## 11. Non-goals (for now)
+## 12. Non-goals (for now)
 
 - Real-time collaborative editing or chat.
 - Replacing Git as the source of truth for code.

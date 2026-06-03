@@ -14,7 +14,8 @@
 > notes as the zero-infra team transport, and add an optional self-hostable
 > `tellur serve` hub. Decided MVP path: **Tier 0 (`tellur team report`, no
 > server) first, then Tier 1 (self-hosted hub)**. Proposal only — no code yet;
-> reconcile with PRD §24 before Tier 1.
+> reconciled with the PRD (§6 surface 11, §16.2 Layer 5, §32 Step 20; note PRD
+> §24 is *Architecture Guardian*, not team mode).
 >
 > **2026-06-03 — Devin webhook + JetBrains plugin.** Continued roadmap item #7
 > ("live capture beyond import") for the remaining adoption tools.
@@ -280,8 +281,8 @@ Tellur/
 | 43 | SLSA/SPDX export | 20 | ✅ Done | SLSA v1.0 provenance + SPDX 2.3 SBOM with AI metadata, 2 tests | |
 | 44 | HTTP daemon (axum) | 22 | ✅ Done | `tellur daemon` (loopback-only, token-auth, Host check). Server **recomputes the hash chain** via EventWriter — clients cannot forge provenance. 7 endpoints incl. `POST /webhook/{source}` for cloud-agent (Devin) live capture. |
 | 45 | MCP server | 23 | ✅ Done | `tellur mcp` — real stdio JSON-RPC 2.0 (initialize/tools/list/tools/call). 6 tools backed by actual index/policy/verify queries. |
-| 46 | Team/server mode | 24 | ❌ Not started | |
-| 47 | Plugin SDK | 25 | ❌ Not started | |
+| 46 | Team/server mode | §6.11 / §16.2 L5 / §32 Step 20 | 📋 Proposed | Design proposal: [`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md). MVP = Tier 0 (Git-native, no server) → Tier 1 (`tellur serve` hub). Not yet implemented |
+| 47 | Plugin/adapter SDK | §8.3 / §32 Step 18 | ❌ Not started | Requires stable adapter/event API |
 
 ### Phase 7: Distribution (PRD sectie 32.3)
 
@@ -299,7 +300,8 @@ Tellur/
 Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney's beslissing:
 
 1. **Pricing / Business model** (PRD sectie 27-31) — niet relevant voor dev, Sydney beslist
-2. **Team/server mode** (PRD sectie 24) — design proposal klaar
+2. **Team/server mode** (PRD §6.11 / §16.2 Layer 5 / §32 Step 20) — design
+   proposal klaar
    ([`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md));
    MVP = Tier 0 (Git-native) → Tier 1 (self-host hub). Nog niet geïmplementeerd.
 3. **SOC 2 compliance** (PRD sectie 26) — far future
@@ -386,8 +388,8 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
 8. **Team/server mode** — design proposal written:
    [`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md).
    Decided MVP path: **Tier 0 (Git-native `tellur team report`, no server) first,
-   then Tier 1 (`tellur serve` self-hosted hub)**. Not yet implemented; align
-   with PRD §24 before Tier 1.
+   then Tier 1 (`tellur serve` self-hosted hub)**. Not yet implemented;
+   reconciled with PRD §6.11 / §16.2 Layer 5 / §32 Step 20.
 9. **Plugin SDK** — requires stable adapter/event API
 
 ---
