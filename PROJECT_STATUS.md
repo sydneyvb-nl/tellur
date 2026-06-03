@@ -1,11 +1,20 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-03 (Team mode Tier 0 — `tellur team report`)
+**Last updated:** 2026-06-03 (Tier 1 secure implementation plan)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0
 
+> **2026-06-03 — Tier 1 implementation plan.** Researched current security &
+> compliance standards (OWASP ASVS 5.0, OWASP API Top 10 2023/BOLA, EU CRA,
+> SLSA v1.0, NIST SSDF, GDPR, SOC 2/ISO 27001 readiness, Sigstore/SBOM) and
+> wrote a secure-by-design, maintainable, scalable plan for the `tellur serve`
+> hub: `docs/proposals/TEAM_SERVER_IMPLEMENTATION.md` (new FSL `crates/server`,
+> thin-handler/fat-service layering, swappable SQLite→Postgres `Store` trait,
+> data-layer tenant scoping to kill BOLA, hash-chained audit log, phased B0–B6
+> with CI security gates). Plan only — no code yet.
+>
 > **2026-06-03 — Team mode Tier 0 shipped.** First build of roadmap item #8.
 > `tellur team report` aggregates the `refs/notes/ai` authorship notes of every
 > commit in a `--base..--head` range into one team view: AI vs human lines, by
@@ -407,11 +416,13 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
    `POST /webhook/devin` endpoint. Remaining (optional): lifecycle-hook capture
    for Windsurf/JetBrains if/when they document a local hook API; publish the
    JetBrains plugin to the Marketplace.
-8. **Team/server mode** — design proposal written:
-   [`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md).
-   Decided MVP path: **Tier 0 (Git-native `tellur team report`, no server) first,
-   then Tier 1 (`tellur serve` self-hosted hub)**. Not yet implemented;
+8. **Team/server mode** — proposal
+   [`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md);
    reconciled with PRD §6.11 / §16.2 Layer 5 / §32 Step 20.
+   **Tier 0 ✅ done** (`tellur team report` + example PR CI).
+   **Tier 1 next:** secure-by-design implementation plan ready at
+   [`docs/proposals/TEAM_SERVER_IMPLEMENTATION.md`](docs/proposals/TEAM_SERVER_IMPLEMENTATION.md)
+   (phased B0–B6). Awaiting go-ahead.
 9. **Plugin SDK** — requires stable adapter/event API
 
 ---

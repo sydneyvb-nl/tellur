@@ -159,6 +159,10 @@ view with zero server, and each contribution stays hash-verifiable.
 
 ### Phase B — Tier 1 (self-hosted hub)
 
+> Detailed secure-by-design implementation plan (standards mapping, code
+> structure, auth/tenancy, scalability, CRA/SLSA/GDPR/SOC 2 readiness, phased
+> B0–B6 build): [`TEAM_SERVER_IMPLEMENTATION.md`](TEAM_SERVER_IMPLEMENTATION.md).
+
 1. **`tellur serve`** — promote the daemon to a network listener with a config
    for bind address, TLS termination guidance, and multi-token auth.
 2. **Ingest endpoint** — accept redacted bundles/notes, re-verify hash chains,
