@@ -2279,13 +2279,10 @@ fn editor_user_settings_path(home: &Path, app_name: &str) -> PathBuf {
     }
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     {
-        let config_dir = match app_name {
-            "Code" => "Code",
-            "Cursor" => "Cursor",
-            other => other,
-        };
+        // On Linux, VS Code-family editors store user settings under
+        // ~/.config/<AppName>/User/settings.json (Code, Cursor, Windsurf, ...).
         home.join(".config")
-            .join(config_dir)
+            .join(app_name)
             .join("User/settings.json")
     }
 }

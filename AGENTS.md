@@ -156,6 +156,15 @@ cargo deny check   # supply-chain gate: licenses + advisories + sources
 license (`license.workspace = true` for Apache core crates; the FSL server crate
 uses `license-file` + `publish = false`).
 
+**Toolchain is pinned** in `rust-toolchain.toml` so local and CI run the same
+clippy — bump it deliberately and fix any new lints in that change.
+
+**Platform-specific code:** local `cargo clippy` on macOS does **not** compile
+`#[cfg(target_os = "...")]` blocks for other OSes, so a lint inside a
+Linux/Windows-only block can pass locally yet fail CI (which runs on Ubuntu).
+Keep `cfg` branches trivial, and treat the Ubuntu CI run as the cross-platform
+authority before considering a change green.
+
 For VS Code extension changes, also run from `editor/tellur-vscode`:
 
 ```bash
