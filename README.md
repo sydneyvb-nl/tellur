@@ -385,7 +385,8 @@ Tellur/
 ├── crates/
 │   ├── core/          # Schemas, attribution, storage, policy, export, daemon, MCP
 │   ├── cli/           # tellur command
-│   └── adapters/      # Claude Code, Cursor, Aider, Codex, Copilot, Gemini, Antigravity, Windsurf, JetBrains, Devin, Continue, Cline, Generic
+│   ├── adapters/      # Claude Code, Cursor, Aider, Codex, Copilot, Gemini, Antigravity, Windsurf, JetBrains, Devin, Continue, Cline, Generic
+│   └── server/        # Tier 1 team hub (tellur-server) — FSL-1.1-ALv2 (in progress)
 ├── editor/            # VS Code extension + JetBrains plugin (tellur-jetbrains)
 ├── schemas/           # JSON Schema definitions
 ├── dist/              # npm wrapper and Homebrew formula

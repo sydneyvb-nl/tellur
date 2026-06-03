@@ -1,0 +1,71 @@
+//! Integration tests for the B0 operational endpoints.
+
+use std::sync::Arc;
+
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use http_body_util::BodyExt;
+use tellur_server::storage::{SqliteStore, Store};
+use tellur_server::{AppState, Config, build_router};
+use tower::ServiceExt; // for `oneshot`
+
+fn test_state() -> AppState {
+    let store = SqliteStore::open_in_memory().unwrap();
+    store.migrate().unwrap();
+    let config = Config {
+        bind: "127.0.0.1:0".parse().unwrap(),
+        db_path: ":memory:".into(),
+        allow_non_loopback: false,
+    };
+    AppState {
+        store: Arc::new(store),
+        config: Arc::new(config),
+    }
+}
+
+#[tokio::test]
+async fn healthz_returns_ok() {
+    let app = build_router(test_state());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/healthz")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["status"], "ok");
+    assert_eq!(json["service"], "tellur-server");
+}
+
+#[tokio::test]
+async fn readyz_returns_ready_when_store_healthy() {
+    let app = build_router(test_state());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/readyz")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["status"], "ready");
+}
+
+#[tokio::test]
+async fn unknown_route_is_404() {
+    let app = build_router(test_state());
+    let resp = app
+        .oneshot(Request::builder().uri("/nope").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}

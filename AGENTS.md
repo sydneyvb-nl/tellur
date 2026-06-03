@@ -32,7 +32,8 @@ tellur/
 │   ├── core/         # library: schema, storage, attribution, policy, redaction,
 │   │                 #          export, daemon, mcp, notes, remap, report
 │   ├── cli/          # the `tellur` binary (all commands + global setup)
-│   └── adapters/     # per-tool import parsers + hook/payload normalization
+│   ├── adapters/     # per-tool import parsers + hook/payload normalization
+│   └── server/       # Tier 1 team hub (tellur-server) — FSL-1.1-ALv2, not Apache
 ├── editor/
 │   ├── tellur-vscode/    # VS Code / Cursor / Windsurf extension (TypeScript)
 │   └── tellur-jetbrains/ # JetBrains IDE plugin (Kotlin/Gradle)
@@ -100,6 +101,9 @@ Use this map before changing code so you land changes in the right layer.
 | CLI integration tests | `crates/cli/tests/cli_integration.rs` | End-to-end binary behavior and generated config fixtures. |
 | VS Code/Cursor/Windsurf extension | `editor/tellur-vscode/src/` | Extension client, commands, tree providers, save/watch capture, model diagnostics. Same extension serves VS Code, Cursor, and Windsurf (all VS Code-compatible). |
 | JetBrains plugin | `editor/tellur-jetbrains/` | IntelliJ Platform plugin (Kotlin/Gradle): `VFS_CHANGES` listener → `hooks ingest --source jetbrains`, settings UI. Built with Gradle, **not** the Rust CI (see Verification). |
+| Team/server hub (Tier 1) | `crates/server/` | `tellur-server` binary — **FSL-1.1-ALv2**, not Apache (own `LICENSE`, `publish = false`). Layered: `config`/`error`/`storage` (Store trait + SQLite)/`app` (router). B0 = scaffolding + `/healthz`/`/readyz` only. See `docs/proposals/TEAM_SERVER_IMPLEMENTATION.md`. |
+| Security policy / threat model | `SECURITY.md`, `docs/THREAT_MODEL.md` | Coordinated disclosure + CRA reporting; STRIDE analysis. Update the threat model when trust boundaries/endpoints change. |
+| Supply-chain gate | `deny.toml`, `.github/workflows/ci.yml` | `cargo-deny` (licenses/advisories/sources) + `cargo-audit` + fmt/clippy/test in CI. |
 | Web dashboard | `web/index.html` | Static dashboard client backed by daemon endpoints. |
 | Packaging | `dist/`, `.github/workflows/` | npm wrapper, Homebrew formula, release and CI workflows. |
 | User docs | `README.md`, `docs/ADAPTERS.md`, `docs/FINDINGS.md` | Public commands/mechanisms/limits; adapter mechanics; historical review notes. |
@@ -145,7 +149,12 @@ For Rust changes, run:
 cargo fmt
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test
+cargo deny check   # supply-chain gate: licenses + advisories + sources
 ```
+
+`cargo deny check` must stay green (CI enforces it). New crates must declare a
+license (`license.workspace = true` for Apache core crates; the FSL server crate
+uses `license-file` + `publish = false`).
 
 For VS Code extension changes, also run from `editor/tellur-vscode`:
 

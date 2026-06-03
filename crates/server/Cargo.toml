@@ -1,0 +1,32 @@
+[package]
+name = "tellur-server"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+# NOTE: this crate is licensed differently from the Apache-2.0 core.
+# See crates/server/LICENSE (Functional Source License, FSL-1.1-ALv2).
+license-file = "LICENSE"
+description = "Tellur team/server hub (self-hostable). Source-available under FSL-1.1-ALv2."
+# Not published to crates.io (application crate under a source-available license).
+publish = false
+
+[[bin]]
+name = "tellur-server"
+path = "src/main.rs"
+
+[dependencies]
+tellur-core = { path = "../core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+axum = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

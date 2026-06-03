@@ -1,11 +1,23 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-03 (Tier 1 secure implementation plan)
+**Last updated:** 2026-06-03 (Tier 1 B0 — `tellur-server` scaffolding)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
-**License:** Apache-2.0
+**License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-03 — Tier 1 B0 shipped (server scaffolding).** New FSL-licensed
+> `crates/server` (`tellur-server` binary), the secure foundation before any data
+> endpoints. Secure-by-default config (refuses non-loopback bind without explicit
+> opt-in; validated at boot), typed errors → RFC 9457 `problem+json` that never
+> leak internals on 5xx, a swappable `Store` trait with a SQLite backend
+> (WAL/foreign-keys, idempotent migrate), `AppState` + axum router with
+> `/healthz` + `/readyz`, structured `tracing`, graceful shutdown. Added
+> `SECURITY.md` (coordinated disclosure + CRA reporting), `docs/THREAT_MODEL.md`
+> (STRIDE), `deny.toml` + a CI workflow (`cargo fmt`/`clippy`/`test` +
+> `cargo-deny` + `cargo-audit`). Verified: 10 server tests; `cargo deny check` →
+> advisories/bans/licenses/sources ok; live binary smoke-tested.
+>
 > **2026-06-03 — Tier 1 implementation plan.** Researched current security &
 > compliance standards (OWASP ASVS 5.0, OWASP API Top 10 2023/BOLA, EU CRA,
 > SLSA v1.0, NIST SSDF, GDPR, SOC 2/ISO 27001 readiness, Sigstore/SBOM) and
@@ -186,6 +198,7 @@ De PRD bevindt zich op een locatie die Sydney bepaalt. Als je de PRD niet hebt, 
 cargo build
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test
+cargo deny check          # supply-chain gate (licenses + advisories + sources)
 cd editor/tellur-vscode
 npm run compile
 npm run test:unit
@@ -204,7 +217,8 @@ Tellur/
 │   ├── core/                ← Core library (schema, storage, attribution, policy,
 │   │                          redaction, export, reports, notes, remap, daemon, mcp)
 │   ├── cli/                 ← CLI binary (tellur command)
-│   └── adapters/            ← AI tool adapters (import + hook/payload normalization)
+│   ├── adapters/            ← AI tool adapters (import + hook/payload normalization)
+│   └── server/              ← Tier 1 team hub (tellur-server, FSL-1.1-ALv2)
 ├── schemas/                 ← JSON Schema definities
 ├── web/                     ← Static session-replay dashboard
 ├── .github/workflows/       ← GitHub Actions
@@ -331,10 +345,9 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 2. **Team/server mode** (PRD §6.11 / §16.2 Layer 5 / §32 Step 20) — design
    proposal klaar
    ([`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md)).
-   **Tier 0 / Phase A klaar:** `tellur team report` (Git-native aggregatie, geen
-   server) + voorbeeld-PR-workflow
-   ([`docs/examples/github-actions-team-report.yml`](docs/examples/github-actions-team-report.yml)).
-   Tier 1 (self-host hub) nog niet.
+   **Tier 0 / Phase A klaar:** `tellur team report` + voorbeeld-PR-workflow.
+   **Tier 1 (self-host hub) in aanbouw:** B0 (FSL `crates/server` scaffolding)
+   klaar; B1 (identity & tenancy) volgt.
 3. **SOC 2 compliance** (PRD sectie 26) — far future
 4. **Plugin SDK** (PRD sectie 25) — API stabiliteit eerst nodig
 5. **Release signing** (PRD sectie 20) — na v1.0 (SLSA/SPDX *export* is wel klaar)
@@ -346,7 +359,9 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-144 Rust tests, 0 failures, 0 clippy warnings.
+154 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
+- server:    10 tests (config validation/secure-by-default bind, SQLite store
+             migrate+health, error mapping, /healthz + /readyz + 404 via router)
 - core:      72 tests (schema/event-type round-trip, glob matcher, storage,
              hash-chain verify + reseal, index session/attribution round-trip,
              capture pipeline end-to-end, block_ai_read, attribution, redaction,
@@ -420,9 +435,11 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
    [`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md);
    reconciled with PRD §6.11 / §16.2 Layer 5 / §32 Step 20.
    **Tier 0 ✅ done** (`tellur team report` + example PR CI).
-   **Tier 1 next:** secure-by-design implementation plan ready at
+   **Tier 1 in progress** per
    [`docs/proposals/TEAM_SERVER_IMPLEMENTATION.md`](docs/proposals/TEAM_SERVER_IMPLEMENTATION.md)
-   (phased B0–B6). Awaiting go-ahead.
+   (B0–B6). **B0 ✅ done:** `crates/server` (FSL) scaffolding — secure-by-default
+   config, typed errors, `Store` trait + SQLite, `/healthz`+`/readyz`, SECURITY.md,
+   STRIDE threat model, cargo-deny + CI gates. Next: **B1 — identity & tenancy**.
 9. **Plugin SDK** — requires stable adapter/event API
 
 ---

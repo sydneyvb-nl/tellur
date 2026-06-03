@@ -209,13 +209,19 @@ Each phase ships independently, behind config, with its own tests + docs.
 - **B4 — Central policy & export.** `tellur policy pull`; org-level
   SLSA/SPDX/audit export portal.
 - **B5 — Scale & ops.** Postgres backend, background jobs, pagination, metrics,
-  backup/retention.
+  backup/retention. Packaging: single binary + signed multi-arch Docker image +
+  Docker Compose example (Helm deferred).
 - **B6 — Enterprise (Tier 2).** OIDC SSO, SCIM, fine-grained RBAC, signed
   release pipeline hardening, SOC 2 evidence collection.
 
-## 15. Open questions (for Sydney)
+## 15. Decisions (2026-06-03)
 
-1. Hosting model for managed (Tier 2): region(s) for GDPR data residency.
-2. Whether to ship a container image + Helm chart in B5 (self-host UX).
-3. Support-period length to commit to (CRA security-update duty).
-4. When to pursue formal SOC 2 / ISO 27001 (design supports it now).
+| Question | Decision |
+| --- | --- |
+| Managed hosting / GDPR residency | **Self-host first; managed later, EU-first** (add US regions afterwards). Self-host keeps residency under the customer's control. |
+| Self-host packaging (B5) | **Single binary (always) + signed multi-arch Docker image + Docker Compose example** (app + Postgres). Helm chart deferred until enterprise demand. |
+| CRA support period | **`SECURITY.md` best-effort policy now**; commit a concrete period (~24 months/major, evolving toward the CRA 5-year reference) when the commercial hub ships. |
+| SOC 2 / ISO 27001 | **Readiness now, certify on demand.** Build controls + audit log now; certify (ISO 27001 for EU, or SOC 2) when a paying enterprise requires it, accelerated with a compliance platform. |
+
+Remaining inputs needed only at their phase: exact managed region(s) at Tier 2;
+final support-period number at commercial launch.
