@@ -7,12 +7,15 @@
 //! B0 scaffolding: secure-by-default config, typed errors, a swappable storage
 //! backend, and operational endpoints. Data/tenant endpoints arrive in B1+.
 
+pub mod api;
 pub mod app;
+pub mod auth;
 pub mod config;
 pub mod error;
 pub mod storage;
 
 pub use app::{AppState, build_router};
+pub use auth::{Principal, Role};
 pub use config::Config;
 pub use error::ServerError;
 

@@ -1,11 +1,23 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-03 (Tier 1 B0 — `tellur-server` scaffolding)
+**Last updated:** 2026-06-03 (Tier 1 B1 — identity & tenancy; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-03 — Tier 1 B1 (identity & tenancy).** On branch
+> `feat/server-b1-identity-tenancy`. Added to `crates/server`: an `auth` module
+> (viewer/contributor/admin roles; API tokens `tlr_<id>_<secret>` with the secret
+> stored only as an **Argon2id** hash; split id/secret for constant-work lookup),
+> storage for orgs/members/tokens + a **tamper-evident hash-chained audit log**
+> (append/verify/tamper-detect), a deny-by-default axum auth extractor
+> (`Principal` from `Authorization: Bearer`), tenant-scoped endpoints
+> `GET /v1/me` and `GET /v1/orgs/{org}/me` (object+tenant authz → **BOLA**
+> blocked), and a `tellur-server admin create-org/create-token` bootstrap CLI.
+> Verified: 22 server tests incl. cross-org BOLA regression; live end-to-end
+> smoke (401/200/403); fmt/clippy/test/deny green. Next: B2 (ingest & verify).
+>
 > **2026-06-03 — CI hardening.** Fixed a clippy failure that only surfaced on
 > the Ubuntu CI (an unnecessary `match` inside a Linux-only `#[cfg]` block that
 > macOS-local clippy never compiles). Durable follow-ups: pinned the toolchain in
@@ -366,9 +378,11 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-154 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
-- server:    10 tests (config validation/secure-by-default bind, SQLite store
-             migrate+health, error mapping, /healthz + /readyz + 404 via router)
+166 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
+- server:    22 tests (config secure-by-default bind, SQLite store migrate+health,
+             error mapping, /healthz+/readyz+404; B1: Argon2id token roundtrip +
+             role rules, org/member/token auth, hash-chained audit append/verify/
+             tamper-detect, and the authn + tenant-scoping/BOLA API tests)
 - core:      72 tests (schema/event-type round-trip, glob matcher, storage,
              hash-chain verify + reseal, index session/attribution round-trip,
              capture pipeline end-to-end, block_ai_read, attribution, redaction,
@@ -444,9 +458,11 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
    **Tier 0 ✅ done** (`tellur team report` + example PR CI).
    **Tier 1 in progress** per
    [`docs/proposals/TEAM_SERVER_IMPLEMENTATION.md`](docs/proposals/TEAM_SERVER_IMPLEMENTATION.md)
-   (B0–B6). **B0 ✅ done:** `crates/server` (FSL) scaffolding — secure-by-default
-   config, typed errors, `Store` trait + SQLite, `/healthz`+`/readyz`, SECURITY.md,
-   STRIDE threat model, cargo-deny + CI gates. Next: **B1 — identity & tenancy**.
+   (B0–B6). **B0 ✅** scaffolding (config, errors, Store+SQLite, health, SECURITY/
+   STRIDE/cargo-deny/CI). **B1 ✅** (branch `feat/server-b1-identity-tenancy`):
+   roles + Argon2id API tokens, orgs/members, hash-chained audit log, deny-by-
+   default auth extractor, tenant-scoped `/v1/me` + `/v1/orgs/{org}/me` (BOLA
+   blocked), admin bootstrap CLI. Next: **B2 — ingest & verify**.
 9. **Plugin SDK** — requires stable adapter/event API
 
 ---

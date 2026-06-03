@@ -197,11 +197,13 @@ All under `/v1`, versioned; OpenAPI-described; rate-limited; request-size capped
 
 Each phase ships independently, behind config, with its own tests + docs.
 
-- **B0 — Scaffolding & threat model.** `crates/server` (FSL), config, AppState,
-  error type, `Store` trait + SQLite backend, `/healthz`, tracing, CI gates
-  (`cargo-deny`/`audit`), `SECURITY.md`, STRIDE doc. No data endpoints yet.
-- **B1 — Identity & tenancy.** orgs, members, API tokens (hashed), RBAC,
-  per-request `TenantContext`, audit log. BOLA regression tests.
+- **B0 — Scaffolding & threat model.** ✅ Done. `crates/server` (FSL), config,
+  AppState, error type, `Store` trait + SQLite backend, `/healthz`+`/readyz`,
+  tracing, CI gate (`cargo-deny`), `SECURITY.md`, STRIDE doc. No data endpoints.
+- **B1 — Identity & tenancy.** ✅ Done (branch `feat/server-b1-identity-tenancy`).
+  orgs, members, Argon2id API tokens, RBAC roles, deny-by-default `Principal`
+  auth extractor, tenant-scoped `/v1/me` + `/v1/orgs/{org}/me`, hash-chained
+  audit log, admin bootstrap CLI. BOLA regression tests included.
 - **B2 — Ingest & verify.** Authenticated bundle/notes ingest with hash-chain
   re-verification; rate limits + size caps; redaction on inbound.
 - **B3 — Read & report.** Repo/session/attribution reads; server-side team
