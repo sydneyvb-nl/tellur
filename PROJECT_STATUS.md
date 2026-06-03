@@ -6,6 +6,12 @@
 **Branch:** main
 **License:** Apache-2.0
 
+> **2026-06-03 — Licensing direction.** Documented the license/structure
+> direction in `docs/proposals/LICENSING.md`: Apache-2.0 for the core
+> (CLI/core/adapters/schemas/editor); the future team/server component
+> (`crates/server`) under FSL-1.1-Apache-2.0 in the same monorepo; contributions
+> via DCO, no CLA. Direction only — not implemented; not legal advice.
+>
 > **2026-06-03 — Team/server mode proposal.** Researched roadmap item #8 against
 > the existing local-first primitives (Git notes, per-repo hash chain, daemon,
 > export profiles, policy) and the target segments (independent/OSS, SMB,

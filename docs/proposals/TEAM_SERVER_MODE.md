@@ -202,14 +202,14 @@ beyond the PRD's Layer 5 ("team server, object storage or artifact store"): it
 adds a zero-infra option that fits the PRD's local-first, no-mandatory-cloud
 spirit and reuses the already-built `refs/notes/ai` support.
 
-### Licensing note (from PRD header)
+### Licensing note
 
-The PRD targets **Apache-2.0 for the core**, with an **AGPL-3.0-compatible
-license only for an optional hosted/server distribution** if a community server
-edition is created. Practical implication: keep the Tier 1/2 server in a clearly
-separable component (e.g. its own crate / `crates/server` or build feature) so a
-different license can apply to the server without touching the Apache-2.0 core.
-Decide the exact split with Sydney before shipping Tier 1.
+Direction: **Apache-2.0 for the core**, and the Tier 1/2 server as a separable
+component (`crates/server`) under **FSL-1.1-Apache-2.0** (source-available,
+converts to Apache-2.0 after two years). The PRD header allowed an
+AGPL-compatible server; FSL was chosen instead. See
+[`LICENSING.md`](LICENSING.md) for the full picture. Keep the server separable so
+the Apache-2.0 core is never affected.
 
 ## 11. Open questions (for Sydney)
 
