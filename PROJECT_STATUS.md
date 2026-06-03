@@ -1,11 +1,27 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-02 (Windsurf live capture wiring)
+**Last updated:** 2026-06-03 (Devin webhook + JetBrains plugin live capture)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0
 
+> **2026-06-03 — Devin webhook + JetBrains plugin.** Continued roadmap item #7
+> ("live capture beyond import") for the remaining adoption tools.
+> **Devin** now has a first-class daemon webhook: `POST /webhook/{source}`
+> (token-auth, loopback-only) in `crates/core/src/daemon/` normalizes a tool's
+> native run/session payload (messages, shell commands, file edits, status) into
+> canonical Tellur events, hashing prompt-like fields, redacting commands, and
+> **recomputing the hash chain** so provenance cannot be forged. The normalizer
+> lives in `crates/core/src/daemon/webhook.rs` (core can't depend on the adapters
+> crate). **JetBrains** now has a real IntelliJ Platform plugin under
+> `editor/tellur-jetbrains/` (Kotlin/Gradle): it subscribes to `VFS_CHANGES` and
+> routes saved/created files to `tellur hooks ingest --source jetbrains
+> --auto-init`, capturing AI Assistant and Junie edits live; capture is
+> best-effort and off the EDT. The plugin builds outside the Rust workspace CI
+> (JDK 17 + IntelliJ SDK via Gradle), so it is verified by manual build/run.
+> Added 4 Rust tests (webhook normalization + authenticated route).
+>
 > **2026-06-02 — Windsurf live capture.** Started roadmap item #7 ("live capture
 > beyond import") for the adoption tools. Windsurf/Cascade now has live capture,
 > not just import: `tellur setup windsurf` (and `tellur setup agents`) writes
@@ -193,6 +209,8 @@ Tellur/
 | 16j | Continue adapter | 8.2 | ✅ Done | Import via `tellur import continue <file>`; `dev_data` JSONL with nested `data` payloads |
 | 16k | Cline / Roo Code adapter | 8.2 | ✅ Done | Import via `tellur import cline <file>`; `ui_messages.json`/`api_conversation_history.json` task history, shared by Roo Code |
 | 16l | Windsurf live capture | 8.1/10/23 | ✅ Done | `tellur setup windsurf` writes Windsurf user settings + `~/.codeium/windsurf/mcp_config.json`; VS Code-compatible extension captures saves with source `windsurf` (mirrors Cursor). Same extension also covers Continue/Cline/Roo running in a VS Code-family editor. `hooks ingest` source normalization for windsurf/jetbrains/devin/continue/cline |
+| 16m | Devin webhook live capture | 22/23 | ✅ Done | Daemon `POST /webhook/{source}` (token-auth, loopback-only) normalizes native run/session payloads → events with recomputed hash chain (`crates/core/src/daemon/webhook.rs`). 4 tests |
+| 16n | JetBrains live-capture plugin | 10 | ✅ Done | `editor/tellur-jetbrains/` IntelliJ Platform plugin (Kotlin/Gradle): `VFS_CHANGES` listener → `hooks ingest --source jetbrains --auto-init`, settings UI for the tellur path. Builds outside Rust CI (JDK 17 + IntelliJ SDK) |
 
 ### Phase 3: CLI (PRD sectie 8.1)
 
@@ -228,6 +246,7 @@ Tellur/
 | # | Module | PRD Sectie | Status | Details |
 |---|--------|-----------|--------|---------|
 | 36 | VS Code/Cursor-compatible extension | 10 | ✅ Done | Full extension: client, decorations, tree views, commands, auto-init, auto-watch, save capture through `hooks ingest` |
+| 36a | JetBrains IDE plugin | 10 | ✅ Done | `editor/tellur-jetbrains/` — IntelliJ Platform plugin, `VFS_CHANGES` listener → `hooks ingest --source jetbrains`, settings UI. Live capture for AI Assistant/Junie. Builds outside Rust CI |
 | 37 | Inline attribution decorations | 10.1 | ✅ Done | Purple (AI) vs green (human) line decorations | |
 | 38 | Hover cards (origin, model, confidence) | 10.2 | ✅ Done | Explain command shows origin, model, confidence, session | |
 | 39 | Sidebar panel | 10.3 | ✅ Done | Sessions + Attributions tree views in activity bar | |
@@ -240,7 +259,7 @@ Tellur/
 | 41 | Session replay web UI | 16 | ✅ Done | Dark theme timeline, session sidebar, attribution bar, diff viewer, demo fallback, live daemon data via `/sessions` + `/sessions/{id}/events` | Web dashboard |
 | 42 | Git remapping | 17 | ✅ Done | SHA remap via git diff-tree, rebase detection, 3 tests | |
 | 43 | SLSA/SPDX export | 20 | ✅ Done | SLSA v1.0 provenance + SPDX 2.3 SBOM with AI metadata, 2 tests | |
-| 44 | HTTP daemon (axum) | 22 | ✅ Done | `tellur daemon` (loopback-only, token-auth, Host check). Server **recomputes the hash chain** via EventWriter — clients cannot forge provenance. 6 endpoints. |
+| 44 | HTTP daemon (axum) | 22 | ✅ Done | `tellur daemon` (loopback-only, token-auth, Host check). Server **recomputes the hash chain** via EventWriter — clients cannot forge provenance. 7 endpoints incl. `POST /webhook/{source}` for cloud-agent (Devin) live capture. |
 | 45 | MCP server | 23 | ✅ Done | `tellur mcp` — real stdio JSON-RPC 2.0 (initialize/tools/list/tools/call). 6 tools backed by actual index/policy/verify queries. |
 | 46 | Team/server mode | 24 | ❌ Not started | |
 | 47 | Plugin SDK | 25 | ❌ Not started | |
@@ -273,17 +292,20 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-136 Rust tests, 0 failures, 0 clippy warnings.
-- core:      65 tests (schema/event-type round-trip, glob matcher, storage,
+140 Rust tests, 0 failures, 0 clippy warnings.
+- core:      69 tests (schema/event-type round-trip, glob matcher, storage,
              hash-chain verify + reseal, index session/attribution round-trip,
              capture pipeline end-to-end, block_ai_read, attribution, redaction,
-             policy, export, PR report, dashboard daemon endpoints)
+             policy, export, PR report, dashboard daemon endpoints + webhook
+             normalization & authenticated POST /webhook route)
 - adapters:  47 tests (Claude Code, Aider, Cursor, Codex, Copilot, Gemini CLI,
              Antigravity, Windsurf, JetBrains, Devin, Continue, Cline/Roo Code,
              Generic, and the shared import loop incl. envelope inheritance,
              content-block extraction, and command-text recovery)
 - cli:       24 integration tests (version/help/init/doctor/status/sessions/verify/import/setup incl. windsurf/hooks ingest)
-- editor:    TypeScript compile, 5 unit tests, VS Code extension integration tests
+- editor:    VS Code — TypeScript compile, 5 unit tests, extension integration tests.
+             JetBrains — `editor/tellur-jetbrains` (Kotlin/Gradle) builds outside the
+             Rust workspace CI (JDK 17 + IntelliJ SDK); verified by manual build/run
 ```
 
 Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && cargo test`, then `cd editor/tellur-vscode && npm run compile && npm run test:unit && npm run test:extension`.
@@ -331,13 +353,14 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
 4. ~~**Codex CLI adapter**~~ — ✅ Done
 5. ~~**GitHub Copilot adapter**~~ — ✅ Done
 6. ~~**Next first-party adapters for adoption**~~ — ✅ Done as import adapters (Windsurf/Cascade, JetBrains AI / Junie, Devin, Continue, Cline/Roo Code)
-7. **Live capture beyond import** — in progress. ✅ Windsurf/Cascade live via
-   `tellur setup windsurf` (VS Code-compatible extension + MCP); Continue and
-   Cline/Roo covered by the same extension inside any VS Code-family editor.
-   Remaining: JetBrains needs a dedicated plugin (no stable global MCP config);
-   Devin needs a first-class daemon webhook that normalizes its native payload
-   (today: post pre-shaped events to `POST /events`); lifecycle-hook capture for
-   Windsurf/JetBrains if/when they document a local hook API.
+7. **Live capture beyond import** — ✅ Done for all adoption tools' durable
+   surfaces. Windsurf/Cascade live via `tellur setup windsurf` (VS Code-compatible
+   extension + MCP); Continue and Cline/Roo covered by the same extension inside
+   any VS Code-family editor; JetBrains live via the `editor/tellur-jetbrains`
+   IntelliJ plugin (`VFS_CHANGES` → `hooks ingest`); Devin live via the daemon
+   `POST /webhook/devin` endpoint. Remaining (optional): lifecycle-hook capture
+   for Windsurf/JetBrains if/when they document a local hook API; publish the
+   JetBrains plugin to the Marketplace.
 8. **Team/server mode** — decide architecture after local dashboard settles
 9. **Plugin SDK** — requires stable adapter/event API
 

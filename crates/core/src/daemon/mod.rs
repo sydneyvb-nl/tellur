@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 use crate::schema::types::TraceEvent;
 use crate::storage::{EventWriter, TraceIndex};
 
+mod webhook;
+
 /// Daemon configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonConfig {
@@ -125,6 +127,7 @@ pub fn build_router(state: DaemonState) -> Router {
         .route("/status", get(get_status))
         .route("/event", post(submit_event))
         .route("/events", post(submit_events))
+        .route("/webhook/{source}", post(ingest_webhook_route))
         .route("/sessions", get(list_sessions))
         .route("/sessions/{session_id}/events", get(get_session_events))
         .route("/export", post(export_bundle))
@@ -159,6 +162,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<()> {
     println!("Endpoints:");
     println!("  POST /event    — Submit a single event   (auth required)");
     println!("  POST /events   — Submit multiple events   (auth required)");
+    println!("  POST /webhook/{{source}} — Ingest a tool's native webhook (auth required)");
     println!("  GET  /status   — Daemon status");
     println!("  GET  /sessions — List sessions");
     println!("  GET  /sessions/{{id}}/events — Session event timeline");
@@ -244,6 +248,41 @@ async fn submit_events(
             data: Some(serde_json::json!({ "event_ids": ids, "count": ids.len() })),
         }),
     )
+}
+
+/// Live-capture webhook for cloud agents (Devin and similar) that have no local
+/// lifecycle hook or editor extension. The tool POSTs its native payload to
+/// `POST /webhook/{source}`; Tellur normalizes it into canonical events and
+/// **recomputes the hash chain** so provenance cannot be forged.
+async fn ingest_webhook_route(
+    State(state): State<Arc<DaemonState>>,
+    AxumPath(source): AxumPath<String>,
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<ApiResponse>) {
+    if !authorized(&state, &headers) {
+        return unauthorized();
+    }
+    match webhook::ingest_webhook(&state.repo_root, &source, &body) {
+        Ok(result) => (
+            StatusCode::CREATED,
+            Json(ApiResponse {
+                status: "created".to_string(),
+                data: Some(serde_json::json!({
+                    "session_id": result.session_id,
+                    "event_ids": result.event_ids,
+                    "count": result.event_ids.len(),
+                })),
+            }),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                status: "error".to_string(),
+                data: Some(serde_json::json!({ "error": e.to_string() })),
+            }),
+        ),
+    }
 }
 
 async fn list_sessions(State(state): State<Arc<DaemonState>>) -> Json<ApiResponse> {
@@ -512,5 +551,54 @@ mod tests {
         assert_eq!(events[0]["id"], "evt_daemon");
         assert_eq!(events[0]["event_type"], "file.write");
         assert_eq!(events[0]["body"], "Modified src/lib.rs");
+    }
+
+    #[tokio::test]
+    async fn test_webhook_route_requires_auth_and_ingests() {
+        use axum::extract::Path;
+        use axum::http::header::AUTHORIZATION;
+
+        let temp = tempfile::tempdir().unwrap();
+        let repo_root = temp.path();
+        std::fs::create_dir_all(repo_root.join(".tellur").join("traces")).unwrap();
+        std::fs::create_dir_all(repo_root.join(".tellur").join("index")).unwrap();
+        let state = Arc::new(DaemonState {
+            repo_root: repo_root.to_path_buf(),
+            token: "test-token".to_string(),
+        });
+        let body = serde_json::json!({
+            "session_id": "run-7",
+            "messages": [{"type": "edit", "file_path": "src/main.rs"}]
+        });
+
+        // Unauthenticated request is rejected and writes nothing.
+        let (status, _) = ingest_webhook_route(
+            State(state.clone()),
+            Path("devin".to_string()),
+            HeaderMap::new(),
+            Json(body.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+        // Authenticated request ingests the normalized event.
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, "Bearer test-token".parse().unwrap());
+        let (status, Json(resp)) = ingest_webhook_route(
+            State(state.clone()),
+            Path("devin".to_string()),
+            headers,
+            Json(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(resp.data.as_ref().unwrap()["count"], 1);
+        assert_eq!(resp.data.as_ref().unwrap()["session_id"], "run-7");
+
+        let index =
+            TraceIndex::open(&repo_root.join(".tellur").join("index").join("tellur.db")).unwrap();
+        let events = index.get_session_events("run-7").unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type.as_wire(), "file.write");
     }
 }

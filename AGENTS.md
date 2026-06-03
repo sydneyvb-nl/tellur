@@ -44,13 +44,14 @@ Use this map before changing code so you land changes in the right layer.
 | SQLite query index | `crates/core/src/storage/index.rs` | Session/event/attribution indexing used by CLI, MCP, daemon, editor, dashboard. |
 | Git/file capture | `crates/core/src/capture.rs`, `crates/core/src/storage/file_watcher.rs` | Working-tree diff capture, filtered path capture, attribution writes. |
 | Policy/redaction/export | `crates/core/src/policy/`, `crates/core/src/redaction/`, `crates/core/src/storage/export.rs`, `crates/core/src/export/` | Policy checks, secret cleanup, provenance/SLSA/SPDX export. |
-| Local daemon | `crates/core/src/daemon/` | Loopback HTTP API for ingestion and dashboard data. |
+| Local daemon | `crates/core/src/daemon/` | Loopback HTTP API for ingestion and dashboard data. `webhook.rs` normalizes cloud-agent (Devin) native payloads on `POST /webhook/{source}`. |
 | MCP server | `crates/core/src/mcp/` | Stdio JSON-RPC tools exposed to agents/editors. |
 | Adapter implementations | `crates/adapters/src/` | Tool-specific import parsers and hook payload normalization. Keep prompt hashing/redaction here. |
 | Adapter registry | `crates/core/src/adapter/builtin.rs`, `crates/adapters/src/lib.rs` | Built-in adapter metadata and exports. |
 | CLI commands/setup | `crates/cli/src/main.rs` | User commands, global setup/uninstall/status, hook ingestion, import dispatch. |
 | CLI integration tests | `crates/cli/tests/cli_integration.rs` | End-to-end binary behavior and generated config fixtures. |
 | VS Code/Cursor extension | `editor/tellur-vscode/src/` | Extension client, commands, tree providers, save/watch capture, model diagnostics. |
+| JetBrains plugin | `editor/tellur-jetbrains/` | IntelliJ Platform plugin (Kotlin/Gradle): `VFS_CHANGES` listener → `hooks ingest --source jetbrains`. Builds outside Rust CI. |
 | Web dashboard | `web/index.html` | Static dashboard client backed by daemon endpoints. |
 | Packaging | `dist/`, `.github/workflows/` | npm wrapper, Homebrew formula, release and CI workflows. |
 | User docs | `README.md`, `docs/ADAPTERS.md` | Public commands, integration mechanisms, guarantees, limits, adapter roadmap. |

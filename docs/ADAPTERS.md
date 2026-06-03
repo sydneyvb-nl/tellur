@@ -40,8 +40,8 @@ Last updated: 2026-06-02
 | VS Code/Copilot | VS Code extension save/watch capture, metadata JSON/JSONL import | `tellur setup vscode` writes user settings so the installed extension can auto-init, watch, and capture saved files in every Git workspace. Prompt capture remains explicit because VS Code does not expose arbitrary Copilot prompts to extensions. |
 | GitHub Copilot | Metadata JSON/JSONL import | Import-only. Does not intercept Copilot prompts directly because VS Code does not expose that API to extensions. |
 | Windsurf / Cascade | VS Code-compatible extension capture, global MCP, JSON/JSONL session import | `tellur setup windsurf` writes Windsurf user settings and `~/.codeium/windsurf/mcp_config.json`. Windsurf is a VS Code-compatible editor, so live capture is handled by the extension save/watch path (source `windsurf`); Cascade session exports can still be imported. |
-| JetBrains AI Assistant / Junie | JSON/JSONL action-log import | Import-only today. Covers the AI Assistant plugin and the Junie agent across IntelliJ-family IDEs from an exported action log. JetBrains MCP is configured in-IDE, not through a stable global config file, so Tellur does not auto-write it. |
-| Devin | Run/session export import | Import-only by default. Reads a Devin run object (or array/JSONL) of messages, shell commands, and file edits for per-run provenance. Real-time capture is possible by posting events to the authenticated local daemon (`POST /events`). |
+| JetBrains AI Assistant / Junie | JetBrains plugin save/watch capture + JSON/JSONL action-log import | The `editor/tellur-jetbrains` plugin subscribes to IDE virtual-file changes and routes saved/created files to `tellur hooks ingest --source jetbrains --auto-init`, capturing AI Assistant and Junie edits live. Exported action logs can still be imported. JetBrains MCP is configured in-IDE, not through a stable global config file, so Tellur does not auto-write it. |
+| Devin | Daemon webhook live capture + run/session export import | The daemon's authenticated `POST /webhook/devin` normalizes Devin's native run/session payload (messages, shell commands, file edits, status) into Tellur events with a recomputed hash chain. Run exports (object/array/JSONL) can still be imported after the fact. |
 | Continue | `dev_data` JSONL import | Reads Continue development-data files (`chat.jsonl`, `editInteraction.jsonl`, ...) where each line has a `name` and nested `data`. When Continue runs inside a VS Code-family editor, the Tellur extension save/watch path also captures its file edits live. |
 | Cline / Roo Code | Task-history import | Reads a task's `ui_messages.json` / `api_conversation_history.json`; one adapter covers Cline and its Roo Code fork (shared format). When Cline/Roo runs inside a VS Code-family editor, the Tellur extension save/watch path also captures its file edits live. |
 | Aider | Git log import | Uses Aider commit-message markers and file status from the source Git repository. |
@@ -58,6 +58,8 @@ model every editor as if it had Codex-style hooks.
 | Personal plugin / marketplace | Codex | Manual workflow discovery, not required per project. | Setup writes `~/.codex/plugins/tellur-provenance` and `~/.agents/plugins/marketplace.json`. |
 | MCP server | Cursor, Antigravity, Windsurf, external agents | Tool access for status, explain, blame, verify, and policy checks. | Setup writes `~/.cursor/mcp.json`, `~/.codeium/windsurf/mcp_config.json`, and Antigravity MCP configs pointing to the absolute `tellur mcp` command. |
 | VS Code-compatible extension | VS Code, Cursor, Windsurf | Best available editor-level live capture where lifecycle hooks are not documented. Also captures edits from agents that run inside the editor (e.g. Cline/Roo Code, Continue). | User settings enable `autoInit`, `autoWatch`, and `captureOnSave`; save capture routes through `hooks ingest` with source `vscode`, `cursor`, or `windsurf`. |
+| JetBrains plugin | JetBrains IDEs (AI Assistant, Junie) | Editor-level live capture for IntelliJ-family IDEs, which have no documented local hook. | `editor/tellur-jetbrains` subscribes to `VFS_CHANGES` and routes saved/created files to `hooks ingest --source jetbrains --auto-init`. |
+| Daemon webhook | Devin, any cloud/CI agent | Live capture for cloud agents with no local surface. | `POST /webhook/{source}` (token-auth, loopback-only) normalizes a tool's native webhook payload into events and recomputes the hash chain (`crates/core/src/daemon/webhook.rs`). |
 | Import adapters | Cursor, Codex, Copilot, Aider, Gemini CLI, Antigravity, Windsurf, JetBrains, Devin, Continue, Cline/Roo Code, Generic | Historical or metadata-based evidence. | `tellur import <adapter> <source>` normalizes external event streams while preserving source identity and timestamps. JSONL/array/envelope adapters share one tolerant parsing loop (`crates/adapters/src/import.rs`); each adapter only defines its event-type mapping. |
 | Git/policy fallback | All editors | Enforcement at review/commit time. | `tellur policy check`, PR reports, Git notes, and future pre-commit/CI wiring catch gaps in editor APIs. |
 
@@ -79,22 +81,22 @@ added through whichever durable surface each one does expose:
   Windsurf), since the extension records file saves regardless of which agent
   made the edit. Their import adapters remain available for history outside a
   configured editor.
-- **JetBrains AI Assistant / Junie** — import-only today. JetBrains MCP is
-  configured in-IDE rather than through a stable global config file, so Tellur
-  does not auto-write it; a dedicated JetBrains plugin would be needed for
-  editor-level live capture.
-- **Devin** — import-only by default. As a cloud agent it has no local
-  file-edit surface; real-time capture is possible by posting events to the
-  authenticated local daemon (`POST /events`).
+- **JetBrains AI Assistant / Junie** — now has live capture through the
+  `editor/tellur-jetbrains` plugin, which subscribes to IDE virtual-file changes
+  and routes saves to `hooks ingest --source jetbrains`. JetBrains MCP remains
+  in-IDE configuration; Tellur does not auto-write it.
+- **Devin** — now has live capture through the daemon's
+  `POST /webhook/devin` endpoint, which normalizes Devin's native run/session
+  payload. Run-export import remains available for after-the-fact provenance.
 
 Next candidates, when they expose durable capture surfaces:
 
 1. Live lifecycle-hook capture for Windsurf and JetBrains if/when those tools
    document a local hook API (today only Codex, Claude Code, Gemini CLI, and
-   Antigravity do).
-2. A first-class Devin webhook ingestion path through the local daemon that
-   normalizes Devin's native webhook payload, instead of requiring callers to
-   post pre-shaped Tellur events.
+   Antigravity do); the JetBrains plugin's VFS capture is the current best
+   available surface.
+2. Publishing the JetBrains plugin to the JetBrains Marketplace and the VS Code
+   extension flow so users can install live capture without a manual build.
 
 ## Known Limits
 
@@ -135,5 +137,15 @@ Next candidates, when they expose durable capture surfaces:
   `<tool>.<kind>` custom events rather than dropped, and ambiguous tool actions
   (e.g. a Cline `tool` message that may be a read or a write) are kept neutral
   rather than guessed as file writes.
+- The JetBrains plugin captures any file written through the IDE's VFS, not only
+  AI-authored edits; origin (AI vs human) is decided by the core attribution
+  layer, the same as the VS Code extension. It builds outside the Rust workspace
+  CI (JDK 17 + IntelliJ SDK via Gradle), so it is verified by manual build/run
+  rather than by `cargo test`.
+- The daemon webhook (`POST /webhook/{source}`) is a tolerant normalizer, not a
+  signed channel: it proves what a caller posted to the local, token-protected
+  endpoint, not that Devin's cloud independently attested the events. Validate it
+  against representative real Devin payloads before treating coverage as
+  complete.
 - For line-level attribution, hooks and live capture are stronger evidence than
   metadata-only imports.

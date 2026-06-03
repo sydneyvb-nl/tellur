@@ -212,8 +212,8 @@ tellur verify                       # Verify hash-chain integrity
 | Aider | Git commit attribution import | Working |
 | GitHub Copilot | Metadata JSON/JSONL import | Working |
 | Windsurf / Cascade | Windsurf MCP/settings, VS Code-compatible extension save/watch capture, Cascade session JSON/JSONL import | Working |
-| JetBrains AI Assistant / Junie | Action-log JSON/JSONL import (live MCP configured in-IDE) | Working |
-| Devin | Cloud agent run/session export import (live capture via authenticated daemon `POST /events`) | Working |
+| JetBrains AI Assistant / Junie | JetBrains plugin save/watch capture (`editor/tellur-jetbrains`) + action-log JSON/JSONL import | Working |
+| Devin | Live capture via daemon webhook (`POST /webhook/devin`) + cloud agent run/session export import | Working |
 | Continue | `dev_data` JSONL import; live save/watch capture when running in a VS Code-family editor | Working |
 | Cline / Roo Code | Task-history JSON/JSONL import; live save/watch capture when running in a VS Code-family editor | Working |
 | Generic | CLI events, JSONL, local HTTP daemon | Working |
@@ -232,6 +232,35 @@ The adapter layer is pluggable, so additional tools can normalize their events
 into Tellur's schema without changing the core attribution engine.
 See [`docs/ADAPTERS.md`](docs/ADAPTERS.md) for current adapter guarantees,
 known limits, and the adoption roadmap.
+
+### Live Capture Beyond Import
+
+Some tools have no documented local lifecycle hook, so Tellur captures them
+through the durable surface each one does expose:
+
+- **JetBrains IDEs (AI Assistant / Junie)** — the
+  [`editor/tellur-jetbrains`](editor/tellur-jetbrains) plugin subscribes to the
+  IDE's virtual-file changes and reports saved/created files to
+  `tellur hooks ingest --source jetbrains --auto-init`. Edits made by the
+  JetBrains AI Assistant and the Junie agent land on disk through the same path,
+  so they are captured live. JetBrains MCP is configured in-IDE, so Tellur does
+  not auto-write it.
+- **Devin (cloud agent)** — has no local file surface. Point a Devin webhook (or
+  a small relay) at the local daemon's authenticated
+  `POST /webhook/devin` endpoint, which normalizes Devin's native run/session
+  payload (messages, shell commands, file edits, status) into Tellur events and
+  recomputes the hash chain. The endpoint is generic: `POST /webhook/{source}`
+  works for any tool whose webhook posts a similar shape.
+
+The daemon webhook requires the same bearer token as the other mutating
+endpoints (see `.tellur/daemon.token`) and only accepts loopback hosts:
+
+```bash
+curl -X POST http://127.0.0.1:4917/webhook/devin \
+  -H "Authorization: Bearer $(cat .tellur/daemon.token)" \
+  -H 'Content-Type: application/json' \
+  -d '{"devin_run_id":"run-1","messages":[{"type":"edit","file_path":"src/app.py"}]}'
+```
 
 ## One-Time Agent Setup
 
@@ -356,7 +385,7 @@ Tellur/
 │   ├── core/          # Schemas, attribution, storage, policy, export, daemon, MCP
 │   ├── cli/           # tellur command
 │   └── adapters/      # Claude Code, Cursor, Aider, Codex, Copilot, Gemini, Antigravity, Windsurf, JetBrains, Devin, Continue, Cline, Generic
-├── editor/            # VS Code extension
+├── editor/            # VS Code extension + JetBrains plugin (tellur-jetbrains)
 ├── schemas/           # JSON Schema definitions
 ├── dist/              # npm wrapper and Homebrew formula
 └── web/               # Session replay dashboard

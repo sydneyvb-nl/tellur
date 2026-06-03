@@ -1,0 +1,38 @@
+<idea-plugin>
+    <id>dev.tellur.jetbrains</id>
+    <name>Tellur Provenance</name>
+    <vendor email="hello@tellur.dev" url="https://tellur.dev">Tellur</vendor>
+
+    <description><![CDATA[
+        Live AI code provenance capture for JetBrains IDEs.
+        <br/>
+        Tellur records which files change while you work — including edits made by
+        the JetBrains AI Assistant and the Junie agent — and routes them to the
+        local <code>tellur</code> CLI for line-level attribution, policy checks,
+        and tamper-evident provenance. Capture is local-first: no cloud
+        dependency, and a repository can opt out by creating
+        <code>.tellur/disable</code>.
+    ]]></description>
+
+    <!-- Works across all IntelliJ-family IDEs (IDEA, PyCharm, WebStorm, ...). -->
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationService
+            serviceImplementation="dev.tellur.jetbrains.TellurSettings"/>
+        <applicationConfigurable
+            parentId="tools"
+            instance="dev.tellur.jetbrains.TellurSettingsConfigurable"
+            id="dev.tellur.jetbrains.settings"
+            displayName="Tellur Provenance"/>
+        <notificationGroup
+            id="Tellur Provenance"
+            displayType="BALLOON"/>
+    </extensions>
+
+    <applicationListeners>
+        <listener
+            class="dev.tellur.jetbrains.TellurVfsListener"
+            topic="com.intellij.openapi.vfs.newvfs.BulkFileListener"/>
+    </applicationListeners>
+</idea-plugin>
