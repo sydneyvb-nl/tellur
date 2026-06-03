@@ -8,12 +8,17 @@ use axum::Json;
 use axum::extract::{FromRequestParts, Path, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
+use serde::Deserialize;
 use serde_json::{Value, json};
+use tellur_core::redaction::RedactionEngine;
 
 use crate::app::AppState;
-use crate::auth::Principal;
+use crate::auth::{Principal, Role};
 use crate::error::ServerError;
-use crate::storage::AuditEntry;
+use crate::storage::{AuditEntry, IngestEvent};
+
+/// Maximum events accepted in a single ingest request.
+const MAX_EVENTS_PER_REQUEST: usize = 1000;
 
 /// Authenticate the caller from a `Authorization: Bearer <token>` header.
 /// Deny by default: any missing/invalid token is rejected.
@@ -131,4 +136,148 @@ pub async fn org_me(
         })
         .map_err(ServerError::Internal)?;
     Ok(Json(principal_json(&principal)))
+}
+
+/// Wire format for an ingest request.
+#[derive(Debug, Deserialize)]
+pub struct IngestRequest {
+    pub events: Vec<IngestEventWire>,
+}
+
+/// Wire format for a single event. The hub assigns the id and (re)computes the
+/// hash chain, so any client-supplied hashes are ignored.
+#[derive(Debug, Deserialize)]
+pub struct IngestEventWire {
+    pub session_id: String,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    #[serde(default)]
+    pub timestamp: Option<String>,
+    #[serde(default)]
+    pub actor: Option<String>,
+    #[serde(default)]
+    pub payload: Value,
+}
+
+/// `POST /v1/orgs/{org}/repos/{repo}/events` — ingest provenance events.
+///
+/// Requires a contributor+ token for the path org (cross-tenant → forbidden).
+/// Inbound payloads are secret-redacted; the hub recomputes the per-repo hash
+/// chain so provenance cannot be forged. Rate-limited per member; body size is
+/// capped by the router layer and event count by `MAX_EVENTS_PER_REQUEST`.
+pub async fn ingest_events(
+    State(state): State<AppState>,
+    Path((org_id, repo)): Path<(String, String)>,
+    principal: Principal,
+    Json(req): Json<IngestRequest>,
+) -> Result<Json<Value>, ServerError> {
+    // Tenant + role authorization (object + tenant, not just role).
+    if org_id != principal.org_id || !principal.role.allows(Role::Contributor) {
+        state
+            .store
+            .append_audit(&AuditEntry {
+                org_id: Some(principal.org_id.clone()),
+                actor_member_id: Some(principal.member_id.clone()),
+                action: "ingest_denied".to_string(),
+                detail: format!("attempted_org={org_id} role={}", principal.role.as_str()),
+            })
+            .map_err(ServerError::Internal)?;
+        return Err(ServerError::Forbidden);
+    }
+
+    // Per-member rate limit.
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+
+    // Validate batch size.
+    if req.events.is_empty() {
+        return Err(ServerError::BadRequest("no events provided".to_string()));
+    }
+    if req.events.len() > MAX_EVENTS_PER_REQUEST {
+        return Err(ServerError::BadRequest(format!(
+            "too many events: {} (max {MAX_EVENTS_PER_REQUEST})",
+            req.events.len()
+        )));
+    }
+
+    let repo = state
+        .store
+        .ensure_repo(&org_id, &repo)
+        .map_err(ServerError::Internal)?;
+
+    // Redact secrets from inbound payloads before storage.
+    let engine = RedactionEngine::default_engine();
+    let events: Vec<IngestEvent> = req
+        .events
+        .into_iter()
+        .map(|e| IngestEvent {
+            session_id: e.session_id,
+            timestamp: e
+                .timestamp
+                .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+            event_type: e.event_type,
+            actor: e.actor.unwrap_or_else(|| "agent".to_string()),
+            payload: redact_value(&engine, e.payload),
+        })
+        .collect();
+
+    let ids = state
+        .store
+        .append_events(&org_id, &repo.id, &events)
+        .map_err(ServerError::Internal)?;
+
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id),
+            actor_member_id: Some(principal.member_id.clone()),
+            action: "events.ingest".to_string(),
+            detail: format!("repo={} count={}", repo.id, ids.len()),
+        })
+        .map_err(ServerError::Internal)?;
+
+    Ok(Json(json!({
+        "repo_id": repo.id,
+        "count": ids.len(),
+        "event_ids": ids,
+    })))
+}
+
+/// Recursively redact secret-looking strings anywhere in a JSON value.
+fn redact_value(engine: &RedactionEngine, value: Value) -> Value {
+    match value {
+        Value::String(s) => Value::String(engine.scan_and_redact(&s).redacted_content.unwrap_or(s)),
+        Value::Array(items) => {
+            Value::Array(items.into_iter().map(|v| redact_value(engine, v)).collect())
+        }
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(k, v)| (k, redact_value(engine, v)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redact_value_strips_secrets_recursively() {
+        let engine = RedactionEngine::default_engine();
+        let input = json!({
+            "command": "deploy --key AKIAIOSFODNN7EXAMPLE",
+            "nested": { "list": ["plain", "password=hunter2supersecretvalue"] },
+            "count": 3
+        });
+        let out = redact_value(&engine, input);
+        let s = out.to_string();
+        assert!(!s.contains("AKIAIOSFODNN7EXAMPLE"));
+        assert!(!s.contains("hunter2supersecretvalue"));
+        assert!(s.contains("[REDACTED]"));
+        // Non-string values are preserved.
+        assert_eq!(out["count"], 3);
+    }
 }

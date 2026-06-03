@@ -23,6 +23,25 @@ pub struct Org {
     pub created_at: String,
 }
 
+/// A repository within an org.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Repo {
+    pub id: String,
+    pub org_id: String,
+    pub name: String,
+}
+
+/// A provenance event to ingest. The hub assigns the id and (re)computes the
+/// hash chain, so client-supplied hashes are never trusted.
+#[derive(Debug, Clone)]
+pub struct IngestEvent {
+    pub session_id: String,
+    pub timestamp: String,
+    pub event_type: String,
+    pub actor: String,
+    pub payload: serde_json::Value,
+}
+
 /// A row to append to the tamper-evident audit log.
 #[derive(Debug, Clone)]
 pub struct AuditEntry {
@@ -54,6 +73,26 @@ pub trait Store: Send + Sync {
     /// Resolve a bearer token to a tenant-scoped principal, or `None` if the
     /// token is malformed/unknown/invalid.
     fn authenticate(&self, token: &str) -> Result<Option<Principal>>;
+
+    // ─── Repos & provenance events (tenant-scoped) ──────────────────────────
+
+    /// Get-or-create a repo by `(org_id, name)`; returns its id.
+    fn ensure_repo(&self, org_id: &str, name: &str) -> Result<Repo>;
+
+    /// Append events to a repo's chain. The hub assigns ids and recomputes the
+    /// per-repo hash chain (clients cannot forge provenance). Returns new ids.
+    fn append_events(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        events: &[IngestEvent],
+    ) -> Result<Vec<String>>;
+
+    /// Count events in a repo (tenant-scoped).
+    fn event_count(&self, org_id: &str, repo_id: &str) -> Result<u64>;
+
+    /// Recompute a repo's event hash chain and report whether it is intact.
+    fn verify_event_chain(&self, org_id: &str, repo_id: &str) -> Result<bool>;
 
     // ─── Audit log (append-only, hash-chained) ──────────────────────────────
 

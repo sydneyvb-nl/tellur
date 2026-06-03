@@ -12,6 +12,7 @@ pub mod app;
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod ratelimit;
 pub mod storage;
 
 pub use app::{AppState, build_router};
@@ -31,6 +32,10 @@ pub fn build_state(config: Config) -> Result<AppState> {
     Ok(AppState {
         store: Arc::new(store),
         config: Arc::new(config),
+        rate_limiter: Arc::new(ratelimit::RateLimiter::new(
+            120,
+            std::time::Duration::from_secs(60),
+        )),
     })
 }
 
