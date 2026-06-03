@@ -6,6 +6,13 @@
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-03 — CI hardening.** Fixed a clippy failure that only surfaced on
+> the Ubuntu CI (an unnecessary `match` inside a Linux-only `#[cfg]` block that
+> macOS-local clippy never compiles). Durable follow-ups: pinned the toolchain in
+> `rust-toolchain.toml` (1.96.0) so local/CI clippy match; dropped the redundant
+> `cargo-audit` CI step (cargo-deny already scans RustSec); bumped
+> `actions/checkout` v4→v5 (Node 20 EOL). CI is green.
+>
 > **2026-06-03 — Tier 1 B0 shipped (server scaffolding).** New FSL-licensed
 > `crates/server` (`tellur-server` binary), the secure foundation before any data
 > endpoints. Secure-by-default config (refuses non-loopback bind without explicit
