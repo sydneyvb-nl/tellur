@@ -14,6 +14,7 @@ use anyhow::Result;
 
 use crate::auth::{GeneratedToken, Principal, Role};
 
+mod chain;
 pub mod sqlite;
 pub use sqlite::SqliteStore;
 

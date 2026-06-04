@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use tellur_core::schema::ids;
 
+use super::chain;
 use super::{AuditEntry, IngestEvent, Org, OrgReport, Repo, RepoSummary, Store, StoredEvent};
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
@@ -330,14 +331,12 @@ impl Store for SqliteStore {
         }
 
         // The head checkpoint is the authoritative chain tip + length.
-        let (mut prev, mut count): (String, i64) = tx
-            .query_row(
-                "SELECT head_hash, entry_count FROM event_head WHERE repo_id = ?1",
-                [repo_id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()?
-            .unwrap_or_else(|| (String::new(), 0));
+        let head = chain::HeadRef {
+            table: "event_head",
+            key_col: "repo_id",
+            key: &repo_id,
+        };
+        let (mut prev, mut count) = chain::read_head(&tx, &head)?;
 
         let mut new_ids = Vec::with_capacity(events.len());
         for ev in events {
@@ -381,13 +380,7 @@ impl Store for SqliteStore {
             count += 1;
             new_ids.push(id);
         }
-        tx.execute(
-            "INSERT INTO event_head (repo_id, head_hash, entry_count) VALUES (?1, ?2, ?3)
-             ON CONFLICT(repo_id) DO UPDATE SET head_hash = excluded.head_hash,
-                                                entry_count = excluded.entry_count",
-            params![repo_id, prev, count],
-        )
-        .context("failed to update event head")?;
+        chain::write_head(&tx, &head, &prev, count)?;
         tx.commit().context("failed to commit events")?;
         Ok(new_ids)
     }
@@ -404,67 +397,41 @@ impl Store for SqliteStore {
 
     fn verify_event_chain(&self, org_id: &str, repo_id: &str) -> Result<bool> {
         let conn = self.conn()?;
-        let mut stmt = conn.prepare(
+        let head = chain::HeadRef {
+            table: "event_head",
+            key_col: "repo_id",
+            key: &repo_id,
+        };
+        chain::verify(
+            &conn,
             "SELECT id, session_id, ts, event_type, actor, payload, prev_hash, entry_hash
              FROM event WHERE org_id = ?1 AND repo_id = ?2 ORDER BY seq ASC",
-        )?;
-        let rows = stmt.query_map(params![org_id, repo_id], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, String>(4)?,
-                r.get::<_, String>(5)?,
-                r.get::<_, String>(6)?,
-                r.get::<_, String>(7)?,
-            ))
-        })?;
-
-        let mut expected_prev = String::new();
-        let mut counted: i64 = 0;
-        for row in rows {
-            let (id, session_id, ts, event_type, actor, payload, prev_hash, entry_hash) = row?;
-            if prev_hash != expected_prev {
-                return Ok(false);
-            }
-            let payload_value: serde_json::Value = serde_json::from_str(&payload)?;
-            let prev_opt = if prev_hash.is_empty() {
-                None
-            } else {
-                Some(prev_hash.as_str())
-            };
-            let recomputed = ids::hash_event(
-                &id,
-                &session_id,
-                &ts,
-                &event_type,
-                &actor,
-                &payload_value,
-                prev_opt,
-            );
-            if recomputed != entry_hash {
-                return Ok(false);
-            }
-            expected_prev = entry_hash;
-            counted += 1;
-        }
-
-        // Compare against the persisted head checkpoint so tail truncation /
-        // rollback to an earlier prefix is detected.
-        let head: Option<(String, i64)> = conn
-            .query_row(
-                "SELECT head_hash, entry_count FROM event_head WHERE repo_id = ?1",
-                [repo_id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()?;
-        match head {
-            Some((head_hash, entry_count)) => {
-                Ok(counted == entry_count && expected_prev == head_hash)
-            }
-            None => Ok(counted == 0),
-        }
+            params![org_id, repo_id],
+            &head,
+            |r| {
+                let id: String = r.get(0)?;
+                let session_id: String = r.get(1)?;
+                let ts: String = r.get(2)?;
+                let event_type: String = r.get(3)?;
+                let actor: String = r.get(4)?;
+                let payload: String = r.get(5)?;
+                let prev_hash: String = r.get(6)?;
+                let entry_hash: String = r.get(7)?;
+                let payload_value: serde_json::Value = serde_json::from_str(&payload)
+                    .with_context(|| format!("corrupt event payload for event {id}"))?;
+                let prev_opt = (!prev_hash.is_empty()).then_some(prev_hash.as_str());
+                let recomputed = ids::hash_event(
+                    &id,
+                    &session_id,
+                    &ts,
+                    &event_type,
+                    &actor,
+                    &payload_value,
+                    prev_opt,
+                );
+                Ok((prev_hash, entry_hash, recomputed))
+            },
+        )
     }
 
     fn list_repos(&self, org_id: &str) -> Result<Vec<RepoSummary>> {
@@ -572,14 +539,13 @@ impl Store for SqliteStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .context("failed to begin audit transaction")?;
 
-        let (prev, count): (String, i64) = tx
-            .query_row(
-                "SELECT head_hash, entry_count FROM audit_head WHERE id = 1",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()?
-            .unwrap_or_else(|| (String::new(), 0));
+        let audit_key: i64 = 1;
+        let head = chain::HeadRef {
+            table: "audit_head",
+            key_col: "id",
+            key: &audit_key,
+        };
+        let (prev, count) = chain::read_head(&tx, &head)?;
 
         let entry_hash = audit_hash(
             &prev,
@@ -604,13 +570,7 @@ impl Store for SqliteStore {
             ],
         )
         .context("failed to append audit entry")?;
-        tx.execute(
-            "INSERT INTO audit_head (id, head_hash, entry_count) VALUES (1, ?1, ?2)
-             ON CONFLICT(id) DO UPDATE SET head_hash = excluded.head_hash,
-                                           entry_count = excluded.entry_count",
-            params![entry_hash, count + 1],
-        )
-        .context("failed to update audit head")?;
+        chain::write_head(&tx, &head, &entry_hash, count + 1)?;
         tx.commit().context("failed to commit audit entry")?;
         Ok(())
     }
@@ -623,60 +583,37 @@ impl Store for SqliteStore {
 
     fn verify_audit_chain(&self) -> Result<bool> {
         let conn = self.conn()?;
-        let mut stmt = conn.prepare(
+        let audit_key: i64 = 1;
+        let head = chain::HeadRef {
+            table: "audit_head",
+            key_col: "id",
+            key: &audit_key,
+        };
+        chain::verify(
+            &conn,
             "SELECT ts, org_id, actor_member_id, action, detail, prev_hash, entry_hash
              FROM audit_log ORDER BY seq ASC",
-        )?;
-        let rows = stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,         // ts
-                r.get::<_, Option<String>>(1)?, // org_id
-                r.get::<_, Option<String>>(2)?, // actor
-                r.get::<_, String>(3)?,         // action
-                r.get::<_, String>(4)?,         // detail
-                r.get::<_, String>(5)?,         // prev_hash
-                r.get::<_, String>(6)?,         // entry_hash
-            ))
-        })?;
-
-        let mut expected_prev = String::new();
-        let mut counted: i64 = 0;
-        for row in rows {
-            let (ts, org_id, actor, action, detail, prev_hash, entry_hash) = row?;
-            if prev_hash != expected_prev {
-                return Ok(false);
-            }
-            let recomputed = audit_hash(
-                &prev_hash,
-                &ts,
-                org_id.as_deref(),
-                actor.as_deref(),
-                &action,
-                &detail,
-            );
-            if recomputed != entry_hash {
-                return Ok(false);
-            }
-            expected_prev = entry_hash;
-            counted += 1;
-        }
-
-        // Compare against the persisted head checkpoint so deleting the newest
-        // row(s) — a tail truncation that leaves an internally-consistent prefix
-        // — is detected.
-        let head: Option<(String, i64)> = conn
-            .query_row(
-                "SELECT head_hash, entry_count FROM audit_head WHERE id = 1",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()?;
-        match head {
-            Some((head_hash, entry_count)) => {
-                Ok(counted == entry_count && expected_prev == head_hash)
-            }
-            None => Ok(counted == 0),
-        }
+            params![],
+            &head,
+            |r| {
+                let ts: String = r.get(0)?;
+                let org_id: Option<String> = r.get(1)?;
+                let actor: Option<String> = r.get(2)?;
+                let action: String = r.get(3)?;
+                let detail: String = r.get(4)?;
+                let prev_hash: String = r.get(5)?;
+                let entry_hash: String = r.get(6)?;
+                let recomputed = audit_hash(
+                    &prev_hash,
+                    &ts,
+                    org_id.as_deref(),
+                    actor.as_deref(),
+                    &action,
+                    &detail,
+                );
+                Ok((prev_hash, entry_hash, recomputed))
+            },
+        )
     }
 }
 

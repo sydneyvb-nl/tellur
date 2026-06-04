@@ -1,11 +1,20 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-04 (Tier 1 B3 — read & report; on feature branch)
+**Last updated:** 2026-06-04 (shared hash-chain helper refactor; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-04 — Shared hash-chain helper (refactor).** On branch
+> `refactor/server-hash-chain`. Extracted the tamper-evident chain logic that
+> review flagged twice (missing head checkpoint) into one
+> `crates/server/src/storage/chain.rs`: `read_head`/`write_head` + a generic
+> `verify` (walk + prev-linkage + per-row hash recompute closure + head/length
+> comparison). The audit log and per-repo event log now both use it, so any
+> future chain gets tail-truncation detection for free. Behavior-preserving:
+> all 191 tests pass unchanged; clippy + cargo-deny green.
+>
 > **2026-06-04 — Tier 1 B3 (read & report).** On branch
 > `feat/server-b3-read-report`. Added tenant-scoped read endpoints (all audit
 > cross-org denials, BOLA-blocked): `GET /v1/orgs/{org}/repos` (repos + event
