@@ -10,6 +10,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 
 use crate::config::Config;
+use crate::metrics::Metrics;
 use crate::ratelimit::RateLimiter;
 use crate::storage::Store;
 
@@ -20,6 +21,8 @@ pub struct AppState {
     pub config: Arc<Config>,
     /// Per-principal rate limiter for the ingest endpoint.
     pub rate_limiter: Arc<RateLimiter>,
+    /// In-process metrics, exposed at `/metrics`.
+    pub metrics: Arc<Metrics>,
 }
 
 /// Maximum accepted request body size (1 MiB).
@@ -31,6 +34,7 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .route("/metrics", get(metrics))
         .route("/v1/me", get(crate::api::me))
         .route("/v1/orgs/{org_id}/me", get(crate::api::org_me))
         .route("/v1/orgs/{org_id}/repos", get(crate::api::list_repos))
@@ -67,6 +71,18 @@ async fn healthz() -> (StatusCode, Json<serde_json::Value>) {
             "version": env!("CARGO_PKG_VERSION"),
         })),
     )
+}
+
+/// Prometheus metrics (no auth; no tenant data — only aggregate counters).
+async fn metrics(State(state): State<AppState>) -> Response {
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
+        state.metrics.render(),
+    )
+        .into_response()
 }
 
 /// Readiness: dependencies (the store) are reachable.

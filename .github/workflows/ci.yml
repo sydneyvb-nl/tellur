@@ -36,3 +36,11 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
+
+  docker:
+    name: build tellur-server image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # Verify the hub container image builds (build-only, no push).
+      - run: docker build -f dist/docker/Dockerfile -t tellur-server:ci .

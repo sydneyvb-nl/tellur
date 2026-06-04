@@ -1188,3 +1188,125 @@ fn test_team_report_aggregates_notes_over_range() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+fn tellur_server_binary() -> PathBuf {
+    let root = workspace_root();
+    let release = root.join("target/release/tellur-server");
+    let debug = root.join("target/debug/tellur-server");
+    if release.exists() {
+        return release;
+    }
+    if !debug.exists() {
+        let status = Command::new("cargo")
+            .args(["build", "-p", "tellur-server", "--bin", "tellur-server"])
+            .current_dir(&root)
+            .status()
+            .expect("failed to build tellur-server");
+        assert!(status.success(), "failed to build tellur-server");
+    }
+    debug
+}
+
+fn wait_for_port(port: u16) {
+    use std::net::TcpStream;
+    for _ in 0..100 {
+        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("tellur-server did not start on port {port}");
+}
+
+#[test]
+fn test_policy_pull_from_hub() {
+    let server = tellur_server_binary();
+    let dir = temp_repo();
+    let db = dir.join("hub.db");
+    let port: u16 = 40000 + (std::process::id() % 20000) as u16;
+
+    // Repo needs .tellur for the default pull destination.
+    require_binary()
+        .arg("init")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    // Bootstrap org + admin token + policy on the hub DB (offline admin CLI).
+    let org_out = Command::new(&server)
+        .args(["admin", "create-org", "--name", "Acme"])
+        .env("TELLUR_SERVER_DB", &db)
+        .output()
+        .unwrap();
+    assert!(org_out.status.success());
+    let org_stdout = String::from_utf8_lossy(&org_out.stdout);
+    let org = org_stdout.split("id=").nth(1).unwrap().trim().to_string();
+
+    let tok_out = Command::new(&server)
+        .args(["admin", "create-token", "--org", &org, "--role", "admin"])
+        .env("TELLUR_SERVER_DB", &db)
+        .output()
+        .unwrap();
+    let tok_stdout = String::from_utf8_lossy(&tok_out.stdout);
+    let token = tok_stdout
+        .split_whitespace()
+        .find(|w| w.starts_with("tlr_"))
+        .unwrap()
+        .to_string();
+
+    let policy_file = dir.join("seed-policy.yml");
+    fs::write(&policy_file, "version: 1\nrules: []\n").unwrap();
+    let set_out = Command::new(&server)
+        .args([
+            "admin",
+            "set-policy",
+            "--org",
+            &org,
+            "--name",
+            "default",
+            "--file",
+            policy_file.to_str().unwrap(),
+        ])
+        .env("TELLUR_SERVER_DB", &db)
+        .output()
+        .unwrap();
+    assert!(set_out.status.success());
+
+    // Start the hub.
+    let mut child = Command::new(&server)
+        .env("TELLUR_SERVER_DB", &db)
+        .env("TELLUR_SERVER_BIND", format!("127.0.0.1:{port}"))
+        .spawn()
+        .unwrap();
+    wait_for_port(port);
+
+    // Pull the policy with the CLI client.
+    let pull = require_binary()
+        .args([
+            "policy",
+            "pull",
+            "--org",
+            &org,
+            "--name",
+            "default",
+            "--hub",
+            &format!("http://127.0.0.1:{port}"),
+            "--token",
+            &token,
+        ])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert!(
+        pull.status.success(),
+        "policy pull failed: {}",
+        String::from_utf8_lossy(&pull.stderr)
+    );
+    let pulled = fs::read_to_string(dir.join(".tellur/policies/default.yml")).unwrap();
+    assert!(pulled.contains("version: 1"));
+
+    let _ = fs::remove_dir_all(&dir);
+}

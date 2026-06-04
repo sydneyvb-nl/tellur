@@ -218,9 +218,12 @@ Each phase ships independently, behind config, with its own tests + docs.
   export portal (`GET .../export/events|audit`, rate-limited, audit export
   carries a `chain_intact` flag). Follow-ups: org-level SLSA/SPDX export and the
   Apache-CLI `tellur policy pull` client.
-- **B5 — Scale & ops.** Postgres backend, background jobs, pagination, metrics,
-  backup/retention. Packaging: single binary + signed multi-arch Docker image +
-  Docker Compose example (Helm deferred).
+- **B5 — Scale & ops.** Partially ✅ (branch `feat/server-b5-scale-ops`):
+  `/metrics` (Prometheus), heavy-op offload via `spawn_blocking`, Docker image +
+  Compose example + CI image build, and the `tellur policy pull` client. **Still
+  open (own PR):** Postgres backend behind the `Store` trait + a persistent
+  queued-job system + backup/retention. Org-level SLSA/SPDX export remains gated
+  on hub attribution ingest (generators need `FileAttribution`, not events).
 - **B6 — Enterprise (Tier 2).** OIDC SSO, SCIM, fine-grained RBAC, signed
   release pipeline hardening, SOC 2 evidence collection.
 

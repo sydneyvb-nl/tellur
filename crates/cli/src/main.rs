@@ -384,6 +384,24 @@ enum PolicyActions {
         /// Policy rule ID
         rule_id: Option<String>,
     },
+    /// Pull a central policy from a Tellur team hub into this repo
+    Pull {
+        /// Organization id on the hub
+        #[arg(long)]
+        org: String,
+        /// Policy name to fetch
+        #[arg(long, default_value = "default")]
+        name: String,
+        /// Hub base URL (or env TELLUR_HUB_URL), e.g. http://127.0.0.1:4920
+        #[arg(long)]
+        hub: Option<String>,
+        /// Bearer token (or env TELLUR_HUB_TOKEN)
+        #[arg(long)]
+        token: Option<String>,
+        /// Output path (default: .tellur/policies/<name>.yml)
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -400,6 +418,19 @@ async fn main() -> Result<()> {
         Commands::Policy { action } => match action {
             PolicyActions::Check => cmd_policy_check(),
             PolicyActions::Explain { rule_id } => cmd_policy_explain(rule_id.as_deref()),
+            PolicyActions::Pull {
+                org,
+                name,
+                hub,
+                token,
+                out,
+            } => cmd_policy_pull(
+                &org,
+                &name,
+                hub.as_deref(),
+                token.as_deref(),
+                out.as_deref(),
+            ),
         },
         Commands::Export { format, output } => cmd_export(&format, output.as_deref()),
         Commands::Import { adapter, source } => cmd_import(&adapter, &source).await,
@@ -837,6 +868,67 @@ fn cmd_policy_check() -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Pull a central policy from a Tellur team hub (Tier 0/Tier 1 distribution) and
+/// write it into this repo's `.tellur/policies/`. Validates the content before
+/// writing so a broken policy is never installed.
+fn cmd_policy_pull(
+    org: &str,
+    name: &str,
+    hub: Option<&str>,
+    token: Option<&str>,
+    out: Option<&Path>,
+) -> Result<()> {
+    let hub = hub
+        .map(str::to_string)
+        .or_else(|| std::env::var("TELLUR_HUB_URL").ok())
+        .context("hub URL required (--hub or TELLUR_HUB_URL)")?;
+    let token = token
+        .map(str::to_string)
+        .or_else(|| std::env::var("TELLUR_HUB_TOKEN").ok())
+        .context("hub token required (--token or TELLUR_HUB_TOKEN)")?;
+
+    let url = format!(
+        "{}/v1/orgs/{}/policies/{}",
+        hub.trim_end_matches('/'),
+        org,
+        name
+    );
+    let body = ureq::get(&url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .call()
+        .map_err(|e| anyhow::anyhow!("policy pull request failed: {e}"))?
+        .into_string()
+        .context("failed to read hub response")?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&body).context("hub response was not valid JSON")?;
+    let content = parsed["content"]
+        .as_str()
+        .context("hub response missing policy content")?;
+
+    // Validate before writing — never install a broken policy.
+    tellur_core::policy::PolicyEngine::from_yaml_str(content)
+        .context("hub returned invalid policy YAML")?;
+
+    let out_path = match out {
+        Some(p) => p.to_path_buf(),
+        None => {
+            let storage = RepoStorage::discover()?;
+            storage.policies_dir.join(format!("{name}.yml"))
+        }
+    };
+    if let Some(parent) = out_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&out_path, content)?;
+    println!(
+        "Pulled policy '{}' (version {}) → {}",
+        name,
+        parsed["version"],
+        out_path.display()
+    );
     Ok(())
 }
 
