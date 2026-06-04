@@ -6,6 +6,12 @@
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-04 — B4 review fixes (Codex).** Addressed 3 P2 findings on PR #6:
+> org event exports now carry `repo_id` per event (multi-repo context);
+> `docs/THREAT_MODEL.md` updated for the policy-write + export endpoints
+> (disclosure/DoS, policy bodies validated/declarative); and `README.md` now
+> documents the self-hosted hub (preview) instead of saying it's unimplemented.
+>
 > **2026-06-04 — Tier 1 B4 (central policy & export).** On branch
 > `feat/server-b4-policy-export`. **Central policy distribution:**
 > `PUT /v1/orgs/{org}/policies/{name}` (admin; body validated as Tellur policy

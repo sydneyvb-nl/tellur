@@ -193,6 +193,8 @@ async fn admin_export_events_and_audit() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["count"], 1);
     assert_eq!(json["schema"], "tellur.server.export.events.v1");
+    // Org-level export must carry repo identity per event.
+    assert!(json["events"][0]["repo_id"].as_str().is_some());
 
     let (status, json) = req(
         &s.state,

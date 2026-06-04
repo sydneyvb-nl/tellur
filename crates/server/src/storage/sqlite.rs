@@ -501,6 +501,7 @@ impl Store for SqliteStore {
             out.push(StoredEvent {
                 seq,
                 id,
+                repo_id: repo_id.to_string(),
                 session_id,
                 timestamp,
                 event_type,
@@ -608,8 +609,10 @@ impl Store for SqliteStore {
 
     fn export_events(&self, org_id: &str) -> Result<Vec<StoredEvent>> {
         let conn = self.conn()?;
+        // Include repo_id: an org-level export spans multiple repos, so each
+        // event must carry which repo it belongs to.
         let mut stmt = conn.prepare(
-            "SELECT seq, id, session_id, ts, event_type, actor, payload
+            "SELECT seq, id, repo_id, session_id, ts, event_type, actor, payload
              FROM event WHERE org_id = ?1 ORDER BY seq ASC",
         )?;
         let rows = stmt.query_map([org_id], |r| {
@@ -621,16 +624,18 @@ impl Store for SqliteStore {
                 r.get::<_, String>(4)?,
                 r.get::<_, String>(5)?,
                 r.get::<_, String>(6)?,
+                r.get::<_, String>(7)?,
             ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (seq, id, session_id, timestamp, event_type, actor, payload_str) = row?;
+            let (seq, id, repo_id, session_id, timestamp, event_type, actor, payload_str) = row?;
             let payload = serde_json::from_str(&payload_str)
                 .with_context(|| format!("corrupt event payload for event {id}"))?;
             out.push(StoredEvent {
                 seq,
                 id,
+                repo_id,
                 session_id,
                 timestamp,
                 event_type,

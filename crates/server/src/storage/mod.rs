@@ -58,6 +58,7 @@ pub struct RepoSummary {
 pub struct StoredEvent {
     pub seq: i64,
     pub id: String,
+    pub repo_id: String,
     pub session_id: String,
     pub timestamp: String,
     #[serde(rename = "type")]
