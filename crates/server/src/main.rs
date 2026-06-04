@@ -40,6 +40,15 @@ enum AdminAction {
         #[arg(long, default_value = "token")]
         name: String,
     },
+    /// Upload (or update) an org policy from a YAML file.
+    SetPolicy {
+        #[arg(long)]
+        org: String,
+        #[arg(long, default_value = "default")]
+        name: String,
+        #[arg(long)]
+        file: std::path::PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -76,6 +85,19 @@ fn run_admin(config: Config, action: AdminAction) -> Result<()> {
             println!("Created member id={member} role={}", role.as_str());
             println!("API token (store it now — shown only once):");
             println!("  {}", token.plaintext);
+        }
+        AdminAction::SetPolicy { org, name, file } => {
+            let content = std::fs::read_to_string(&file)?;
+            // Validate before storing so a broken policy is never distributed.
+            tellur_core::policy::PolicyEngine::from_yaml_str(&content)?;
+            let version = store.put_policy(&org, &name, &content)?;
+            store.append_audit(&AuditEntry {
+                org_id: Some(org),
+                actor_member_id: None,
+                action: "policy.put".to_string(),
+                detail: format!("name={name} version={version} via=admin-cli"),
+            })?;
+            println!("Stored policy \"{name}\" version {version}");
         }
     }
     Ok(())

@@ -23,6 +23,14 @@ impl PolicyEngine {
         Ok(Self { policy })
     }
 
+    /// Parse a policy from YAML text (same format as `load_from_file`). Useful
+    /// for validating policy documents received over the network.
+    pub fn from_yaml_str(content: &str) -> Result<Self> {
+        let policy: PolicyFile =
+            serde_yaml::from_str(content).context("Failed to parse policy YAML")?;
+        Ok(Self { policy })
+    }
+
     /// Create from an existing policy
     pub fn from_policy(policy: PolicyFile) -> Self {
         Self { policy }

@@ -438,6 +438,36 @@ To post the report automatically on pull requests, copy the example workflow in
 [`docs/examples/github-actions-team-report.yml`](docs/examples/github-actions-team-report.yml)
 into `.github/workflows/`.
 
+## Self-Hosted Team Hub (preview)
+
+For teams that want a shared, server-backed view, Tellur ships an optional
+self-hostable hub, `tellur-server` (in `crates/server`). It is **source-available
+under FSL-1.1-ALv2** (the Apache-2.0 core/CLI/adapters are unaffected) and is
+under active development — see
+[`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md) and
+[`docs/proposals/TEAM_SERVER_IMPLEMENTATION.md`](docs/proposals/TEAM_SERVER_IMPLEMENTATION.md).
+
+Local-first stays the default: the hub is opt-in, loopback-bound unless you
+explicitly allow otherwise, token-authenticated, and tenant-isolated. Bootstrap
+and run it:
+
+```bash
+tellur-server admin create-org --name "Acme"
+tellur-server admin create-token --org <org-id> --role admin   # printed once
+tellur-server admin set-policy --org <org-id> --file policy.yml # optional
+tellur-server                                                   # serve (default 127.0.0.1:4920)
+```
+
+Authenticated, org-scoped API (Bearer token): provenance ingest
+(`POST /v1/orgs/{org}/repos/{repo}/events`, with inbound secret redaction and a
+re-verified per-repo hash chain), reads (`GET .../repos`, `.../events`,
+`.../report`), central policy distribution (`PUT/GET .../policies[/{name}]`), and
+an admin export portal (`GET .../export/events|audit`). Cross-org access is
+denied and audited; the audit log is itself tamper-evident.
+
+Implemented through milestone B4 (identity/tenancy, ingest, read/report, policy &
+export). Postgres scaling, packaging, and SSO are upcoming (B5–B6).
+
 ## Development
 
 ```bash

@@ -7,7 +7,7 @@ use axum::Router;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 
 use crate::config::Config;
 use crate::ratelimit::RateLimiter;
@@ -38,6 +38,19 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org_id}/repos/{repo}/events",
             post(crate::api::ingest_events).get(crate::api::list_events),
+        )
+        .route("/v1/orgs/{org_id}/policies", get(crate::api::list_policies))
+        .route(
+            "/v1/orgs/{org_id}/policies/{name}",
+            put(crate::api::put_policy).get(crate::api::get_policy),
+        )
+        .route(
+            "/v1/orgs/{org_id}/export/events",
+            get(crate::api::export_events),
+        )
+        .route(
+            "/v1/orgs/{org_id}/export/audit",
+            get(crate::api::export_audit),
         )
         // Cap request bodies (defense against unrestricted resource consumption).
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))

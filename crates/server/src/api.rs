@@ -31,14 +31,30 @@ fn ensure_same_org(
     org_id: &str,
     action: &str,
 ) -> Result<(), ServerError> {
-    if org_id != principal.org_id {
+    ensure_org_role(state, principal, org_id, Role::Viewer, action)
+}
+
+/// Verify the caller belongs to the path org *and* meets the required role;
+/// audit + reject (403) otherwise.
+fn ensure_org_role(
+    state: &AppState,
+    principal: &Principal,
+    org_id: &str,
+    required: Role,
+    action: &str,
+) -> Result<(), ServerError> {
+    if org_id != principal.org_id || !principal.role.allows(required) {
         state
             .store
             .append_audit(&AuditEntry {
                 org_id: Some(principal.org_id.clone()),
                 actor_member_id: Some(principal.member_id.clone()),
                 action: "access_denied".to_string(),
-                detail: format!("{action} attempted_org={org_id}"),
+                detail: format!(
+                    "{action} attempted_org={org_id} role={} required={}",
+                    principal.role.as_str(),
+                    required.as_str()
+                ),
             })
             .map_err(ServerError::Internal)?;
         return Err(ServerError::Forbidden);
@@ -370,6 +386,147 @@ pub async fn org_report(
     serde_json::to_value(&report)
         .map(Json)
         .map_err(|e| ServerError::Internal(e.into()))
+}
+
+// ─── Central policy distribution ─────────────────────────────────────────────
+
+/// `PUT /v1/orgs/{org}/policies/{name}` — upload a policy YAML doc (admin only).
+/// The body is validated as Tellur policy YAML before storage.
+pub async fn put_policy(
+    State(state): State<AppState>,
+    Path((org_id, name)): Path<(String, String)>,
+    principal: Principal,
+    body: String,
+) -> Result<Json<Value>, ServerError> {
+    ensure_org_role(&state, &principal, &org_id, Role::Admin, "policy.put")?;
+    tellur_core::policy::PolicyEngine::from_yaml_str(&body)
+        .map_err(|e| ServerError::BadRequest(format!("invalid policy YAML: {e}")))?;
+
+    let version = state
+        .store
+        .put_policy(&org_id, &name, &body)
+        .map_err(ServerError::Internal)?;
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id),
+            actor_member_id: Some(principal.member_id.clone()),
+            action: "policy.put".to_string(),
+            detail: format!("name={name} version={version}"),
+        })
+        .map_err(ServerError::Internal)?;
+    Ok(Json(json!({ "name": name, "version": version })))
+}
+
+/// `GET /v1/orgs/{org}/policies` — list policy metadata.
+pub async fn list_policies(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    principal: Principal,
+) -> Result<Json<Value>, ServerError> {
+    ensure_same_org(&state, &principal, &org_id, "list_policies")?;
+    let policies = state
+        .store
+        .list_policies(&org_id)
+        .map_err(ServerError::Internal)?;
+    Ok(Json(json!({ "policies": policies })))
+}
+
+/// `GET /v1/orgs/{org}/policies/{name}` — fetch a policy (for `policy pull`).
+pub async fn get_policy(
+    State(state): State<AppState>,
+    Path((org_id, name)): Path<(String, String)>,
+    principal: Principal,
+) -> Result<Json<Value>, ServerError> {
+    ensure_same_org(&state, &principal, &org_id, "policy.pull")?;
+    let doc = state
+        .store
+        .get_policy(&org_id, &name)
+        .map_err(ServerError::Internal)?
+        .ok_or(ServerError::NotFound)?;
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id),
+            actor_member_id: Some(principal.member_id.clone()),
+            action: "policy.pull".to_string(),
+            detail: format!("name={} version={}", doc.name, doc.version),
+        })
+        .map_err(ServerError::Internal)?;
+    serde_json::to_value(&doc)
+        .map(Json)
+        .map_err(|e| ServerError::Internal(e.into()))
+}
+
+// ─── Export portal ───────────────────────────────────────────────────────────
+
+/// `GET /v1/orgs/{org}/export/events` — full provenance event bundle (admin).
+pub async fn export_events(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    principal: Principal,
+) -> Result<Json<Value>, ServerError> {
+    ensure_org_role(&state, &principal, &org_id, Role::Admin, "export.events")?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let events = state
+        .store
+        .export_events(&org_id)
+        .map_err(ServerError::Internal)?;
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id.clone()),
+            actor_member_id: Some(principal.member_id.clone()),
+            action: "export.events".to_string(),
+            detail: format!("count={}", events.len()),
+        })
+        .map_err(ServerError::Internal)?;
+    Ok(Json(json!({
+        "schema": "tellur.server.export.events.v1",
+        "org_id": org_id,
+        "generated_at": chrono::Utc::now().to_rfc3339(),
+        "count": events.len(),
+        "events": events,
+    })))
+}
+
+/// `GET /v1/orgs/{org}/export/audit` — org audit trail + chain integrity (admin).
+pub async fn export_audit(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    principal: Principal,
+) -> Result<Json<Value>, ServerError> {
+    ensure_org_role(&state, &principal, &org_id, Role::Admin, "export.audit")?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let entries = state
+        .store
+        .export_audit(&org_id)
+        .map_err(ServerError::Internal)?;
+    let chain_intact = state
+        .store
+        .verify_audit_chain()
+        .map_err(ServerError::Internal)?;
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id.clone()),
+            actor_member_id: Some(principal.member_id.clone()),
+            action: "export.audit".to_string(),
+            detail: format!("count={} chain_intact={chain_intact}", entries.len()),
+        })
+        .map_err(ServerError::Internal)?;
+    Ok(Json(json!({
+        "schema": "tellur.server.export.audit.v1",
+        "org_id": org_id,
+        "generated_at": chrono::Utc::now().to_rfc3339(),
+        "chain_intact": chain_intact,
+        "count": entries.len(),
+        "entries": entries,
+    })))
 }
 
 /// Recursively redact secret-looking strings anywhere in a JSON value.

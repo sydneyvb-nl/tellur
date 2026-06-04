@@ -1,11 +1,30 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-04 (shared hash-chain helper refactor; on feature branch)
+**Last updated:** 2026-06-04 (Tier 1 B4 — central policy & export; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-04 — B4 review fixes (Codex).** Addressed 3 P2 findings on PR #6:
+> org event exports now carry `repo_id` per event (multi-repo context);
+> `docs/THREAT_MODEL.md` updated for the policy-write + export endpoints
+> (disclosure/DoS, policy bodies validated/declarative); and `README.md` now
+> documents the self-hosted hub (preview) instead of saying it's unimplemented.
+>
+> **2026-06-04 — Tier 1 B4 (central policy & export).** On branch
+> `feat/server-b4-policy-export`. **Central policy distribution:**
+> `PUT /v1/orgs/{org}/policies/{name}` (admin; body validated as Tellur policy
+> YAML via new `PolicyEngine::from_yaml_str`, auto-versioned), `GET .../policies`
+> (list), `GET .../policies/{name}` (pull, audited) + `tellur-server admin
+> set-policy --file`. **Export portal:** `GET .../export/events` and
+> `GET .../export/audit` (admin, rate-limited, audited; audit export includes a
+> `chain_intact` integrity flag). New `policy` table (schema v6), storage
+> `put_policy/list_policies/get_policy/export_events/export_audit`. Verified: 53
+> server tests + live smoke (CLI set-policy → pull, invalid → 400, audit export);
+> workspace 197; clippy + deny green. Org-level SLSA/SPDX export and the Apache
+> CLI `tellur policy pull` client are noted follow-ups. Next: B5 (scale & ops).
+>
 > **2026-06-04 — Shared hash-chain helper (refactor).** On branch
 > `refactor/server-hash-chain`. Extracted the tamper-evident chain logic that
 > review flagged twice (missing head checkpoint) into one
@@ -433,7 +452,7 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 
 ```
 191 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
-- server:    47 tests (B0 config/health/errors; B1 Argon2id tokens, org/member
+- server:    53 tests (B0 config/health/errors; B1 Argon2id tokens, org/member
              auth, hash-chained audit append/verify/tamper/tail-truncation/
              two-connection, authn + BOLA + auth-denied auditing; B2 repo
              get-or-create, per-repo event chain verify/tamper, tenant scoping,
@@ -521,9 +540,12 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
    blocked), admin bootstrap CLI. **B2 ✅** (branch `feat/server-b2-ingest`):
    authenticated `POST .../repos/{repo}/events` with server-recomputed per-repo
    hash chain, inbound secret redaction, body/size + rate-limit guardrails.
-   **B3 ✅** (branch `feat/server-b3-read-report`): tenant-scoped read endpoints
-   (`GET .../repos`, `GET .../repos/{repo}/events` paginated, `GET .../report`).
-   Next: **B4 — central policy & export**.
+   **B3 ✅** tenant-scoped read endpoints (`GET .../repos`, paginated
+   `.../events`, `.../report`). **B4 ✅** (branch `feat/server-b4-policy-export`):
+   central policy distribution (`PUT/GET .../policies[/{name}]`, validated +
+   versioned) and an export portal (`GET .../export/events|audit`, admin,
+   rate-limited). Next: **B5 — scale & ops** (Postgres backend, background jobs,
+   packaging).
 9. **Plugin SDK** — requires stable adapter/event API
 
 ---
