@@ -8,6 +8,8 @@
 //! lookups resolve a caller to a tenant-scoped [`Principal`], so handlers cannot
 //! accidentally cross org boundaries.
 
+use std::collections::BTreeMap;
+
 use anyhow::Result;
 
 use crate::auth::{GeneratedToken, Principal, Role};
@@ -40,6 +42,38 @@ pub struct IngestEvent {
     pub event_type: String,
     pub actor: String,
     pub payload: serde_json::Value,
+}
+
+/// A repo plus its event count (for listings).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RepoSummary {
+    pub id: String,
+    pub name: String,
+    pub event_count: u64,
+}
+
+/// A stored provenance event (read model).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StoredEvent {
+    pub seq: i64,
+    pub id: String,
+    pub session_id: String,
+    pub timestamp: String,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub actor: String,
+    pub payload: serde_json::Value,
+}
+
+/// Org-level activity rollup aggregated across the org's repos.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct OrgReport {
+    pub org_id: String,
+    pub total_events: u64,
+    pub distinct_sessions: u64,
+    pub by_type: BTreeMap<String, u64>,
+    pub by_actor: BTreeMap<String, u64>,
+    pub repos: Vec<RepoSummary>,
 }
 
 /// A row to append to the tamper-evident audit log.
@@ -79,6 +113,9 @@ pub trait Store: Send + Sync {
     /// Get-or-create a repo by `(org_id, name)`; returns its id.
     fn ensure_repo(&self, org_id: &str, name: &str) -> Result<Repo>;
 
+    /// Look up a repo by `(org_id, name)` without creating it.
+    fn find_repo(&self, org_id: &str, name: &str) -> Result<Option<Repo>>;
+
     /// Append events to a repo's chain. The hub assigns ids and recomputes the
     /// per-repo hash chain (clients cannot forge provenance). Returns new ids.
     fn append_events(
@@ -93,6 +130,22 @@ pub trait Store: Send + Sync {
 
     /// Recompute a repo's event hash chain and report whether it is intact.
     fn verify_event_chain(&self, org_id: &str, repo_id: &str) -> Result<bool>;
+
+    /// List repos in an org with their event counts.
+    fn list_repos(&self, org_id: &str) -> Result<Vec<RepoSummary>>;
+
+    /// List events in a repo, newest first, with cursor pagination by `seq`.
+    /// Returns at most `limit` rows with `seq < before_seq` (when given).
+    fn list_events(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        limit: u32,
+        before_seq: Option<i64>,
+    ) -> Result<Vec<StoredEvent>>;
+
+    /// Aggregate an org-level activity rollup across its repos.
+    fn org_report(&self, org_id: &str) -> Result<OrgReport>;
 
     // ─── Audit log (append-only, hash-chained) ──────────────────────────────
 

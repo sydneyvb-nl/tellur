@@ -5,7 +5,7 @@
 //! for one org cannot reach another org's resources (BOLA prevention).
 
 use axum::Json;
-use axum::extract::{FromRequestParts, Path, State};
+use axum::extract::{FromRequestParts, Path, Query, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use serde::Deserialize;
@@ -19,6 +19,32 @@ use crate::storage::{AuditEntry, IngestEvent};
 
 /// Maximum events accepted in a single ingest request.
 const MAX_EVENTS_PER_REQUEST: usize = 1000;
+
+/// Default and maximum page size for event listings.
+const DEFAULT_PAGE: u32 = 50;
+const MAX_PAGE: u32 = 200;
+
+/// Verify the caller's org matches the path org; audit + reject otherwise.
+fn ensure_same_org(
+    state: &AppState,
+    principal: &Principal,
+    org_id: &str,
+    action: &str,
+) -> Result<(), ServerError> {
+    if org_id != principal.org_id {
+        state
+            .store
+            .append_audit(&AuditEntry {
+                org_id: Some(principal.org_id.clone()),
+                actor_member_id: Some(principal.member_id.clone()),
+                action: "access_denied".to_string(),
+                detail: format!("{action} attempted_org={org_id}"),
+            })
+            .map_err(ServerError::Internal)?;
+        return Err(ServerError::Forbidden);
+    }
+    Ok(())
+}
 
 /// Authenticate the caller from a `Authorization: Bearer <token>` header.
 /// Deny by default: any missing/invalid token is rejected.
@@ -242,6 +268,87 @@ pub async fn ingest_events(
         "count": ids.len(),
         "event_ids": ids,
     })))
+}
+
+/// `GET /v1/orgs/{org}/repos` — list the org's repos with event counts.
+pub async fn list_repos(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    principal: Principal,
+) -> Result<Json<Value>, ServerError> {
+    ensure_same_org(&state, &principal, &org_id, "list_repos")?;
+    let repos = state
+        .store
+        .list_repos(&org_id)
+        .map_err(ServerError::Internal)?;
+    Ok(Json(json!({ "repos": repos })))
+}
+
+/// Query parameters for event listing (cursor pagination by `seq`).
+#[derive(Debug, Deserialize)]
+pub struct ListEventsParams {
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub before: Option<i64>,
+}
+
+/// `GET /v1/orgs/{org}/repos/{repo}/events` — newest-first, paginated.
+pub async fn list_events(
+    State(state): State<AppState>,
+    Path((org_id, repo)): Path<(String, String)>,
+    Query(params): Query<ListEventsParams>,
+    principal: Principal,
+) -> Result<Json<Value>, ServerError> {
+    ensure_same_org(&state, &principal, &org_id, "list_events")?;
+    let repo = state
+        .store
+        .find_repo(&org_id, &repo)
+        .map_err(ServerError::Internal)?
+        .ok_or(ServerError::NotFound)?;
+
+    let limit = params.limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE);
+    let events = state
+        .store
+        .list_events(&org_id, &repo.id, limit, params.before)
+        .map_err(ServerError::Internal)?;
+
+    // Cursor for the next page: the seq of the last row, only if the page is full.
+    let next_before = if events.len() as u32 == limit {
+        events.last().map(|e| e.seq)
+    } else {
+        None
+    };
+    Ok(Json(json!({
+        "repo_id": repo.id,
+        "events": events,
+        "next_before": next_before,
+    })))
+}
+
+/// `GET /v1/orgs/{org}/report` — org-level activity rollup across repos.
+pub async fn org_report(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    principal: Principal,
+) -> Result<Json<Value>, ServerError> {
+    ensure_same_org(&state, &principal, &org_id, "report")?;
+    let report = state
+        .store
+        .org_report(&org_id)
+        .map_err(ServerError::Internal)?;
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id),
+            actor_member_id: Some(principal.member_id.clone()),
+            action: "report".to_string(),
+            detail: format!("total_events={}", report.total_events),
+        })
+        .map_err(ServerError::Internal)?;
+    serde_json::to_value(&report)
+        .map(Json)
+        .map_err(|e| ServerError::Internal(e.into()))
 }
 
 /// Recursively redact secret-looking strings anywhere in a JSON value.

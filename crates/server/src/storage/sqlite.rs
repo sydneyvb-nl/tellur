@@ -1,5 +1,6 @@
 //! SQLite implementation of [`Store`] — the default single-node backend.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -7,7 +8,7 @@ use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use tellur_core::schema::ids;
 
-use super::{AuditEntry, IngestEvent, Org, Repo, Store};
+use super::{AuditEntry, IngestEvent, Org, OrgReport, Repo, RepoSummary, Store, StoredEvent};
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
@@ -62,6 +63,26 @@ fn audit_hash(
         actor.unwrap_or("")
     );
     ids::hash_content(&material)
+}
+
+/// Count events grouped by an internal column (`event_type` or `actor`), scoped
+/// to an org. The column is never user-controlled.
+fn group_counts(conn: &Connection, column: &str, org_id: &str) -> Result<BTreeMap<String, u64>> {
+    assert!(
+        matches!(column, "event_type" | "actor"),
+        "group_counts column must be an allow-listed identifier"
+    );
+    let sql = format!("SELECT {column}, COUNT(*) FROM event WHERE org_id = ?1 GROUP BY {column}");
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([org_id], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+    })?;
+    let mut map = BTreeMap::new();
+    for row in rows {
+        let (key, count) = row?;
+        map.insert(key, count as u64);
+    }
+    Ok(map)
 }
 
 impl Store for SqliteStore {
@@ -266,6 +287,22 @@ impl Store for SqliteStore {
         })
     }
 
+    fn find_repo(&self, org_id: &str, name: &str) -> Result<Option<Repo>> {
+        let conn = self.conn()?;
+        let id: Option<String> = conn
+            .query_row(
+                "SELECT id FROM repo WHERE org_id = ?1 AND name = ?2",
+                params![org_id, name],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(id.map(|id| Repo {
+            id,
+            org_id: org_id.to_string(),
+            name: name.to_string(),
+        }))
+    }
+
     fn append_events(
         &self,
         org_id: &str,
@@ -426,6 +463,96 @@ impl Store for SqliteStore {
             }
             None => Ok(counted == 0),
         }
+    }
+
+    fn list_repos(&self, org_id: &str) -> Result<Vec<RepoSummary>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT r.id, r.name, COUNT(e.seq)
+             FROM repo r LEFT JOIN event e ON e.repo_id = r.id
+             WHERE r.org_id = ?1
+             GROUP BY r.id, r.name
+             ORDER BY r.name",
+        )?;
+        let rows = stmt.query_map([org_id], |r| {
+            Ok(RepoSummary {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                event_count: r.get::<_, i64>(2)? as u64,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    fn list_events(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        limit: u32,
+        before_seq: Option<i64>,
+    ) -> Result<Vec<StoredEvent>> {
+        let cursor = before_seq.unwrap_or(i64::MAX);
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT seq, id, session_id, ts, event_type, actor, payload
+             FROM event
+             WHERE org_id = ?1 AND repo_id = ?2 AND seq < ?3
+             ORDER BY seq DESC
+             LIMIT ?4",
+        )?;
+        let rows = stmt.query_map(params![org_id, repo_id, cursor, limit], |r| {
+            let payload_str: String = r.get(6)?;
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                payload_str,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (seq, id, session_id, timestamp, event_type, actor, payload_str) = row?;
+            out.push(StoredEvent {
+                seq,
+                id,
+                session_id,
+                timestamp,
+                event_type,
+                actor,
+                payload: serde_json::from_str(&payload_str).unwrap_or(serde_json::Value::Null),
+            });
+        }
+        Ok(out)
+    }
+
+    fn org_report(&self, org_id: &str) -> Result<OrgReport> {
+        let conn = self.conn()?;
+        let total_events: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM event WHERE org_id = ?1",
+            [org_id],
+            |r| r.get(0),
+        )?;
+        let distinct_sessions: i64 = conn.query_row(
+            "SELECT COUNT(DISTINCT session_id) FROM event WHERE org_id = ?1",
+            [org_id],
+            |r| r.get(0),
+        )?;
+
+        let by_type = group_counts(&conn, "event_type", org_id)?;
+        let by_actor = group_counts(&conn, "actor", org_id)?;
+        drop(conn);
+
+        Ok(OrgReport {
+            org_id: org_id.to_string(),
+            total_events: total_events as u64,
+            distinct_sessions: distinct_sessions as u64,
+            by_type,
+            by_actor,
+            repos: self.list_repos(org_id)?,
+        })
     }
 
     fn append_audit(&self, entry: &AuditEntry) -> Result<()> {
@@ -647,6 +774,56 @@ mod tests {
         // Wrong org for this repo id → rejected.
         let err = s.append_events("org_other", &repo.id, &[ingest_event("x")]);
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn list_and_report_aggregate_events() {
+        let s = store();
+        let org = s.create_org("Acme").unwrap();
+        let repo = s.ensure_repo(&org.id, "app").unwrap();
+        s.append_events(
+            &org.id,
+            &repo.id,
+            &[ingest_event("a"), ingest_event("b"), ingest_event("c")],
+        )
+        .unwrap();
+
+        let repos = s.list_repos(&org.id).unwrap();
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].event_count, 3);
+
+        // Pagination newest-first.
+        let page = s.list_events(&org.id, &repo.id, 2, None).unwrap();
+        assert_eq!(page.len(), 2);
+        assert!(page[0].seq > page[1].seq);
+        let next = s
+            .list_events(&org.id, &repo.id, 2, Some(page[1].seq))
+            .unwrap();
+        assert_eq!(next.len(), 1);
+
+        let report = s.org_report(&org.id).unwrap();
+        assert_eq!(report.total_events, 3);
+        assert_eq!(report.distinct_sessions, 1);
+        assert_eq!(report.by_type.get("file.write"), Some(&3));
+        assert_eq!(report.by_actor.get("agent"), Some(&3));
+        assert_eq!(report.repos.len(), 1);
+    }
+
+    #[test]
+    fn reads_are_tenant_scoped() {
+        let s = store();
+        let org = s.create_org("Acme").unwrap();
+        let repo = s.ensure_repo(&org.id, "app").unwrap();
+        s.append_events(&org.id, &repo.id, &[ingest_event("a")])
+            .unwrap();
+        // A different org sees none of it.
+        assert!(s.list_repos("org_other").unwrap().is_empty());
+        assert!(
+            s.list_events("org_other", &repo.id, 10, None)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(s.org_report("org_other").unwrap().total_events, 0);
     }
 
     #[test]

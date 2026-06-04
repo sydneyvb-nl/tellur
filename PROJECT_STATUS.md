@@ -1,11 +1,23 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-03 (Tier 1 B2 — ingest & verify; on feature branch)
+**Last updated:** 2026-06-04 (Tier 1 B3 — read & report; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-04 — Tier 1 B3 (read & report).** On branch
+> `feat/server-b3-read-report`. Added tenant-scoped read endpoints (all audit
+> cross-org denials, BOLA-blocked): `GET /v1/orgs/{org}/repos` (repos + event
+> counts), `GET /v1/orgs/{org}/repos/{repo}/events` (newest-first, cursor
+> pagination by `seq`, limit clamped 1..200, 404 on unknown repo), and
+> `GET /v1/orgs/{org}/report` (org rollup: total/distinct-sessions/by-type/
+> by-actor/per-repo, audited). Storage: `find_repo`, `list_repos`, `list_events`,
+> `org_report`. Verified: 44 server tests (read BOLA/404/401/pagination + report
+> aggregation + tenant scoping) + live smoke; workspace fmt/clippy/test (188) +
+> deny green. Dashboard wiring (`web/`) deferred to a follow-up. Next: B4
+> (central policy & export).
+>
 > **2026-06-03 — Tier 1 B2 (ingest & verify).** On branch
 > `feat/server-b2-ingest`. Added authenticated provenance ingest:
 > `POST /v1/orgs/{org}/repos/{repo}/events` (contributor+ role, cross-tenant →
@@ -404,8 +416,8 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-183 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
-- server:    39 tests (B0 config/health/errors; B1 Argon2id tokens, org/member
+188 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
+- server:    44 tests (B0 config/health/errors; B1 Argon2id tokens, org/member
              auth, hash-chained audit append/verify/tamper/tail-truncation/
              two-connection, authn + BOLA + auth-denied auditing; B2 repo
              get-or-create, per-repo event chain verify/tamper, tenant scoping,
@@ -493,7 +505,9 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
    blocked), admin bootstrap CLI. **B2 ✅** (branch `feat/server-b2-ingest`):
    authenticated `POST .../repos/{repo}/events` with server-recomputed per-repo
    hash chain, inbound secret redaction, body/size + rate-limit guardrails.
-   Next: **B3 — read & report**.
+   **B3 ✅** (branch `feat/server-b3-read-report`): tenant-scoped read endpoints
+   (`GET .../repos`, `GET .../repos/{repo}/events` paginated, `GET .../report`).
+   Next: **B4 — central policy & export**.
 9. **Plugin SDK** — requires stable adapter/event API
 
 ---
