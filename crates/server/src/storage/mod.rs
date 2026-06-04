@@ -77,6 +77,35 @@ pub struct OrgReport {
     pub repos: Vec<RepoSummary>,
 }
 
+/// A stored org policy document.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PolicyDoc {
+    pub name: String,
+    pub content: String,
+    pub version: i64,
+    pub updated_at: String,
+}
+
+/// Policy metadata without the body (for listings).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PolicySummary {
+    pub name: String,
+    pub version: i64,
+    pub updated_at: String,
+}
+
+/// An audit-log record (read model for the export portal).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AuditRecord {
+    pub seq: i64,
+    pub ts: String,
+    pub org_id: Option<String>,
+    pub actor_member_id: Option<String>,
+    pub action: String,
+    pub detail: String,
+    pub entry_hash: String,
+}
+
 /// A row to append to the tamper-evident audit log.
 #[derive(Debug, Clone)]
 pub struct AuditEntry {
@@ -147,6 +176,25 @@ pub trait Store: Send + Sync {
 
     /// Aggregate an org-level activity rollup across its repos.
     fn org_report(&self, org_id: &str) -> Result<OrgReport>;
+
+    // ─── Central policy distribution ─────────────────────────────────────────
+
+    /// Create or update a named org policy; returns the new version number.
+    fn put_policy(&self, org_id: &str, name: &str, content: &str) -> Result<i64>;
+
+    /// List an org's policies (metadata only).
+    fn list_policies(&self, org_id: &str) -> Result<Vec<PolicySummary>>;
+
+    /// Fetch a named org policy (for `tellur policy pull`).
+    fn get_policy(&self, org_id: &str, name: &str) -> Result<Option<PolicyDoc>>;
+
+    // ─── Export portal ───────────────────────────────────────────────────────
+
+    /// All provenance events for an org, oldest first (full export bundle).
+    fn export_events(&self, org_id: &str) -> Result<Vec<StoredEvent>>;
+
+    /// All audit records scoped to an org, oldest first.
+    fn export_audit(&self, org_id: &str) -> Result<Vec<AuditRecord>>;
 
     // ─── Audit log (append-only, hash-chained) ──────────────────────────────
 

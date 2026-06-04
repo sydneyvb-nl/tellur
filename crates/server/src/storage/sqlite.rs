@@ -9,11 +9,14 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use tellur_core::schema::ids;
 
 use super::chain;
-use super::{AuditEntry, IngestEvent, Org, OrgReport, Repo, RepoSummary, Store, StoredEvent};
+use super::{
+    AuditEntry, AuditRecord, IngestEvent, Org, OrgReport, PolicyDoc, PolicySummary, Repo,
+    RepoSummary, Store, StoredEvent,
+};
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
-const SCHEMA_VERSION: &str = "5";
+const SCHEMA_VERSION: &str = "6";
 
 /// A SQLite-backed store. The connection is behind a `Mutex` so the store is
 /// `Send + Sync` and usable as `Arc<dyn Store>`.
@@ -159,6 +162,14 @@ impl Store for SqliteStore {
                  repo_id     TEXT PRIMARY KEY REFERENCES repo(id),
                  head_hash   TEXT NOT NULL,
                  entry_count INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS policy (
+                 org_id     TEXT NOT NULL REFERENCES org(id),
+                 name       TEXT NOT NULL,
+                 content    TEXT NOT NULL,
+                 version    INTEGER NOT NULL,
+                 updated_at TEXT NOT NULL,
+                 PRIMARY KEY (org_id, name)
              );",
         )
         .context("failed to create schema")?;
@@ -527,6 +538,129 @@ impl Store for SqliteStore {
         })
     }
 
+    fn put_policy(&self, org_id: &str, name: &str, content: &str) -> Result<i64> {
+        let mut guard = self.conn()?;
+        let tx = guard
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .context("failed to begin policy transaction")?;
+        let current: i64 = tx
+            .query_row(
+                "SELECT version FROM policy WHERE org_id = ?1 AND name = ?2",
+                params![org_id, name],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or(0);
+        let version = current + 1;
+        tx.execute(
+            "INSERT INTO policy (org_id, name, content, version, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(org_id, name) DO UPDATE SET content = excluded.content,
+                                                     version = excluded.version,
+                                                     updated_at = excluded.updated_at",
+            params![
+                org_id,
+                name,
+                content,
+                version,
+                chrono::Utc::now().to_rfc3339()
+            ],
+        )
+        .context("failed to write policy")?;
+        tx.commit()?;
+        Ok(version)
+    }
+
+    fn list_policies(&self, org_id: &str) -> Result<Vec<PolicySummary>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT name, version, updated_at FROM policy WHERE org_id = ?1 ORDER BY name",
+        )?;
+        let rows = stmt.query_map([org_id], |r| {
+            Ok(PolicySummary {
+                name: r.get(0)?,
+                version: r.get(1)?,
+                updated_at: r.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    fn get_policy(&self, org_id: &str, name: &str) -> Result<Option<PolicyDoc>> {
+        let conn = self.conn()?;
+        let doc = conn
+            .query_row(
+                "SELECT name, content, version, updated_at FROM policy
+                 WHERE org_id = ?1 AND name = ?2",
+                params![org_id, name],
+                |r| {
+                    Ok(PolicyDoc {
+                        name: r.get(0)?,
+                        content: r.get(1)?,
+                        version: r.get(2)?,
+                        updated_at: r.get(3)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(doc)
+    }
+
+    fn export_events(&self, org_id: &str) -> Result<Vec<StoredEvent>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT seq, id, session_id, ts, event_type, actor, payload
+             FROM event WHERE org_id = ?1 ORDER BY seq ASC",
+        )?;
+        let rows = stmt.query_map([org_id], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, String>(6)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (seq, id, session_id, timestamp, event_type, actor, payload_str) = row?;
+            let payload = serde_json::from_str(&payload_str)
+                .with_context(|| format!("corrupt event payload for event {id}"))?;
+            out.push(StoredEvent {
+                seq,
+                id,
+                session_id,
+                timestamp,
+                event_type,
+                actor,
+                payload,
+            });
+        }
+        Ok(out)
+    }
+
+    fn export_audit(&self, org_id: &str) -> Result<Vec<AuditRecord>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT seq, ts, org_id, actor_member_id, action, detail, entry_hash
+             FROM audit_log WHERE org_id = ?1 ORDER BY seq ASC",
+        )?;
+        let rows = stmt.query_map([org_id], |r| {
+            Ok(AuditRecord {
+                seq: r.get(0)?,
+                ts: r.get(1)?,
+                org_id: r.get(2)?,
+                actor_member_id: r.get(3)?,
+                action: r.get(4)?,
+                detail: r.get(5)?,
+                entry_hash: r.get(6)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     fn append_audit(&self, entry: &AuditEntry) -> Result<()> {
         let ts = chrono::Utc::now().to_rfc3339();
         let mut guard = self.conn()?;
@@ -765,6 +899,26 @@ mod tests {
         }
         // Corruption is surfaced as an error, not masked as null.
         assert!(s.list_events(&org.id, &repo.id, 10, None).is_err());
+    }
+
+    #[test]
+    fn policy_versions_bump_and_export_is_scoped() {
+        let s = store();
+        let org = s.create_org("Acme").unwrap();
+        assert_eq!(s.put_policy(&org.id, "default", "version: 1").unwrap(), 1);
+        assert_eq!(s.put_policy(&org.id, "default", "version: 1").unwrap(), 2);
+        let doc = s.get_policy(&org.id, "default").unwrap().unwrap();
+        assert_eq!(doc.version, 2);
+        assert_eq!(s.list_policies(&org.id).unwrap().len(), 1);
+        assert!(s.get_policy(&org.id, "nope").unwrap().is_none());
+
+        let repo = s.ensure_repo(&org.id, "app").unwrap();
+        s.append_events(&org.id, &repo.id, &[ingest_event("a")])
+            .unwrap();
+        assert_eq!(s.export_events(&org.id).unwrap().len(), 1);
+        // Another org exports nothing.
+        assert!(s.export_events("org_other").unwrap().is_empty());
+        assert!(s.list_policies("org_other").unwrap().is_empty());
     }
 
     #[test]

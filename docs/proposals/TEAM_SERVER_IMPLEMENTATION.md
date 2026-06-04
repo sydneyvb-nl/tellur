@@ -212,8 +212,12 @@ Each phase ships independently, behind config, with its own tests + docs.
   Tenant-scoped `GET .../repos`, `GET .../repos/{repo}/events` (cursor
   pagination), and `GET .../report` (org rollup across repos). Reusing the
   `web/` dashboard against these endpoints is deferred to a follow-up.
-- **B4 — Central policy & export.** `tellur policy pull`; org-level
-  SLSA/SPDX/audit export portal.
+- **B4 — Central policy & export.** ✅ Done (branch
+  `feat/server-b4-policy-export`). Versioned org policy distribution
+  (`PUT/GET .../policies[/{name}]`, validated as Tellur policy YAML) + admin
+  export portal (`GET .../export/events|audit`, rate-limited, audit export
+  carries a `chain_intact` flag). Follow-ups: org-level SLSA/SPDX export and the
+  Apache-CLI `tellur policy pull` client.
 - **B5 — Scale & ops.** Postgres backend, background jobs, pagination, metrics,
   backup/retention. Packaging: single binary + signed multi-arch Docker image +
   Docker Compose example (Helm deferred).
