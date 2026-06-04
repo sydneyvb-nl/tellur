@@ -12,6 +12,16 @@
 > (disclosure/DoS, policy bodies validated/declarative); and `README.md` now
 > documents the self-hosted hub (preview) instead of saying it's unimplemented.
 >
+> **2026-06-04 — Attribution/SLSA review fixes (Codex).** Addressed 3 P2
+> findings on PR #8: ingest now rejects malformed attribution ranges
+> (`start_line == 0` or `start > end`) before storage, so SPDX/SLSA line-count
+> math can't underflow; and the core SLSA + SPDX structs now serialize the
+> **standard JSON field names** (`predicateType`/`buildType`/`configSource`/
+> `entryPoint`; `spdxVersion`/`dataLicense`/`SPDXID`/`documentNamespace`/…) via
+> `rename_all = "camelCase"` (+ explicit `SPDXID`), so the attestations are
+> accepted by SLSA/in-toto and SPDX 2.3 tooling — this also fixes the standalone
+> `tellur export slsa|spdx` output. 59 server tests; workspace 204.
+>
 > **2026-06-04 — Attribution ingest + org SLSA/SPDX export.** On branch
 > `feat/server-b6-attribution-slsa`. The hub now ingests line-level attribution
 > (`POST /v1/orgs/{org}/repos/{repo}/attributions`, contributor+, per-file
@@ -479,8 +489,8 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-203 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
-- server:    58 tests (B0 config/health/errors + /metrics; B1 Argon2id tokens, org/member
+204 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
+- server:    59 tests (B0 config/health/errors + /metrics; B1 Argon2id tokens, org/member
              auth, hash-chained audit append/verify/tamper/tail-truncation/
              two-connection, authn + BOLA + auth-denied auditing; B2 repo
              get-or-create, per-repo event chain verify/tamper, tenant scoping,

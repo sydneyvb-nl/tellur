@@ -597,6 +597,19 @@ pub async fn ingest_attributions(
             req.attributions.len()
         )));
     }
+    // Reject malformed line ranges up front: lines are 1-based and start must not
+    // exceed end. Otherwise `end_line - start_line + 1` underflows in SPDX/SLSA
+    // generation (panic in debug, huge count in release).
+    for file in &req.attributions {
+        for r in &file.ranges {
+            if r.start_line == 0 || r.start_line > r.end_line {
+                return Err(ServerError::BadRequest(format!(
+                    "invalid range in {}: start_line={} end_line={}",
+                    file.file_path, r.start_line, r.end_line
+                )));
+            }
+        }
+    }
 
     let repo = state
         .store

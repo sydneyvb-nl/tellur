@@ -156,9 +156,11 @@ async fn contributor_ingests_attribution_then_admin_exports_slsa_and_spdx() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(slsa["_type"], "https://in-toto.io/Statement/v1");
+    // Standard SLSA/in-toto camelCase field names.
+    assert!(slsa["predicateType"].as_str().unwrap().contains("slsa.dev"));
     let materials = slsa["predicate"]["materials"].as_array().unwrap();
     assert_eq!(materials.len(), 1);
-    assert_eq!(materials[0]["ai_model"], "claude-opus-4.7");
+    assert_eq!(materials[0]["aiModel"], "claude-opus-4.7");
 
     // SPDX export builds too.
     let (status, spdx) = req(
@@ -170,7 +172,27 @@ async fn contributor_ingests_attribution_then_admin_exports_slsa_and_spdx() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(spdx["spdx_version"].as_str().is_some());
+    // Standard SPDX field names (camelCase + the special SPDXID key).
+    assert_eq!(spdx["spdxVersion"], "SPDX-2.3");
+    assert!(spdx["SPDXID"].as_str().is_some());
+}
+
+#[tokio::test]
+async fn invalid_attribution_range_is_rejected() {
+    let s = setup();
+    let mut attr = ai_attribution();
+    attr.ranges[0].start_line = 40;
+    attr.ranges[0].end_line = 10; // start > end
+    let body = json!({ "attributions": [attr] });
+    let (status, _) = req(
+        &s.state,
+        "POST",
+        &format!("/v1/orgs/{}/repos/app/attributions", s.org_a),
+        Some(&s.contributor_a),
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

@@ -7,8 +7,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::schema::types::*;
 
-/// SLSA v1.0 Provenance document
+/// SLSA v1.0 Provenance document. JSON uses the standard in-toto/SLSA
+/// camelCase field names (e.g. `predicateType`, `buildType`) so the attestation
+/// is accepted by SLSA/in-toto tooling.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SlsaProvenance {
     #[serde(rename = "_type")]
     pub doc_type: String,
@@ -18,17 +21,20 @@ pub struct SlsaProvenance {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SlsaSubject {
     pub name: String,
     pub digest: SlsaDigest,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SlsaDigest {
     pub sha256: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SlsaPredicate {
     pub builder: SlsaBuilder,
     pub build_type: String,
@@ -37,17 +43,20 @@ pub struct SlsaPredicate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SlsaBuilder {
     pub id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SlsaInvocation {
     pub config_source: SlsaConfigSource,
     pub parameters: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SlsaConfigSource {
     pub uri: String,
     pub digest: SlsaDigest,
@@ -55,6 +64,7 @@ pub struct SlsaConfigSource {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SlsaMaterial {
     pub uri: String,
     pub digest: Option<SlsaDigest>,
@@ -63,11 +73,14 @@ pub struct SlsaMaterial {
     pub ai_confidence: Option<f64>,
 }
 
-/// SPDX 2.3 SBOM document
+/// SPDX 2.3 SBOM document. JSON uses the standard SPDX field names
+/// (camelCase, with the special `SPDXID` key) so SPDX 2.3 tooling accepts it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SpdxDocument {
     pub spdx_version: String,
     pub data_license: String,
+    #[serde(rename = "SPDXID")]
     pub spdx_id: String,
     pub name: String,
     pub document_namespace: String,
@@ -77,13 +90,16 @@ pub struct SpdxDocument {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SpdxCreationInfo {
     pub created: String,
     pub creators: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SpdxPackage {
+    #[serde(rename = "SPDXID")]
     pub spdx_id: String,
     pub name: String,
     pub version_info: Option<String>,
@@ -93,6 +109,7 @@ pub struct SpdxPackage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SpdxRelationship {
     pub spdx_element_id: String,
     pub relationship_type: String,
