@@ -222,8 +222,11 @@ Each phase ships independently, behind config, with its own tests + docs.
   `/metrics` (Prometheus), heavy-op offload via `spawn_blocking`, Docker image +
   Compose example + CI image build, and the `tellur policy pull` client. **Still
   open (own PR):** Postgres backend behind the `Store` trait + a persistent
-  queued-job system + backup/retention. Org-level SLSA/SPDX export remains gated
-  on hub attribution ingest (generators need `FileAttribution`, not events).
+  queued-job system + backup/retention.
+- **Attribution ingest + SLSA/SPDX export.** ✅ Done (branch
+  `feat/server-b6-attribution-slsa`). The hub ingests line-level attribution
+  (`POST .../repos/{repo}/attributions`); per-repo `GET .../export/slsa|spdx`
+  builds real SLSA v1.0 provenance + SPDX SBOM from it via core's generators.
 - **B6 — Enterprise (Tier 2).** OIDC SSO, SCIM, fine-grained RBAC, signed
   release pipeline hardening, SOC 2 evidence collection.
 

@@ -1,6 +1,6 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-04 (Tier 1 B5 — scale/ops + policy-pull; on feature branch)
+**Last updated:** 2026-06-04 (attribution ingest + SLSA/SPDX export; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
@@ -11,6 +11,27 @@
 > `docs/THREAT_MODEL.md` updated for the policy-write + export endpoints
 > (disclosure/DoS, policy bodies validated/declarative); and `README.md` now
 > documents the self-hosted hub (preview) instead of saying it's unimplemented.
+>
+> **2026-06-04 — Attribution/SLSA review fixes (Codex).** Addressed 3 P2
+> findings on PR #8: ingest now rejects malformed attribution ranges
+> (`start_line == 0` or `start > end`) before storage, so SPDX/SLSA line-count
+> math can't underflow; and the core SLSA + SPDX structs now serialize the
+> **standard JSON field names** (`predicateType`/`buildType`/`configSource`/
+> `entryPoint`; `spdxVersion`/`dataLicense`/`SPDXID`/`documentNamespace`/…) via
+> `rename_all = "camelCase"` (+ explicit `SPDXID`), so the attestations are
+> accepted by SLSA/in-toto and SPDX 2.3 tooling — this also fixes the standalone
+> `tellur export slsa|spdx` output. 59 server tests; workspace 204.
+>
+> **2026-06-04 — Attribution ingest + org SLSA/SPDX export.** On branch
+> `feat/server-b6-attribution-slsa`. The hub now ingests line-level attribution
+> (`POST /v1/orgs/{org}/repos/{repo}/attributions`, contributor+, per-file
+> upsert, schema v7 `attribution` table), which unblocks the deferred compliance
+> export: `GET .../repos/{repo}/export/slsa` and `.../export/spdx` (admin) build
+> real SLSA v1.0 provenance + SPDX SBOM from the stored attribution via core's
+> generators (subject `repo_url`/`commit` are caller-supplied query params).
+> Exports run off the async runtime and are audited. Verified: 58 server tests
+> (incl. ingest role/tenant + export admin/404) + live smoke (ingest → SLSA with
+> materials → SPDX); workspace 203; clippy + cargo-deny green.
 >
 > **2026-06-04 — Tier 1 B5 (scale & ops, partial) + policy-pull.** On branch
 > `feat/server-b5-scale-ops`. Added: a `/metrics` Prometheus endpoint (domain
@@ -468,8 +489,8 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-200 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
-- server:    55 tests (B0 config/health/errors + /metrics; B1 Argon2id tokens, org/member
+204 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
+- server:    59 tests (B0 config/health/errors + /metrics; B1 Argon2id tokens, org/member
              auth, hash-chained audit append/verify/tamper/tail-truncation/
              two-connection, authn + BOLA + auth-denied auditing; B2 repo
              get-or-create, per-repo event chain verify/tamper, tenant scoping,
@@ -563,8 +584,10 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
    versioned) and an export portal (`GET .../export/events|audit`, admin,
    rate-limited). **B5 (partial) ✅** (branch `feat/server-b5-scale-ops`):
    `/metrics`, heavy-op offload, Docker/Compose packaging + CI build, and the
-   `tellur policy pull` client. Remaining for B5: **Postgres backend + queued
-   jobs** (own PR — needs a DB/CI service). Then **B6** (SSO/RBAC/SCIM).
+   `tellur policy pull` client. **Attribution ingest + SLSA/SPDX export ✅**
+   (branch `feat/server-b6-attribution-slsa`): per-repo SLSA v1.0 + SPDX from
+   ingested line-level attribution. Remaining: **Postgres backend + queued jobs**
+   (own PR — needs a DB/CI service). Then **B6** (SSO/RBAC/SCIM).
 9. **Plugin SDK** — requires stable adapter/event API
 
 ---

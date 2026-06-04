@@ -11,6 +11,7 @@ use axum::http::request::Parts;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tellur_core::redaction::RedactionEngine;
+use tellur_core::schema::types::FileAttribution;
 
 use crate::app::AppState;
 use crate::auth::{Principal, Role};
@@ -552,6 +553,174 @@ pub async fn export_audit(
         "count": entries.len(),
         "entries": entries,
     })))
+}
+
+// ─── Attribution ingest + SLSA/SPDX export ───────────────────────────────────
+
+/// Wire format for attribution ingest.
+#[derive(Debug, Deserialize)]
+pub struct IngestAttributionsRequest {
+    pub attributions: Vec<FileAttribution>,
+}
+
+/// `POST /v1/orgs/{org}/repos/{repo}/attributions` — ingest line-level
+/// attribution (contributor+). This is what powers SLSA/SPDX export.
+pub async fn ingest_attributions(
+    State(state): State<AppState>,
+    Path((org_id, repo)): Path<(String, String)>,
+    principal: Principal,
+    Json(req): Json<IngestAttributionsRequest>,
+) -> Result<Json<Value>, ServerError> {
+    if org_id != principal.org_id || !principal.role.allows(Role::Contributor) {
+        state
+            .store
+            .append_audit(&AuditEntry {
+                org_id: Some(principal.org_id.clone()),
+                actor_member_id: Some(principal.member_id.clone()),
+                action: "attributions_denied".to_string(),
+                detail: format!("attempted_org={org_id} role={}", principal.role.as_str()),
+            })
+            .map_err(ServerError::Internal)?;
+        return Err(ServerError::Forbidden);
+    }
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    if req.attributions.is_empty() {
+        return Err(ServerError::BadRequest(
+            "no attributions provided".to_string(),
+        ));
+    }
+    if req.attributions.len() > MAX_EVENTS_PER_REQUEST {
+        return Err(ServerError::BadRequest(format!(
+            "too many files: {} (max {MAX_EVENTS_PER_REQUEST})",
+            req.attributions.len()
+        )));
+    }
+    // Reject malformed line ranges up front: lines are 1-based and start must not
+    // exceed end. Otherwise `end_line - start_line + 1` underflows in SPDX/SLSA
+    // generation (panic in debug, huge count in release).
+    for file in &req.attributions {
+        for r in &file.ranges {
+            if r.start_line == 0 || r.start_line > r.end_line {
+                return Err(ServerError::BadRequest(format!(
+                    "invalid range in {}: start_line={} end_line={}",
+                    file.file_path, r.start_line, r.end_line
+                )));
+            }
+        }
+    }
+
+    let repo = state
+        .store
+        .ensure_repo(&org_id, &repo)
+        .map_err(ServerError::Internal)?;
+    let n = state
+        .store
+        .put_attributions(&org_id, &repo.id, &req.attributions)
+        .map_err(ServerError::Internal)?;
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id),
+            actor_member_id: Some(principal.member_id.clone()),
+            action: "attributions.ingest".to_string(),
+            detail: format!("repo={} files={n}", repo.id),
+        })
+        .map_err(ServerError::Internal)?;
+    Ok(Json(json!({ "repo_id": repo.id, "files": n })))
+}
+
+/// Query context for compliance exports (subject identity is caller-supplied
+/// since the hub stores provenance events/attribution, not Git remotes/commits).
+#[derive(Debug, Deserialize)]
+pub struct ExportContext {
+    #[serde(default)]
+    pub repo_url: Option<String>,
+    #[serde(default)]
+    pub commit: Option<String>,
+}
+
+/// `GET /v1/orgs/{org}/repos/{repo}/export/slsa` — SLSA v1.0 provenance built
+/// from the repo's ingested attribution (admin).
+pub async fn export_slsa(
+    State(state): State<AppState>,
+    Path((org_id, repo)): Path<(String, String)>,
+    principal: Principal,
+    Query(ctx): Query<ExportContext>,
+) -> Result<Json<Value>, ServerError> {
+    let (repo, attrs) =
+        export_attributions(&state, &principal, &org_id, &repo, "export.slsa").await?;
+    let repo_url = ctx
+        .repo_url
+        .unwrap_or_else(|| format!("tellur:repo/{}", repo.id));
+    let commit = ctx.commit.unwrap_or_else(|| "unknown".to_string());
+    let slsa = tellur_core::export::generate_slsa_provenance(
+        &repo_url,
+        &commit,
+        &attrs,
+        "https://tellur.dev/hub",
+    );
+    serde_json::to_value(&slsa)
+        .map(Json)
+        .map_err(|e| ServerError::Internal(e.into()))
+}
+
+/// `GET /v1/orgs/{org}/repos/{repo}/export/spdx` — SPDX SBOM with AI attribution
+/// built from the repo's ingested attribution (admin).
+pub async fn export_spdx(
+    State(state): State<AppState>,
+    Path((org_id, repo)): Path<(String, String)>,
+    principal: Principal,
+    Query(ctx): Query<ExportContext>,
+) -> Result<Json<Value>, ServerError> {
+    let (repo, attrs) =
+        export_attributions(&state, &principal, &org_id, &repo, "export.spdx").await?;
+    let repo_url = ctx
+        .repo_url
+        .unwrap_or_else(|| format!("tellur:repo/{}", repo.id));
+    let commit = ctx.commit.unwrap_or_else(|| "unknown".to_string());
+    let spdx = tellur_core::export::generate_spdx_sbom(&repo.name, &repo_url, &commit, &attrs);
+    serde_json::to_value(&spdx)
+        .map(Json)
+        .map_err(|e| ServerError::Internal(e.into()))
+}
+
+/// Shared admin-authz + tenant + rate-limit + fetch for the compliance exports.
+async fn export_attributions(
+    state: &AppState,
+    principal: &Principal,
+    org_id: &str,
+    repo_name: &str,
+    action: &str,
+) -> Result<(crate::storage::Repo, Vec<FileAttribution>), ServerError> {
+    ensure_org_role(state, principal, org_id, Role::Admin, action)?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let repo = state
+        .store
+        .find_repo(org_id, repo_name)
+        .map_err(ServerError::Internal)?
+        .ok_or(ServerError::NotFound)?;
+    let attrs = run_blocking({
+        let store = state.store.clone();
+        let org = org_id.to_string();
+        let repo_id = repo.id.clone();
+        move || store.list_attributions(&org, &repo_id)
+    })
+    .await?;
+    state.metrics.inc_export();
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id.to_string()),
+            actor_member_id: Some(principal.member_id.clone()),
+            action: action.to_string(),
+            detail: format!("repo={} files={}", repo.id, attrs.len()),
+        })
+        .map_err(ServerError::Internal)?;
+    Ok((repo, attrs))
 }
 
 /// Recursively redact secret-looking strings anywhere in a JSON value.
