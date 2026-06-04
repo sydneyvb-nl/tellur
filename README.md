@@ -81,11 +81,10 @@ Implemented surfaces include the CLI, global Codex/Claude Code/Gemini
 CLI/Antigravity hooks, Cursor MCP/settings, VS Code/Cursor extension capture,
 importers for Cursor, Aider, Codex CLI, Gemini CLI, Antigravity, GitHub
 Copilot, Windsurf/Cascade, JetBrains AI/Junie, Devin, Continue, and
-Cline/Roo Code, a local token-authenticated daemon, an MCP stdio server, provenance
-export, Git notes interop, and a static session replay dashboard backed by
-daemon data.
-
-Team/server mode is not implemented yet.
+Cline/Roo Code, a local token-authenticated daemon, an MCP stdio server,
+provenance export, Git notes interop, a static session replay dashboard backed
+by daemon data, and a self-hosted `tellur-server` hub preview for team
+ingest/read/report/policy/export workflows.
 
 ## Install
 
@@ -112,6 +111,9 @@ Initialize Tellur in a Git repository:
 ```bash
 tellur init
 ```
+
+`tellur init --profile` accepts `default`, `team`, and `oss-maintainer`.
+Unsupported profile names fail fast instead of silently using default setup.
 
 Check the local setup and detected AI tools:
 
@@ -245,7 +247,11 @@ through the durable surface each one does expose:
   `tellur hooks ingest --source jetbrains --auto-init`. Edits made by the
   JetBrains AI Assistant and the Junie agent land on disk through the same path,
   so they are captured live. JetBrains MCP is configured in-IDE, so Tellur does
-  not auto-write it.
+  not auto-write it. The plugin deduplicates repeated VFS events for the same
+  file/repository while a capture is queued or running, re-runs capture once more
+  when a new save arrives during an active capture, sends captures through a
+  disposable bounded single-worker queue, and logs CLI failures/timeouts for
+  troubleshooting.
 - **Devin (cloud agent)** — has no local file surface. Point a Devin webhook (or
   a small relay) at the local daemon's authenticated
   `POST /webhook/devin` endpoint, which normalizes Devin's native run/session
@@ -512,10 +518,13 @@ metadata, not the raw prompt text.
 
 ## Roadmap
 
-- Team/server mode for shared organizational visibility
+- Postgres-backed team/server storage and enterprise SSO
 - Live lifecycle-hook capture (beyond import) for editors that expose it
 - Richer policy templates for security-sensitive repositories
 - Packaged releases for npm, Homebrew, and GitHub Releases
+
+The `tellur-core` binary is an internal diagnostic entrypoint for packaging
+smoke tests. Use the `tellur` binary for normal CLI workflows.
 
 ## Contributing
 

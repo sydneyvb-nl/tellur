@@ -132,7 +132,12 @@ pub fn generate_slsa_provenance(
             .find(|r| matches!(r.origin, Origin::Ai | Origin::Mixed));
 
         materials.push(SlsaMaterial {
-            uri: format!("git+{}#{}", repo_url, commit_sha),
+            uri: format!(
+                "git+{}#{}:{}",
+                repo_url,
+                commit_sha,
+                percent_encode_uri_path(&attr.file_path)
+            ),
             digest: Some(SlsaDigest {
                 sha256: attr.git_blob_sha.clone(),
             }),
@@ -252,6 +257,19 @@ pub fn generate_spdx_sbom(
     }
 }
 
+fn percent_encode_uri_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    for &b in path.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                out.push(b as char);
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,6 +323,22 @@ mod tests {
         // Verify it serializes to valid JSON
         let json = serde_json::to_string(&slsa).unwrap();
         assert!(json.contains("slsa.dev"));
+    }
+
+    #[test]
+    fn slsa_material_uri_percent_encodes_file_path() {
+        let mut attr = sample_attribution();
+        attr.file_path = "src/a b#c?:d.rs".to_string();
+        let slsa = generate_slsa_provenance(
+            "https://github.com/example/repo",
+            "sha256abc",
+            &[attr],
+            "https://tellur.dev/builder/v1",
+        );
+        assert_eq!(
+            slsa.predicate.materials[0].uri,
+            "git+https://github.com/example/repo#sha256abc:src/a%20b%23c%3F%3Ad.rs"
+        );
     }
 
     #[test]

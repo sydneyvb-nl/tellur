@@ -83,7 +83,8 @@ async fn get(state: &AppState, uri: &str, bearer: Option<&str>) -> (StatusCode, 
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     (
         status,
-        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|e| panic!("expected JSON response for {uri} ({status}): {e}")),
     )
 }
 
@@ -103,13 +104,31 @@ async fn viewer_can_list_repos_events_and_report() {
 
     let (status, json) = get(
         &s.state,
-        &format!("/v1/orgs/{}/repos/app/events?limit=2", s.org_a),
+        &format!("/v1/orgs/{}/repos/{}/events?limit=2", s.org_a, s.repo_id),
         Some(&s.viewer_a),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["events"].as_array().unwrap().len(), 2);
-    assert!(json["next_before"].is_i64()); // full page → cursor present
+    let first_page = json["events"].as_array().unwrap();
+    assert_eq!(first_page.len(), 2);
+    assert_eq!(first_page[0]["payload"]["file_path"], "c.rs");
+    assert_eq!(first_page[1]["payload"]["file_path"], "b.rs");
+    let next_before = json["next_before"].as_i64().unwrap(); // full page → cursor present
+
+    let (status, json) = get(
+        &s.state,
+        &format!(
+            "/v1/orgs/{}/repos/{}/events?limit=2&before={next_before}",
+            s.org_a, s.repo_id
+        ),
+        Some(&s.viewer_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let second_page = json["events"].as_array().unwrap();
+    assert_eq!(second_page.len(), 1);
+    assert_eq!(second_page[0]["payload"]["file_path"], "a.rs");
+    assert!(json["next_before"].is_null());
 
     let (status, json) = get(
         &s.state,
@@ -141,6 +160,13 @@ async fn reads_are_tenant_scoped_bola() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/repos/{}/events", s.org_a, s.repo_id),
+        Some(&s.admin_b),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
@@ -156,8 +182,6 @@ async fn missing_repo_is_404_and_unauth_is_401() {
 
     let (status, _) = get(&s.state, &format!("/v1/orgs/{}/repos", s.org_a), None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-
-    let _ = s.repo_id; // silence unused if cfg changes
 }
 
 #[tokio::test]
@@ -166,7 +190,7 @@ async fn auth_runs_before_query_parsing() {
     // Bad ?limit on a protected endpoint with no token must be 401, not 400.
     let (status, _) = get(
         &s.state,
-        &format!("/v1/orgs/{}/repos/app/events?limit=abc", s.org_a),
+        &format!("/v1/orgs/{}/repos/{}/events?limit=abc", s.org_a, s.repo_id),
         None,
     )
     .await;
@@ -179,7 +203,7 @@ async fn successful_event_read_is_audited() {
     let before = s.store.audit_len().unwrap();
     let (status, _) = get(
         &s.state,
-        &format!("/v1/orgs/{}/repos/app/events", s.org_a),
+        &format!("/v1/orgs/{}/repos/{}/events", s.org_a, s.repo_id),
         Some(&s.viewer_a),
     )
     .await;

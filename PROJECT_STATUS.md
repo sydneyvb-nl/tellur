@@ -1,6 +1,6 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-04 (attribution ingest + SLSA/SPDX export; on feature branch)
+**Last updated:** 2026-06-04 (Clawpatch report fixes; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
@@ -11,6 +11,29 @@
 > `docs/THREAT_MODEL.md` updated for the policy-write + export endpoints
 > (disclosure/DoS, policy bodies validated/declarative); and `README.md` now
 > documents the self-hosted hub (preview) instead of saying it's unimplemented.
+>
+> **2026-06-04 — Clawpatch report fixes (Codex).** On branch
+> `codex/clawpatch-report-fixes`. Addressed Clawpatch findings across server,
+> CLI, workflows, and JetBrains: `tellur-server admin create-token` now requires
+> an explicit role and records admin-CLI token creation without falsely naming
+> the new member as actor; `tellur-core` is a real diagnostic CLI with
+> help/version/error behavior; PR provenance workflow uses the checked-out
+> binary and immutable PR SHAs from a read-only report job, while PR commenting
+> runs in a separate write-scoped job that does not execute PR code; release
+> builds use the pinned Rust toolchain; readiness checks verify the migrated
+> store; graceful shutdown handles SIGTERM; `tellur init --profile` validates
+> supported profiles; `doctor` uses cross-platform executable PATH lookup and
+> reports unreadable policy/trace directories; test helpers now require JSON
+> problem bodies; read/policy/export/auth/ingest coverage was tightened; SLSA
+> materials preserve file identity with percent-encoded file paths; repo ID
+> lookup is preferred before repo-name fallback; JetBrains capture now
+> deduplicates VFS bursts, re-queues saves that arrive during active capture,
+> uses a disposable bounded single-worker queue, logs CLI failures/timeouts, has
+> a bounded IDE compatibility range, and includes automated runner tests.
+> Verified: `cargo fmt`; `cargo test` (216 Rust tests);
+> `cargo clippy --workspace --all-targets -- -D warnings`; `cargo deny check`
+> (warnings only, gate green); JetBrains `./gradlew test buildPlugin` with JDK
+> 17.
 >
 > **2026-06-04 — Attribution/SLSA review fixes (Codex).** Addressed 3 P2
 > findings on PR #8: ingest now rejects malformed attribution ranges
@@ -453,7 +476,7 @@ Tellur/
 | 43 | SLSA/SPDX export | 20 | ✅ Done | SLSA v1.0 provenance + SPDX 2.3 SBOM with AI metadata, 2 tests | |
 | 44 | HTTP daemon (axum) | 22 | ✅ Done | `tellur daemon` (loopback-only, token-auth, Host check). Server **recomputes the hash chain** via EventWriter — clients cannot forge provenance. 7 endpoints incl. `POST /webhook/{source}` for cloud-agent (Devin) live capture. |
 | 45 | MCP server | 23 | ✅ Done | `tellur mcp` — real stdio JSON-RPC 2.0 (initialize/tools/list/tools/call). 6 tools backed by actual index/policy/verify queries. |
-| 46 | Team/server mode | §6.11 / §16.2 L5 / §32 Step 20 | 📋 Proposed | Design proposal: [`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md). MVP = Tier 0 (Git-native, no server) → Tier 1 (`tellur serve` hub). Not yet implemented |
+| 46 | Team/server mode | §6.11 / §16.2 L5 / §32 Step 20 | ✅ In preview | Tier 0 (`tellur team report`) and Tier 1 self-host hub (`crates/server` / `tellur-server`) are implemented through SQLite ingest/read/report/policy/export, metrics, Docker packaging, policy pull, and repo SLSA/SPDX export. Postgres and enterprise SSO remain roadmap items. |
 | 47 | Plugin/adapter SDK | §8.3 / §32 Step 18 | ❌ Not started | Requires stable adapter/event API |
 
 ### Phase 7: Distribution (PRD sectie 32.3)
@@ -472,12 +495,9 @@ Tellur/
 Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney's beslissing:
 
 1. **Pricing / Business model** (PRD sectie 27-31) — niet relevant voor dev, Sydney beslist
-2. **Team/server mode** (PRD §6.11 / §16.2 Layer 5 / §32 Step 20) — design
-   proposal klaar
-   ([`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md)).
-   **Tier 0 / Phase A klaar:** `tellur team report` + voorbeeld-PR-workflow.
-   **Tier 1 (self-host hub) in aanbouw:** B0 (FSL `crates/server` scaffolding)
-   klaar; B1 (identity & tenancy) volgt.
+2. **Enterprise team/server follow-ups** (PRD §6.11 / §16.2 Layer 5 / §32 Step 20)
+   — Tier 0 and the SQLite self-host hub preview are implemented. Remaining
+   work: Postgres backend, durable jobs, and enterprise SSO/SCIM.
 3. **SOC 2 compliance** (PRD sectie 26) — far future
 4. **Plugin SDK** (PRD sectie 25) — API stabiliteit eerst nodig
 5. **Release signing** (PRD sectie 20) — na v1.0 (SLSA/SPDX *export* is wel klaar)

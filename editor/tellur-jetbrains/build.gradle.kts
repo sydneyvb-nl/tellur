@@ -25,6 +25,8 @@ dependencies {
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
     }
     implementation(kotlin("stdlib"))
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
 }
 
 intellijPlatform {
@@ -34,8 +36,7 @@ intellijPlatform {
         version = providers.gradleProperty("pluginVersion").get()
         ideaVersion {
             sinceBuild = providers.gradleProperty("pluginSinceBuild").get()
-            // No upper bound: keep the plugin loadable on newer IDE builds.
-            untilBuild = provider { null }
+            untilBuild = providers.gradleProperty("pluginUntilBuild").get()
         }
     }
 }

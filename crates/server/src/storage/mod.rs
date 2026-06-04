@@ -144,8 +144,9 @@ pub trait Store: Send + Sync {
     /// Get-or-create a repo by `(org_id, name)`; returns its id.
     fn ensure_repo(&self, org_id: &str, name: &str) -> Result<Repo>;
 
-    /// Look up a repo by `(org_id, name)` without creating it.
-    fn find_repo(&self, org_id: &str, name: &str) -> Result<Option<Repo>>;
+    /// Look up a repo by `(org_id, repo ref)` without creating it. The ref may
+    /// be the stable repo id or the human-readable repo name.
+    fn find_repo(&self, org_id: &str, repo: &str) -> Result<Option<Repo>>;
 
     /// Append events to a repo's chain. The hub assigns ids and recomputes the
     /// per-repo hash chain (clients cannot forge provenance). Returns new ids.

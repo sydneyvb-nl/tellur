@@ -14,8 +14,9 @@ fn tellur_binary() -> PathBuf {
     }
     let root = workspace_root();
     // Try release first, then debug
-    let release = root.join("target/release/tellur");
-    let debug = root.join("target/debug/tellur");
+    let exe = format!("tellur{}", std::env::consts::EXE_SUFFIX);
+    let release = root.join("target/release").join(&exe);
+    let debug = root.join("target/debug").join(&exe);
     if release.exists() { release } else { debug }
 }
 
@@ -107,6 +108,28 @@ fn test_help() {
     assert!(stdout.contains("blame"));
     assert!(stdout.contains("pr-report"));
     assert!(stdout.contains("notes"));
+}
+
+#[test]
+fn test_binary_fallback_uses_platform_executable_suffix() {
+    let path = tellur_binary();
+    assert_eq!(
+        path.file_name().and_then(|n| n.to_str()).unwrap(),
+        format!("tellur{}", std::env::consts::EXE_SUFFIX)
+    );
+}
+
+#[test]
+fn test_init_rejects_unknown_profile() {
+    let dir = temp_repo();
+    let output = tellur()
+        .args(["init", "--profile", "anything-at-all"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unsupported init profile"), "{stderr}");
 }
 
 #[test]
@@ -402,11 +425,7 @@ fn assert_hook_command(config: &serde_json::Value, event: &str, source: &str) {
         .as_str()
         .unwrap();
     assert!(command.contains(&format!(" hooks ingest --source {source} --auto-init")));
-    let exe = command
-        .split_whitespace()
-        .next()
-        .unwrap()
-        .trim_matches('\'');
+    let exe = first_shell_token(command).unwrap();
     assert!(
         PathBuf::from(exe).is_absolute(),
         "hook command must use an absolute executable path: {command}"
@@ -420,11 +439,43 @@ fn assert_named_hook_command(config: &serde_json::Value, event: &str, source: &s
     assert!(command.contains(&format!(
         " hooks ingest --source {source} --auto-init --json-response"
     )));
-    let exe = command
-        .split_whitespace()
-        .next()
-        .unwrap()
-        .trim_matches('\'');
+    let exe = first_shell_token(command).unwrap();
+    assert!(PathBuf::from(exe).is_absolute());
+}
+
+fn first_shell_token(command: &str) -> Option<String> {
+    let command = command.trim_start();
+    if let Some(rest) = command.strip_prefix('\'') {
+        let mut token = String::new();
+        let mut chars = rest.chars().peekable();
+        while let Some(ch) = chars.next() {
+            match ch {
+                '\'' => {
+                    if chars.peek().is_some_and(|c| *c == '\\') {
+                        chars.next();
+                        if chars.next() == Some('\'') && chars.next() == Some('\'') {
+                            token.push('\'');
+                            continue;
+                        }
+                    }
+                    return Some(token);
+                }
+                other => token.push(other),
+            }
+        }
+        None
+    } else {
+        command.split_whitespace().next().map(str::to_string)
+    }
+}
+
+#[test]
+fn hook_command_parser_handles_quoted_executable_with_spaces() {
+    let exe = first_shell_token(
+        "'/tmp/Application Support/tellur' hooks ingest --source codex --auto-init",
+    )
+    .unwrap();
+    assert_eq!(exe, "/tmp/Application Support/tellur");
     assert!(PathBuf::from(exe).is_absolute());
 }
 

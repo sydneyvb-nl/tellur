@@ -10,6 +10,8 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+# Apache-2.0 applies to the core workspace crates. `crates/server` is a
+# source-available FSL member and must keep its explicit `license-file`.
 license = "Apache-2.0"
 repository = "https://github.com/sydneyvb-nl/tellur"
 

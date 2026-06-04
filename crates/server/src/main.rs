@@ -1,7 +1,7 @@
 //! `tellur-server` binary: run the hub, or perform admin bootstrap tasks.
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use tellur_server::auth::Role;
 use tellur_server::storage::AuditEntry;
 use tellur_server::{Config, build_state, run};
@@ -35,8 +35,9 @@ enum AdminAction {
     CreateToken {
         #[arg(long)]
         org: String,
-        #[arg(long, default_value = "admin")]
-        role: String,
+        /// Role for the new member. Required so admin tokens are always explicit.
+        #[arg(long, value_enum)]
+        role: AdminRoleArg,
         #[arg(long, default_value = "token")]
         name: String,
     },
@@ -63,6 +64,23 @@ async fn main() -> Result<()> {
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum AdminRoleArg {
+    Viewer,
+    Contributor,
+    Admin,
+}
+
+impl AdminRoleArg {
+    fn as_role(self) -> Role {
+        match self {
+            AdminRoleArg::Viewer => Role::Viewer,
+            AdminRoleArg::Contributor => Role::Contributor,
+            AdminRoleArg::Admin => Role::Admin,
+        }
+    }
+}
+
 fn run_admin(config: Config, action: AdminAction) -> Result<()> {
     let state = build_state(config)?;
     let store = state.store;
@@ -73,14 +91,14 @@ fn run_admin(config: Config, action: AdminAction) -> Result<()> {
             println!("Created org \"{}\"  id={}", org.name, org.id);
         }
         AdminAction::CreateToken { org, role, name } => {
-            let role = Role::parse(&role)?;
+            let role = role.as_role();
             let member = store.create_member(&org, &name, role)?;
             let token = store.create_token(&member)?;
             store.append_audit(&AuditEntry {
                 org_id: Some(org),
-                actor_member_id: Some(member.clone()),
+                actor_member_id: None,
                 action: "token.create".to_string(),
-                detail: format!("role={}", role.as_str()),
+                detail: format!("role={} member={member} via=admin-cli", role.as_str()),
             })?;
             println!("Created member id={member} role={}", role.as_str());
             println!("API token (store it now — shown only once):");

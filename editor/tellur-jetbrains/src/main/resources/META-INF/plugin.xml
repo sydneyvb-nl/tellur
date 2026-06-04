@@ -20,6 +20,8 @@
     <extensions defaultExtensionNs="com.intellij">
         <applicationService
             serviceImplementation="dev.tellur.jetbrains.TellurSettings"/>
+        <applicationService
+            serviceImplementation="dev.tellur.jetbrains.TellurHookRunner"/>
         <applicationConfigurable
             parentId="tools"
             instance="dev.tellur.jetbrains.TellurSettingsConfigurable"

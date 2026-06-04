@@ -92,7 +92,8 @@ async fn req(
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     (
         status,
-        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|e| panic!("expected JSON response for {uri} ({status}): {e}")),
     )
 }
 
@@ -169,6 +170,17 @@ async fn non_admin_and_cross_org_policy_writes_forbidden() {
     // Org B admin can't write into org A.
     let (status, _) = req(&s.state, "PUT", &uri, Some(&s.admin_b), Some(VALID_POLICY)).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = req(&s.state, "GET", &uri, Some(&s.admin_b), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = req(
+        &s.state,
+        "GET",
+        &format!("/v1/orgs/{}/policies", s.org_a),
+        Some(&s.admin_b),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, _) = req(
         &s.state,
         "GET",
@@ -178,6 +190,31 @@ async fn non_admin_and_cross_org_policy_writes_forbidden() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn unauthenticated_policy_and_export_access_is_rejected() {
+    let s = setup();
+    for (method, uri, body) in [
+        (
+            "PUT",
+            format!("/v1/orgs/{}/policies/default", s.org_a),
+            Some(VALID_POLICY),
+        ),
+        (
+            "GET",
+            format!("/v1/orgs/{}/policies/default", s.org_a),
+            None,
+        ),
+        ("GET", format!("/v1/orgs/{}/policies", s.org_a), None),
+        ("GET", format!("/v1/orgs/{}/export/events", s.org_a), None),
+        ("GET", format!("/v1/orgs/{}/export/audit", s.org_a), None),
+    ] {
+        let (status, json) = req(&s.state, method, &uri, None, body).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {uri}");
+        assert_eq!(json["status"], 401);
+        assert_eq!(json["title"], "unauthorized");
+    }
 }
 
 #[tokio::test]

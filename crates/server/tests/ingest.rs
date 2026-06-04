@@ -87,7 +87,8 @@ async fn post(
         .unwrap();
     let status = resp.status();
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-    let json = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    let json = serde_json::from_slice(&bytes)
+        .unwrap_or_else(|e| panic!("expected JSON response for {uri} ({status}): {e}"));
     (status, json)
 }
 
@@ -114,8 +115,10 @@ async fn contributor_can_ingest_and_chain_verifies() {
 async fn viewer_cannot_ingest() {
     let s = setup();
     let uri = format!("/v1/orgs/{}/repos/app/events", s.org_a);
-    let (status, _) = post(&s.state, &uri, Some(&s.viewer_a), sample_body()).await;
+    let (status, json) = post(&s.state, &uri, Some(&s.viewer_a), sample_body()).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(json["status"], 403);
+    assert_eq!(json["title"], "forbidden");
 }
 
 #[tokio::test]
@@ -156,6 +159,8 @@ async fn rate_limit_returns_429() {
 async fn unauthenticated_ingest_is_rejected() {
     let s = setup();
     let uri = format!("/v1/orgs/{}/repos/app/events", s.org_a);
-    let (status, _) = post(&s.state, &uri, None, sample_body()).await;
+    let (status, json) = post(&s.state, &uri, None, sample_body()).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(json["status"], 401);
+    assert_eq!(json["title"], "unauthorized");
 }

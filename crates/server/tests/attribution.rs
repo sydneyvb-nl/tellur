@@ -121,7 +121,8 @@ async fn req(
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     (
         status,
-        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|e| panic!("expected JSON response for {uri} ({status}): {e}")),
     )
 }
 
@@ -160,6 +161,13 @@ async fn contributor_ingests_attribution_then_admin_exports_slsa_and_spdx() {
     assert!(slsa["predicateType"].as_str().unwrap().contains("slsa.dev"));
     let materials = slsa["predicate"]["materials"].as_array().unwrap();
     assert_eq!(materials.len(), 1);
+    assert!(
+        materials[0]["uri"]
+            .as_str()
+            .unwrap()
+            .contains("src/auth/session.rs")
+    );
+    assert_eq!(materials[0]["digest"]["sha256"], "a91c");
     assert_eq!(materials[0]["aiModel"], "claude-opus-4.7");
 
     // SPDX export builds too.
@@ -175,6 +183,15 @@ async fn contributor_ingests_attribution_then_admin_exports_slsa_and_spdx() {
     // Standard SPDX field names (camelCase + the special SPDXID key).
     assert_eq!(spdx["spdxVersion"], "SPDX-2.3");
     assert!(spdx["SPDXID"].as_str().is_some());
+    let packages = spdx["packages"].as_array().unwrap();
+    assert_eq!(packages[0]["name"], "src/auth/session.rs");
+    assert!(
+        packages[0]["attributionTexts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_str().is_some_and(|s| s.contains("claude-opus-4.7")))
+    );
 }
 
 #[tokio::test]
@@ -184,7 +201,7 @@ async fn invalid_attribution_range_is_rejected() {
     attr.ranges[0].start_line = 40;
     attr.ranges[0].end_line = 10; // start > end
     let body = json!({ "attributions": [attr] });
-    let (status, _) = req(
+    let (status, json) = req(
         &s.state,
         "POST",
         &format!("/v1/orgs/{}/repos/app/attributions", s.org_a),
@@ -193,6 +210,8 @@ async fn invalid_attribution_range_is_rejected() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["status"], 400);
+    assert_eq!(json["title"], "bad-request");
 }
 
 #[tokio::test]
