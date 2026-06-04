@@ -43,6 +43,18 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/orgs/{org_id}/repos/{repo}/events",
             post(crate::api::ingest_events).get(crate::api::list_events),
         )
+        .route(
+            "/v1/orgs/{org_id}/repos/{repo}/attributions",
+            post(crate::api::ingest_attributions),
+        )
+        .route(
+            "/v1/orgs/{org_id}/repos/{repo}/export/slsa",
+            get(crate::api::export_slsa),
+        )
+        .route(
+            "/v1/orgs/{org_id}/repos/{repo}/export/spdx",
+            get(crate::api::export_spdx),
+        )
         .route("/v1/orgs/{org_id}/policies", get(crate::api::list_policies))
         .route(
             "/v1/orgs/{org_id}/policies/{name}",

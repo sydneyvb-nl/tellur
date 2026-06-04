@@ -461,8 +461,10 @@ tellur-server                                                   # serve (default
 Authenticated, org-scoped API (Bearer token): provenance ingest
 (`POST /v1/orgs/{org}/repos/{repo}/events`, with inbound secret redaction and a
 re-verified per-repo hash chain), reads (`GET .../repos`, `.../events`,
-`.../report`), central policy distribution (`PUT/GET .../policies[/{name}]`), and
-an admin export portal (`GET .../export/events|audit`). Cross-org access is
+`.../report`), central policy distribution (`PUT/GET .../policies[/{name}]`),
+attribution ingest (`POST .../repos/{repo}/attributions`), and an admin export
+portal (`GET .../export/events|audit` plus per-repo `GET .../repos/{repo}/export/slsa|spdx`
+for SLSA v1.0 / SPDX SBOM compliance attestations). Cross-org access is
 denied and audited; the audit log is itself tamper-evident. Operational
 endpoints `GET /healthz`, `/readyz`, and `/metrics` (Prometheus) need no auth and
 expose no tenant data.

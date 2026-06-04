@@ -162,6 +162,24 @@ pub trait Store: Send + Sync {
     /// Recompute a repo's event hash chain and report whether it is intact.
     fn verify_event_chain(&self, org_id: &str, repo_id: &str) -> Result<bool>;
 
+    // ─── Attribution (line-level origin data; powers SLSA/SPDX export) ────────
+
+    /// Upsert per-file attribution for a repo; returns the number of files
+    /// written.
+    fn put_attributions(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        files: &[tellur_core::schema::types::FileAttribution],
+    ) -> Result<usize>;
+
+    /// All stored file attributions for a repo (tenant-scoped).
+    fn list_attributions(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+    ) -> Result<Vec<tellur_core::schema::types::FileAttribution>>;
+
     /// List repos in an org with their event counts.
     fn list_repos(&self, org_id: &str) -> Result<Vec<RepoSummary>>;
 

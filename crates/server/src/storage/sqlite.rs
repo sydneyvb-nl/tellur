@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use tellur_core::schema::ids;
+use tellur_core::schema::types::FileAttribution;
 
 use super::chain;
 use super::{
@@ -16,7 +17,7 @@ use super::{
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
-const SCHEMA_VERSION: &str = "6";
+const SCHEMA_VERSION: &str = "7";
 
 /// A SQLite-backed store. The connection is behind a `Mutex` so the store is
 /// `Send + Sync` and usable as `Arc<dyn Store>`.
@@ -170,6 +171,15 @@ impl Store for SqliteStore {
                  version    INTEGER NOT NULL,
                  updated_at TEXT NOT NULL,
                  PRIMARY KEY (org_id, name)
+             );
+             CREATE TABLE IF NOT EXISTS attribution (
+                 org_id       TEXT NOT NULL,
+                 repo_id      TEXT NOT NULL REFERENCES repo(id),
+                 file_path    TEXT NOT NULL,
+                 git_blob_sha TEXT NOT NULL,
+                 ranges_json  TEXT NOT NULL,
+                 updated_at   TEXT NOT NULL,
+                 PRIMARY KEY (org_id, repo_id, file_path)
              );",
         )
         .context("failed to create schema")?;
@@ -443,6 +453,84 @@ impl Store for SqliteStore {
                 Ok((prev_hash, entry_hash, recomputed))
             },
         )
+    }
+
+    fn put_attributions(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        files: &[FileAttribution],
+    ) -> Result<usize> {
+        let mut guard = self.conn()?;
+        let tx = guard
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .context("failed to begin attribution transaction")?;
+        // Tenant scoping: the repo must belong to the caller's org.
+        let belongs = tx
+            .query_row(
+                "SELECT 1 FROM repo WHERE id = ?1 AND org_id = ?2",
+                params![repo_id, org_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !belongs {
+            bail!("repo {repo_id} not found in org {org_id}");
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        for file in files {
+            let ranges_json = serde_json::to_string(&file.ranges)?;
+            tx.execute(
+                "INSERT INTO attribution
+                     (org_id, repo_id, file_path, git_blob_sha, ranges_json, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(org_id, repo_id, file_path) DO UPDATE SET
+                     git_blob_sha = excluded.git_blob_sha,
+                     ranges_json  = excluded.ranges_json,
+                     updated_at   = excluded.updated_at",
+                params![
+                    org_id,
+                    repo_id,
+                    file.file_path,
+                    file.git_blob_sha,
+                    ranges_json,
+                    now
+                ],
+            )
+            .context("failed to upsert attribution")?;
+        }
+        tx.commit().context("failed to commit attributions")?;
+        Ok(files.len())
+    }
+
+    fn list_attributions(&self, org_id: &str, repo_id: &str) -> Result<Vec<FileAttribution>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT file_path, git_blob_sha, ranges_json, updated_at
+             FROM attribution WHERE org_id = ?1 AND repo_id = ?2 ORDER BY file_path",
+        )?;
+        let rows = stmt.query_map(params![org_id, repo_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (file_path, git_blob_sha, ranges_json, updated_at) = row?;
+            let ranges = serde_json::from_str(&ranges_json)
+                .with_context(|| format!("corrupt attribution ranges for {file_path}"))?;
+            out.push(FileAttribution {
+                schema: "tellur.attribution.v1".to_string(),
+                file_path,
+                git_blob_sha,
+                ranges,
+                updated_at,
+            });
+        }
+        Ok(out)
     }
 
     fn list_repos(&self, org_id: &str) -> Result<Vec<RepoSummary>> {
