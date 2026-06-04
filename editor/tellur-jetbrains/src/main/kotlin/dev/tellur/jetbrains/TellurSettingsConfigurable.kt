@@ -31,8 +31,9 @@ class TellurSettingsConfigurable : Configurable {
 
     override fun isModified(): Boolean {
         val settings = TellurSettings.getInstance()
-        return pathField?.text != settings.tellurPath ||
-            enabledBox?.isSelected != settings.enabled
+        val path = pathField ?: return false
+        val enabled = enabledBox ?: return false
+        return path.text != settings.tellurPath || enabled.isSelected != settings.enabled
     }
 
     override fun apply() {

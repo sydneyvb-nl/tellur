@@ -12,6 +12,10 @@ use tower::ServiceExt; // for `oneshot`
 fn test_state() -> AppState {
     let store = SqliteStore::open_in_memory().unwrap();
     store.migrate().unwrap();
+    state_with_store(store)
+}
+
+fn state_with_store(store: SqliteStore) -> AppState {
     let config = Config {
         bind: "127.0.0.1:0".parse().unwrap(),
         db_path: ":memory:".into(),
@@ -63,6 +67,24 @@ async fn readyz_returns_ready_when_store_healthy() {
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(json["status"], "ready");
+}
+
+#[tokio::test]
+async fn readyz_returns_unavailable_when_store_is_not_migrated() {
+    let app = build_router(state_with_store(SqliteStore::open_in_memory().unwrap()));
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/readyz")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["status"], "not_ready");
 }
 
 #[tokio::test]

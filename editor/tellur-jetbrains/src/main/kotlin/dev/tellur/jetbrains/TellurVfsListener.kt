@@ -21,6 +21,7 @@ class TellurVfsListener : BulkFileListener {
         val settings = TellurSettings.getInstance()
         if (!settings.enabled) return
 
+        val captures = linkedSetOf<CaptureTarget>()
         for (event in events) {
             if (event !is VFileContentChangeEvent && event !is VFileCreateEvent) continue
             val file = event.file ?: continue
@@ -28,12 +29,19 @@ class TellurVfsListener : BulkFileListener {
 
             val project = ProjectLocator.getInstance().guessProjectForFile(file) ?: continue
             val baseDir = project.basePath ?: continue
-            val filePath = file.path
+            captures.add(CaptureTarget(baseDir, file.path))
+        }
 
-            // Never block the write path; capture is a best-effort side effect.
-            ApplicationManager.getApplication().executeOnPooledThread {
-                TellurHookRunner.capture(settings.tellurPath, baseDir, filePath)
+        if (captures.isEmpty()) return
+        val tellurPath = settings.tellurPath
+        // Never block the write path; capture is a best-effort side effect.
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val runner = TellurHookRunner.getInstance()
+            captures.forEach { target ->
+                runner.capture(tellurPath, target.baseDir, target.filePath)
             }
         }
     }
+
+    private data class CaptureTarget(val baseDir: String, val filePath: String)
 }

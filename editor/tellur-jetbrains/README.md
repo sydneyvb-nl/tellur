@@ -42,8 +42,14 @@ gating lives in one place:
 - A repository can opt out by creating `.tellur/disable`.
 - Only the working-tree changes for the concrete file path are captured.
 
-Capture runs on a pooled thread and never blocks the IDE write path; if `tellur`
-is not installed or not on `PATH`, capture is silently skipped.
+Capture runs through a single bounded background queue owned by an IntelliJ
+application service and never blocks the IDE write path. Duplicate captures for
+the same file/repository are coalesced while one is queued or running; if a new
+save arrives during an active capture, one follow-up capture is queued so the
+final file state is still recorded. If `tellur` is not installed or not on
+`PATH`, capture is skipped and logged at debug level; non-zero exits and
+timeouts are logged as warnings so repeated provenance loss is visible during
+troubleshooting.
 
 ## Settings
 
@@ -74,6 +80,10 @@ JAVA_HOME=/path/to/jdk-17 ./gradlew buildPlugin
 
 Install the resulting zip via **Preferences → Plugins → ⚙ → Install Plugin from
 Disk…**.
+
+The plugin declares compatibility with IntelliJ Platform 2024.1 through 2024.2
+(`sinceBuild=241`, `untilBuild=242.*`). Raise that range only after building and
+checking the plugin against the newer platform.
 
 > **Verified:** `./gradlew buildPlugin` succeeds on JDK 17 and produces a loadable
 > plugin (the build's `buildSearchableOptions` step boots a headless IDE with the

@@ -193,8 +193,12 @@ impl Store for SqliteStore {
 
     fn health_check(&self) -> Result<()> {
         let conn = self.conn()?;
-        conn.query_row("SELECT 1", [], |row| row.get::<_, i64>(0))
-            .context("database health check failed")?;
+        conn.query_row(
+            "SELECT value FROM schema_meta WHERE key = 'schema_version'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .context("database health check failed")?;
         Ok(())
     }
 
@@ -311,19 +315,29 @@ impl Store for SqliteStore {
         })
     }
 
-    fn find_repo(&self, org_id: &str, name: &str) -> Result<Option<Repo>> {
+    fn find_repo(&self, org_id: &str, repo: &str) -> Result<Option<Repo>> {
         let conn = self.conn()?;
-        let id: Option<String> = conn
+        let found: Option<(String, String)> = conn
             .query_row(
-                "SELECT id FROM repo WHERE org_id = ?1 AND name = ?2",
-                params![org_id, name],
-                |r| r.get(0),
+                "SELECT id, name FROM repo WHERE org_id = ?1 AND id = ?2",
+                params![org_id, repo],
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
-        Ok(id.map(|id| Repo {
+        let found = match found {
+            Some(repo) => Some(repo),
+            None => conn
+                .query_row(
+                    "SELECT id, name FROM repo WHERE org_id = ?1 AND name = ?2",
+                    params![org_id, repo],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?,
+        };
+        Ok(found.map(|(id, name)| Repo {
             id,
             org_id: org_id.to_string(),
-            name: name.to_string(),
+            name,
         }))
     }
 

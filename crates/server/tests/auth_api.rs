@@ -67,18 +67,23 @@ async fn get(state: &AppState, uri: &str, bearer: Option<&str>) -> (StatusCode, 
         .unwrap();
     let status = resp.status();
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-    let json = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    let json = serde_json::from_slice(&bytes)
+        .unwrap_or_else(|e| panic!("expected JSON response for {uri} ({status}): {e}"));
     (status, json)
 }
 
 #[tokio::test]
 async fn unauthenticated_request_is_rejected() {
     let s = setup();
-    let (status, _) = get(&s.state, "/v1/me", None).await;
+    let (status, json) = get(&s.state, "/v1/me", None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(json["status"], 401);
+    assert_eq!(json["title"], "unauthorized");
 
-    let (status, _) = get(&s.state, "/v1/me", Some("tlr_bogus_token")).await;
+    let (status, json) = get(&s.state, "/v1/me", Some("tlr_bogus_token")).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(json["status"], 401);
+    assert_eq!(json["title"], "unauthorized");
 }
 
 #[tokio::test]
@@ -139,6 +144,6 @@ async fn access_is_audited_and_chain_stays_intact() {
     let _ = get(&s.state, &uri_b, Some(&s.token_a)).await; // denied → also audited
 
     let after = s.store.audit_len().unwrap();
-    assert!(after >= before + 2, "expected audit entries to grow");
+    assert_eq!(after, before + 2, "expected one audit entry per request");
     assert!(s.store.verify_audit_chain().unwrap());
 }

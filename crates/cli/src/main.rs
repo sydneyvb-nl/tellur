@@ -16,6 +16,8 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use tellur_core::capture::{
@@ -532,6 +534,7 @@ fn load_policy(storage: &RepoStorage) -> Option<PolicyEngine> {
 // ─── Command Implementations ────────────────────────────────────────────────
 
 async fn cmd_init(profile: &str) -> Result<()> {
+    validate_init_profile(profile)?;
     let storage = RepoStorage::discover()?;
     if storage.is_initialized() {
         println!("Tellur already initialized. Run `tellur doctor` to check setup.");
@@ -546,6 +549,15 @@ async fn cmd_init(profile: &str) -> Result<()> {
     println!();
     println!("Next: run `tellur doctor` to verify setup");
     Ok(())
+}
+
+fn validate_init_profile(profile: &str) -> Result<()> {
+    match profile {
+        "default" | "team" | "oss-maintainer" => Ok(()),
+        other => anyhow::bail!(
+            "unsupported init profile `{other}` (expected: default, team, oss-maintainer)"
+        ),
+    }
 }
 
 async fn cmd_doctor() -> Result<()> {
@@ -563,23 +575,23 @@ async fn cmd_doctor() -> Result<()> {
     }
 
     // Check policies
-    let policies: Vec<_> = match std::fs::read_dir(&storage.policies_dir) {
-        Ok(rd) => rd
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().is_some_and(|ext| ext == "yml"))
-            .collect(),
-        Err(_) => Vec::new(),
-    };
-    println!(
-        "✓ {} polic{} found",
-        policies.len(),
-        if policies.len() == 1 { "y" } else { "ies" }
-    );
-    for p in &policies {
-        println!(
-            "  - {}",
-            p.path().file_name().unwrap_or_default().to_string_lossy()
-        );
+    match list_dir_entries_with_extension(&storage.policies_dir, "yml") {
+        Ok(policies) => {
+            println!(
+                "✓ {} polic{} found",
+                policies.len(),
+                if policies.len() == 1 { "y" } else { "ies" }
+            );
+            for p in &policies {
+                println!(
+                    "  - {}",
+                    p.file_name().unwrap_or_default().to_string_lossy()
+                );
+            }
+        }
+        Err(e) => {
+            println!("⚠ Could not inspect policies directory: {e}");
+        }
     }
 
     // Check index
@@ -594,14 +606,10 @@ async fn cmd_doctor() -> Result<()> {
 
     // Check traces
     if storage.traces_dir.exists() {
-        let trace_files: Vec<_> = match std::fs::read_dir(&storage.traces_dir) {
-            Ok(rd) => rd
-                .filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().is_some_and(|ext| ext == "jsonl"))
-                .collect(),
-            Err(_) => Vec::new(),
-        };
-        println!("✓ Traces directory ({} log files)", trace_files.len());
+        match list_dir_entries_with_extension(&storage.traces_dir, "jsonl") {
+            Ok(trace_files) => println!("✓ Traces directory ({} log files)", trace_files.len()),
+            Err(e) => println!("⚠ Could not inspect traces directory: {e}"),
+        }
     }
 
     // Detect AI tools
@@ -625,12 +633,7 @@ async fn cmd_doctor() -> Result<()> {
     }
 
     // Check for Aider
-    if std::process::Command::new("which")
-        .arg("aider")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
+    if executable_on_path("aider") {
         detected += 1;
         println!("  ✓ Aider (installed)");
     }
@@ -639,11 +642,7 @@ async fn cmd_doctor() -> Result<()> {
     if std::path::Path::new(&std::env::var("HOME").unwrap_or_default())
         .join(".codex")
         .exists()
-        || std::process::Command::new("which")
-            .arg("codex")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        || executable_on_path("codex")
     {
         detected += 1;
         println!("  ✓ Codex CLI (~/.codex or codex binary found)");
@@ -670,6 +669,102 @@ async fn cmd_doctor() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn list_dir_entries_with_extension(dir: &Path, extension: &str) -> std::io::Result<Vec<PathBuf>> {
+    let mut entries = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.extension().is_some_and(|ext| ext == extension) {
+            entries.push(path);
+        }
+    }
+    entries.sort();
+    Ok(entries)
+}
+
+fn executable_on_path(name: &str) -> bool {
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&paths).any(|dir| {
+        executable_candidates(name).any(|candidate| {
+            let path = dir.join(candidate);
+            is_executable_file(&path)
+        })
+    })
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .metadata()
+            .map(|m| m.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
+}
+
+fn executable_candidates(name: &str) -> impl Iterator<Item = String> + '_ {
+    #[cfg(windows)]
+    {
+        let pathext = std::env::var_os("PATHEXT")
+            .map(|v| v.to_string_lossy().to_string())
+            .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_string());
+        let mut names = vec![name.to_string()];
+        names.extend(
+            pathext
+                .split(';')
+                .filter(|ext| !ext.is_empty())
+                .map(move |ext| format!("{name}{ext}")),
+        );
+        names.into_iter()
+    }
+    #[cfg(not(windows))]
+    {
+        std::iter::once(name.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn executable_detection_requires_execute_bit_on_unix() {
+        let dir = std::env::temp_dir().join(format!(
+            "tellur-path-test-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("codex");
+        std::fs::write(&file, "#!/bin/sh\nexit 0\n").unwrap();
+
+        let old_path = std::env::var_os("PATH");
+        unsafe {
+            std::env::set_var("PATH", &dir);
+        }
+        assert!(!executable_on_path("codex"));
+
+        let mut perms = std::fs::metadata(&file).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&file, perms).unwrap();
+        assert!(executable_on_path("codex"));
+
+        unsafe {
+            match old_path {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 fn cmd_status() -> Result<()> {

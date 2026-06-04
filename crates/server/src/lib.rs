@@ -57,7 +57,26 @@ pub async fn run(config: Config) -> Result<()> {
 }
 
 async fn shutdown_signal() {
-    if tokio::signal::ctrl_c().await.is_ok() {
-        tracing::info!("shutdown signal received");
+    #[cfg(unix)]
+    {
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler");
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => {
+                if result.is_ok() {
+                    tracing::info!("ctrl-c received, shutting down");
+                }
+            }
+            _ = sigterm.recv() => {
+                tracing::info!("SIGTERM received, shutting down");
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            tracing::info!("ctrl-c received, shutting down");
+        }
     }
 }

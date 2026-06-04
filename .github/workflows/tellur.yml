@@ -4,33 +4,26 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
-permissions:
-  contents: read
-  pull-requests: write
-  checks: write
-
 jobs:
-  tellur:
+  report:
     runs-on: ubuntu-latest
-    name: Tellur Provenance Check
+    name: Generate Tellur Provenance Report
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Install Tellur
         run: |
           set -euo pipefail
-          # Download the linux x64 release tarball (CI runner is x64) and extract.
-          url="https://github.com/sydneyvb-nl/tellur/releases/latest/download/tellur-linux-x64.tar.gz"
-          if curl -fsSL "$url" -o tellur.tar.gz; then
-            tar xzf tellur.tar.gz
-            sudo install -m 0755 tellur /usr/local/bin/tellur
-            tellur --version
-          else
-            echo "Tellur not yet released — skipping provenance check." >&2
-            echo "skip=true" >> "$GITHUB_ENV"
-          fi
+          # Use the checked-out code, not a floating external release, so the
+          # PR check is reproducible for this commit.
+          cargo build --release --bin tellur
+          sudo install -m 0755 target/release/tellur /usr/local/bin/tellur
+          tellur --version
 
       - name: Check for Tellur config
         id: check
@@ -49,21 +42,44 @@ jobs:
         # Pass refs via the environment (never interpolate ${{ }} into the shell)
         # so a malicious branch name cannot inject commands. See SEC-1.
         env:
-          BASE_REF: ${{ github.base_ref }}
-          HEAD_REF: ${{ github.head_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          tellur pr-report --base "origin/$BASE_REF" --head "origin/$HEAD_REF" > pr-report.md
+          tellur pr-report --base "$BASE_SHA" --head "$HEAD_SHA" > pr-report.md
           tellur policy check > policy-check.txt 2>&1 || true
 
+      - name: Upload PR report
+        uses: actions/upload-artifact@v4
+        with:
+          name: tellur-pr-report
+          path: |
+            pr-report.md
+            policy-check.txt
+          if-no-files-found: ignore
+
+  comment:
+    runs-on: ubuntu-latest
+    name: Comment Tellur Provenance Report
+    needs: report
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      - name: Download PR report
+        uses: actions/download-artifact@v4
+        with:
+          name: tellur-pr-report
+          path: tellur-report
+        continue-on-error: true
+
       - name: Comment PR
-        if: steps.check.outputs.enabled == 'true'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             let body = '## 🔍 Tellur PR Provenance Check\n\n';
             try {
-              const report = fs.readFileSync('pr-report.md', 'utf8');
+              const report = fs.readFileSync('tellur-report/pr-report.md', 'utf8');
               body += report;
             } catch {
               body += '_No provenance data available yet. Run `tellur watch` locally to start capturing._\n';
