@@ -44,6 +44,7 @@ fn setup() -> Setup {
             1000,
             std::time::Duration::from_secs(60),
         )),
+        metrics: Arc::new(tellur_server::Metrics::new()),
     };
     Setup {
         state,

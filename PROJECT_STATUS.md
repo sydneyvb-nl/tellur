@@ -1,6 +1,6 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-04 (Tier 1 B4 — central policy & export; on feature branch)
+**Last updated:** 2026-06-04 (Tier 1 B5 — scale/ops + policy-pull; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
@@ -11,6 +11,23 @@
 > `docs/THREAT_MODEL.md` updated for the policy-write + export endpoints
 > (disclosure/DoS, policy bodies validated/declarative); and `README.md` now
 > documents the self-hosted hub (preview) instead of saying it's unimplemented.
+>
+> **2026-06-04 — Tier 1 B5 (scale & ops, partial) + policy-pull.** On branch
+> `feat/server-b5-scale-ops`. Added: a `/metrics` Prometheus endpoint (domain
+> counters: ingest/exports/auth-denied/policy-pulls); heavy store ops (org
+> report + both exports) now run via `spawn_blocking` so they don't stall the
+> async runtime; **packaging** — multi-stage `dist/docker/Dockerfile` +
+> `docker-compose.yml` + a CI job that builds the image (docker isn't available
+> locally, so it's verified in CI). Follow-up shipped: **`tellur policy pull`**
+> in the Apache CLI (small `ureq` client, no TLS deps; validates before writing
+> to `.tellur/policies/`) with a live end-to-end test that boots a real hub.
+> Verified: 55 server + 26 CLI tests; workspace 200; clippy + cargo-deny green.
+> **Deferred (with reasons):** the Postgres backend → its own PR (needs a DB +
+> CI service); a persistent/queued job system → lands with Postgres; org-level
+> SLSA/SPDX export → needs the hub to ingest line-level attribution first (the
+> generators take `FileAttribution`, not events), so it is gated on an
+> attribution-ingest feature rather than faking line data. Next: B5-pg
+> (Postgres) then B6 (enterprise/SSO).
 >
 > **2026-06-04 — Tier 1 B4 (central policy & export).** On branch
 > `feat/server-b4-policy-export`. **Central policy distribution:**
@@ -451,8 +468,8 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-191 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
-- server:    53 tests (B0 config/health/errors; B1 Argon2id tokens, org/member
+200 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
+- server:    55 tests (B0 config/health/errors + /metrics; B1 Argon2id tokens, org/member
              auth, hash-chained audit append/verify/tamper/tail-truncation/
              two-connection, authn + BOLA + auth-denied auditing; B2 repo
              get-or-create, per-repo event chain verify/tamper, tenant scoping,
@@ -467,7 +484,7 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
              Antigravity, Windsurf, JetBrains, Devin, Continue, Cline/Roo Code,
              Generic, and the shared import loop incl. envelope inheritance,
              content-block extraction, and command-text recovery)
-- cli:       25 integration tests (version/help/init/doctor/status/sessions/verify/import/setup incl. windsurf/hooks ingest/team report)
+- cli:       26 integration tests (version/help/init/doctor/status/sessions/verify/import/setup incl. windsurf/hooks ingest/team report/policy pull from a live hub)
 - editor:    VS Code — TypeScript compile, 5 unit tests, extension integration tests.
              JetBrains — `editor/tellur-jetbrains` (Kotlin/Gradle, committed wrapper
              pinned to 8.9) builds outside the Rust CI; `./gradlew buildPlugin`
@@ -544,8 +561,10 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
    `.../events`, `.../report`). **B4 ✅** (branch `feat/server-b4-policy-export`):
    central policy distribution (`PUT/GET .../policies[/{name}]`, validated +
    versioned) and an export portal (`GET .../export/events|audit`, admin,
-   rate-limited). Next: **B5 — scale & ops** (Postgres backend, background jobs,
-   packaging).
+   rate-limited). **B5 (partial) ✅** (branch `feat/server-b5-scale-ops`):
+   `/metrics`, heavy-op offload, Docker/Compose packaging + CI build, and the
+   `tellur policy pull` client. Remaining for B5: **Postgres backend + queued
+   jobs** (own PR — needs a DB/CI service). Then **B6** (SSO/RBAC/SCIM).
 9. **Plugin SDK** — requires stable adapter/event API
 
 ---

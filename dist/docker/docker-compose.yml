@@ -1,0 +1,27 @@
+# Example Compose file for self-hosting the Tellur team hub (SQLite-backed).
+# Run from this directory:  docker compose up --build
+#
+# Bootstrap (in another shell) once it's running:
+#   docker compose exec tellur-hub tellur-server admin create-org --name "Acme"
+#   docker compose exec tellur-hub tellur-server admin create-token --org <id> --role admin
+#
+# For production, front this with a TLS-terminating reverse proxy. A Postgres
+# backend + compose service arrives with the scale (B5-pg) work.
+
+services:
+  tellur-hub:
+    build:
+      context: ../..
+      dockerfile: dist/docker/Dockerfile
+    image: tellur-server:dev
+    ports:
+      - "4920:4920"
+    volumes:
+      - tellur-data:/data
+    environment:
+      TELLUR_SERVER_BIND: "0.0.0.0:4920"
+      TELLUR_SERVER_ALLOW_NON_LOOPBACK: "1"
+    restart: unless-stopped
+
+volumes:
+  tellur-data:

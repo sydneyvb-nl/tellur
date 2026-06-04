@@ -25,7 +25,9 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    **reads/report** (`GET .../repos`, `.../events`, `.../report`), **central
    policy distribution** (`PUT/GET .../policies[/{name}]` — admin write of policy
    bodies, validated before storage), and the **export portal**
-   (`GET .../export/events|audit` — admin, org-wide data disclosure).
+   (`GET .../export/events|audit` — admin, org-wide data disclosure). Operational
+   endpoints (`/healthz`, `/readyz`, `/metrics`) are unauthenticated but expose
+   only liveness and aggregate counters — no tenant data.
 4. **Hub → storage** — SQLite/Postgres; tenant isolation enforced here.
 
 ## STRIDE analysis (hub focus)

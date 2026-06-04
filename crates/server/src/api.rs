@@ -24,6 +24,19 @@ const MAX_EVENTS_PER_REQUEST: usize = 1000;
 const DEFAULT_PAGE: u32 = 50;
 const MAX_PAGE: u32 = 200;
 
+/// Run a blocking store operation off the async worker threads, flattening the
+/// join + operation errors into a `ServerError`.
+async fn run_blocking<T, F>(f: F) -> Result<T, ServerError>
+where
+    F: FnOnce() -> anyhow::Result<T> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| ServerError::Internal(anyhow::anyhow!("blocking task failed: {e}")))?
+        .map_err(ServerError::Internal)
+}
+
 /// Verify the caller's org matches the path org; audit + reject otherwise.
 fn ensure_same_org(
     state: &AppState,
@@ -109,6 +122,7 @@ impl FromRequestParts<AppState> for Principal {
 /// Best-effort audit of a rejected authentication attempt. A failure to write
 /// the entry must not turn the 401 into a 500, so it is logged, not propagated.
 fn record_auth_denied(state: &AppState, token_id: Option<&str>) {
+    state.metrics.inc_auth_denied();
     let detail = match token_id {
         Some(id) => format!("token_id={id}"),
         None => "malformed_token".to_string(),
@@ -268,6 +282,7 @@ pub async fn ingest_events(
         .store
         .append_events(&org_id, &repo.id, &events)
         .map_err(ServerError::Internal)?;
+    state.metrics.add_ingested(ids.len() as u64);
 
     state
         .store
@@ -370,10 +385,13 @@ pub async fn org_report(
     if !state.rate_limiter.check(&principal.member_id) {
         return Err(ServerError::TooManyRequests);
     }
-    let report = state
-        .store
-        .org_report(&org_id)
-        .map_err(ServerError::Internal)?;
+    // Run the heavy aggregate off the async worker so it can't stall the runtime.
+    let report = run_blocking({
+        let store = state.store.clone();
+        let org = org_id.clone();
+        move || store.org_report(&org)
+    })
+    .await?;
     state
         .store
         .append_audit(&AuditEntry {
@@ -444,6 +462,7 @@ pub async fn get_policy(
         .get_policy(&org_id, &name)
         .map_err(ServerError::Internal)?
         .ok_or(ServerError::NotFound)?;
+    state.metrics.inc_policy_pull();
     state
         .store
         .append_audit(&AuditEntry {
@@ -470,10 +489,13 @@ pub async fn export_events(
     if !state.rate_limiter.check(&principal.member_id) {
         return Err(ServerError::TooManyRequests);
     }
-    let events = state
-        .store
-        .export_events(&org_id)
-        .map_err(ServerError::Internal)?;
+    let events = run_blocking({
+        let store = state.store.clone();
+        let org = org_id.clone();
+        move || store.export_events(&org)
+    })
+    .await?;
+    state.metrics.inc_export();
     state
         .store
         .append_audit(&AuditEntry {
@@ -502,14 +524,17 @@ pub async fn export_audit(
     if !state.rate_limiter.check(&principal.member_id) {
         return Err(ServerError::TooManyRequests);
     }
-    let entries = state
-        .store
-        .export_audit(&org_id)
-        .map_err(ServerError::Internal)?;
-    let chain_intact = state
-        .store
-        .verify_audit_chain()
-        .map_err(ServerError::Internal)?;
+    let (entries, chain_intact) = run_blocking({
+        let store = state.store.clone();
+        let org = org_id.clone();
+        move || {
+            let entries = store.export_audit(&org)?;
+            let chain_intact = store.verify_audit_chain()?;
+            Ok((entries, chain_intact))
+        }
+    })
+    .await?;
+    state.metrics.inc_export();
     state
         .store
         .append_audit(&AuditEntry {

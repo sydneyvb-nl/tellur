@@ -463,10 +463,20 @@ Authenticated, org-scoped API (Bearer token): provenance ingest
 re-verified per-repo hash chain), reads (`GET .../repos`, `.../events`,
 `.../report`), central policy distribution (`PUT/GET .../policies[/{name}]`), and
 an admin export portal (`GET .../export/events|audit`). Cross-org access is
-denied and audited; the audit log is itself tamper-evident.
+denied and audited; the audit log is itself tamper-evident. Operational
+endpoints `GET /healthz`, `/readyz`, and `/metrics` (Prometheus) need no auth and
+expose no tenant data.
 
-Implemented through milestone B4 (identity/tenancy, ingest, read/report, policy &
-export). Postgres scaling, packaging, and SSO are upcoming (B5–B6).
+Pull a central policy into a repo, and run the hub in Docker:
+
+```bash
+tellur policy pull --org <org-id> --hub http://hub:4920 --token <token>
+docker compose -f dist/docker/docker-compose.yml up --build
+```
+
+Implemented through milestone B5 (identity/tenancy, ingest, read/report, policy &
+export, metrics, packaging, `policy pull`). A Postgres backend and SSO are
+upcoming.
 
 ## Development
 

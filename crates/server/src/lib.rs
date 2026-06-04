@@ -12,6 +12,7 @@ pub mod app;
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod metrics;
 pub mod ratelimit;
 pub mod storage;
 
@@ -19,6 +20,7 @@ pub use app::{AppState, build_router};
 pub use auth::{Principal, Role};
 pub use config::Config;
 pub use error::ServerError;
+pub use metrics::Metrics;
 
 use std::sync::Arc;
 
@@ -36,6 +38,7 @@ pub fn build_state(config: Config) -> Result<AppState> {
             120,
             std::time::Duration::from_secs(60),
         )),
+        metrics: Arc::new(metrics::Metrics::new()),
     })
 }
 

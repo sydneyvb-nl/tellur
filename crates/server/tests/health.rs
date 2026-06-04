@@ -24,6 +24,7 @@ fn test_state() -> AppState {
             1000,
             std::time::Duration::from_secs(60),
         )),
+        metrics: Arc::new(tellur_server::Metrics::new()),
     }
 }
 
@@ -62,6 +63,25 @@ async fn readyz_returns_ready_when_store_healthy() {
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(json["status"], "ready");
+}
+
+#[tokio::test]
+async fn metrics_endpoint_exposes_counters() {
+    let app = build_router(test_state());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/metrics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(text.contains("tellur_ingest_events_total"));
+    assert!(text.contains("# TYPE tellur_exports_total counter"));
 }
 
 #[tokio::test]

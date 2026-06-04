@@ -21,3 +21,6 @@ chrono = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 notify = "6"
 ctrlc = "3"
+# Small blocking HTTP client for `tellur policy pull` (no TLS deps; use http to a
+# loopback/self-hosted hub, or front it with a TLS-terminating proxy).
+ureq = { version = "2", default-features = false }
