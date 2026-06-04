@@ -12,7 +12,7 @@ use super::{AuditEntry, IngestEvent, Org, OrgReport, Repo, RepoSummary, Store, S
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
-const SCHEMA_VERSION: &str = "4";
+const SCHEMA_VERSION: &str = "5";
 
 /// A SQLite-backed store. The connection is behind a `Mutex` so the store is
 /// `Send + Sync` and usable as `Arc<dyn Store>`.
@@ -150,6 +150,8 @@ impl Store for SqliteStore {
                  entry_hash TEXT NOT NULL
              );
              CREATE INDEX IF NOT EXISTS idx_event_repo ON event(repo_id, seq);
+             -- Speeds up org-scoped aggregates in org_report.
+             CREATE INDEX IF NOT EXISTS idx_event_org ON event(org_id);
              -- Per-repo chain head + length checkpoint, so tail truncation /
              -- rollback of a repo's event log is detectable.
              CREATE TABLE IF NOT EXISTS event_head (
@@ -515,6 +517,9 @@ impl Store for SqliteStore {
         let mut out = Vec::new();
         for row in rows {
             let (seq, id, session_id, timestamp, event_type, actor, payload_str) = row?;
+            // Surface integrity problems instead of masking them as `null`.
+            let payload = serde_json::from_str(&payload_str)
+                .with_context(|| format!("corrupt event payload for event {id}"))?;
             out.push(StoredEvent {
                 seq,
                 id,
@@ -522,7 +527,7 @@ impl Store for SqliteStore {
                 timestamp,
                 event_type,
                 actor,
-                payload: serde_json::from_str(&payload_str).unwrap_or(serde_json::Value::Null),
+                payload,
             });
         }
         Ok(out)
@@ -807,6 +812,22 @@ mod tests {
         assert_eq!(report.by_type.get("file.write"), Some(&3));
         assert_eq!(report.by_actor.get("agent"), Some(&3));
         assert_eq!(report.repos.len(), 1);
+    }
+
+    #[test]
+    fn list_events_errors_on_corrupt_payload() {
+        let s = store();
+        let org = s.create_org("Acme").unwrap();
+        let repo = s.ensure_repo(&org.id, "app").unwrap();
+        s.append_events(&org.id, &repo.id, &[ingest_event("a")])
+            .unwrap();
+        {
+            let conn = s.conn().unwrap();
+            conn.execute("UPDATE event SET payload = 'not json'", [])
+                .unwrap();
+        }
+        // Corruption is surfaced as an error, not masked as null.
+        assert!(s.list_events(&org.id, &repo.id, 10, None).is_err());
     }
 
     #[test]

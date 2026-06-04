@@ -18,6 +18,13 @@
 > deny green. Dashboard wiring (`web/`) deferred to a follow-up. Next: B4
 > (central policy & export).
 >
+> **2026-06-04 — B3 review fixes (Codex).** Addressed 4 P2 findings on PR #4:
+> successful event reads are now audited; `Principal` is extracted before
+> `Query` so auth/tenant checks (401/403) precede query-param parsing (400);
+> corrupt stored payloads surface as an error instead of `null`; and the org
+> report is rate-limited + index-backed (`idx_event_org`, schema v5) with a
+> job-backed path noted for B5. 47 server tests; workspace 191.
+>
 > **2026-06-03 — Tier 1 B2 (ingest & verify).** On branch
 > `feat/server-b2-ingest`. Added authenticated provenance ingest:
 > `POST /v1/orgs/{org}/repos/{repo}/events` (contributor+ role, cross-tenant →
@@ -416,8 +423,8 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-188 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
-- server:    44 tests (B0 config/health/errors; B1 Argon2id tokens, org/member
+191 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
+- server:    47 tests (B0 config/health/errors; B1 Argon2id tokens, org/member
              auth, hash-chained audit append/verify/tamper/tail-truncation/
              two-connection, authn + BOLA + auth-denied auditing; B2 repo
              get-or-create, per-repo event chain verify/tamper, tenant scoping,

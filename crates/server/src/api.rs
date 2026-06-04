@@ -294,13 +294,20 @@ pub struct ListEventsParams {
 }
 
 /// `GET /v1/orgs/{org}/repos/{repo}/events` — newest-first, paginated.
+///
+/// `principal` is extracted before `Query` so authentication/tenant checks run
+/// before query-parameter parsing (a bad `?limit` must not turn a 401 into a 400
+/// or skip the cross-org denial audit).
 pub async fn list_events(
     State(state): State<AppState>,
     Path((org_id, repo)): Path<(String, String)>,
-    Query(params): Query<ListEventsParams>,
     principal: Principal,
+    Query(params): Query<ListEventsParams>,
 ) -> Result<Json<Value>, ServerError> {
     ensure_same_org(&state, &principal, &org_id, "list_events")?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
     let repo = state
         .store
         .find_repo(&org_id, &repo)
@@ -311,6 +318,16 @@ pub async fn list_events(
     let events = state
         .store
         .list_events(&org_id, &repo.id, limit, params.before)
+        .map_err(ServerError::Internal)?;
+
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id),
+            actor_member_id: Some(principal.member_id.clone()),
+            action: "events.read".to_string(),
+            detail: format!("repo={} count={}", repo.id, events.len()),
+        })
         .map_err(ServerError::Internal)?;
 
     // Cursor for the next page: the seq of the last row, only if the page is full.
@@ -333,6 +350,10 @@ pub async fn org_report(
     principal: Principal,
 ) -> Result<Json<Value>, ServerError> {
     ensure_same_org(&state, &principal, &org_id, "report")?;
+    // The org report runs full aggregates; rate-limit it to bound the cost.
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
     let report = state
         .store
         .org_report(&org_id)
