@@ -208,8 +208,10 @@ Each phase ships independently, behind config, with its own tests + docs.
   `POST /v1/orgs/{org}/repos/{repo}/events` (contributor+; cross-tenant → 403);
   hub recomputes the per-repo hash chain (`hash_event`); inbound payloads are
   secret-redacted; 1 MiB body cap + max-events cap + per-member rate limit (429).
-- **B3 — Read & report.** Repo/session/attribution reads; server-side team
-  report across repos; reuse `web/` dashboard against multi-repo endpoints.
+- **B3 — Read & report.** ✅ Done (branch `feat/server-b3-read-report`).
+  Tenant-scoped `GET .../repos`, `GET .../repos/{repo}/events` (cursor
+  pagination), and `GET .../report` (org rollup across repos). Reusing the
+  `web/` dashboard against these endpoints is deferred to a follow-up.
 - **B4 — Central policy & export.** `tellur policy pull`; org-level
   SLSA/SPDX/audit export portal.
 - **B5 — Scale & ops.** Postgres backend, background jobs, pagination, metrics,
