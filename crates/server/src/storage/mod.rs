@@ -97,6 +97,14 @@ pub struct PolicySummary {
     pub updated_at: String,
 }
 
+/// A per-repo role grant: a member's elevated role on a specific repo.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RepoRoleGrant {
+    pub member_id: String,
+    pub role: String,
+    pub updated_at: String,
+}
+
 /// An audit-log record (read model for the export portal).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AuditRecord {
@@ -149,6 +157,23 @@ pub trait Store: Send + Sync {
     /// Look up a repo by `(org_id, repo ref)` without creating it. The ref may
     /// be the stable repo id or the human-readable repo name.
     fn find_repo(&self, org_id: &str, repo: &str) -> Result<Option<Repo>>;
+
+    // ─── Fine-grained per-repo RBAC (additive grants) ────────────────────────
+
+    /// Grant (or update) a member's per-repo role. Both the repo and the member
+    /// must belong to `org_id`. Grants are **additive**: a member's effective
+    /// role on a repo is `max(org_role, repo_grant)`.
+    fn set_repo_role(&self, org_id: &str, repo_id: &str, member_id: &str, role: Role)
+    -> Result<()>;
+
+    /// Remove a member's per-repo grant. Returns `true` if a grant existed.
+    fn remove_repo_role(&self, org_id: &str, repo_id: &str, member_id: &str) -> Result<bool>;
+
+    /// The member's per-repo grant for a repo, if any (tenant-scoped).
+    fn get_repo_role(&self, org_id: &str, repo_id: &str, member_id: &str) -> Result<Option<Role>>;
+
+    /// List all per-repo grants for a repo (tenant-scoped).
+    fn list_repo_roles(&self, org_id: &str, repo_id: &str) -> Result<Vec<RepoRoleGrant>>;
 
     /// Append events to a repo's chain. The hub assigns ids and recomputes the
     /// per-repo hash chain (clients cannot forge provenance). Returns new ids.

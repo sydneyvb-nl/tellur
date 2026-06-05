@@ -1,11 +1,31 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-05 (Tier 1 B5 Postgres backend; on feature branch)
+**Last updated:** 2026-06-05 (Tier 1 B6 per-repo RBAC; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-05 — Tier 1 B6 (enterprise) — fine-grained per-repo RBAC.** On
+> branch `feat/server-b6-repo-rbac`. First slice of B6: per-repo role grants on
+> top of the org-level RBAC. Grants are **additive** — a member's effective role
+> on a repo is `max(org_role, repo_grant)`, so a grant can elevate (e.g. an org
+> viewer becomes a contributor or admin on one repo) but never reduces a member
+> below their org baseline. New `repo_role` table (schema v8, both SQLite and
+> Postgres backends), `Store` methods (`set/get/remove/list_repo_role(s)`,
+> tenant-scoped: the repo *and* the member must belong to the org → no
+> cross-tenant grants), `Role::max`, and an `effective_role` helper used by the
+> write/export handlers (event + attribution ingest honour per-repo contributor
+> grants; per-repo SLSA/SPDX export honours per-repo admin grants). Management
+> endpoints (org-admin only, audited): `PUT/DELETE /v1/orgs/{org}/repos/{repo}/
+> roles/{member}` + `GET .../roles`, plus `tellur-server admin
+> grant-repo-role|revoke-repo-role|list-repo-roles`. Verified: new
+> `tests/repo_rbac.rs` (grant elevates a viewer, scope is per-repo, revoke
+> restores baseline, per-repo admin export, admin-only + tenant-scoped
+> management) + Postgres parity in `tests/postgres.rs`; 223 workspace tests;
+> clippy -D warnings + cargo-deny green; PG tests pass against a local Postgres.
+> Next B6 slices: OIDC SSO, then SCIM.
+>
 > **2026-06-05 — Tier 1 B5 Postgres backend.** On branch `feat/server-postgres`.
 > The hub now has a second storage backend: `PostgresStore`
 > (`crates/server/src/storage/postgres.rs`) implements the full `Store` trait
@@ -631,8 +651,11 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
    ingested line-level attribution. **Postgres backend ✅** (branch
    `feat/server-postgres`): `PostgresStore` (r2d2 pool, NoTls) behind the same
    `Store` trait, selected via `TELLUR_DATABASE_URL`, with a `postgres:16` CI
-   service running the integration tests. Remaining: **queued/durable jobs**.
-   Then **B6** (SSO/RBAC/SCIM).
+   service running the integration tests. **B6 (enterprise) in progress:**
+   **fine-grained per-repo RBAC ✅** (branch `feat/server-b6-repo-rbac`) —
+   additive per-repo role grants (`max(org_role, grant)`) + admin management
+   endpoints/CLI; remaining B6 slices: **OIDC SSO**, then **SCIM**. Also still
+   open: **queued/durable jobs**.
 9. **Plugin SDK** — requires stable adapter/event API
 
 ---

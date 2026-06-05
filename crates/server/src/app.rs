@@ -48,6 +48,14 @@ pub fn build_router(state: AppState) -> Router {
             post(crate::api::ingest_attributions),
         )
         .route(
+            "/v1/orgs/{org_id}/repos/{repo}/roles",
+            get(crate::api::list_repo_roles),
+        )
+        .route(
+            "/v1/orgs/{org_id}/repos/{repo}/roles/{member_id}",
+            put(crate::api::set_repo_role).delete(crate::api::remove_repo_role),
+        )
+        .route(
             "/v1/orgs/{org_id}/repos/{repo}/export/slsa",
             get(crate::api::export_slsa),
         )

@@ -50,6 +50,34 @@ enum AdminAction {
         #[arg(long)]
         file: std::path::PathBuf,
     },
+    /// Grant a member an additive per-repo role.
+    GrantRepoRole {
+        #[arg(long)]
+        org: String,
+        /// Repo id or name.
+        #[arg(long)]
+        repo: String,
+        #[arg(long)]
+        member: String,
+        #[arg(long, value_enum)]
+        role: AdminRoleArg,
+    },
+    /// Revoke a member's per-repo role grant.
+    RevokeRepoRole {
+        #[arg(long)]
+        org: String,
+        #[arg(long)]
+        repo: String,
+        #[arg(long)]
+        member: String,
+    },
+    /// List per-repo role grants for a repo.
+    ListRepoRoles {
+        #[arg(long)]
+        org: String,
+        #[arg(long)]
+        repo: String,
+    },
 }
 
 #[tokio::main]
@@ -116,6 +144,66 @@ fn run_admin(config: Config, action: AdminAction) -> Result<()> {
                 detail: format!("name={name} version={version} via=admin-cli"),
             })?;
             println!("Stored policy \"{name}\" version {version}");
+        }
+        AdminAction::GrantRepoRole {
+            org,
+            repo,
+            member,
+            role,
+        } => {
+            let role = role.as_role();
+            let repo = store
+                .find_repo(&org, &repo)?
+                .ok_or_else(|| anyhow::anyhow!("repo {repo} not found in org {org}"))?;
+            store.set_repo_role(&org, &repo.id, &member, role)?;
+            store.append_audit(&AuditEntry {
+                org_id: Some(org),
+                actor_member_id: None,
+                action: "repo_role.set".to_string(),
+                detail: format!(
+                    "repo={} member={member} role={} via=admin-cli",
+                    repo.id,
+                    role.as_str()
+                ),
+            })?;
+            println!(
+                "Granted member {member} role {} on repo {}",
+                role.as_str(),
+                repo.id
+            );
+        }
+        AdminAction::RevokeRepoRole { org, repo, member } => {
+            let repo = store
+                .find_repo(&org, &repo)?
+                .ok_or_else(|| anyhow::anyhow!("repo {repo} not found in org {org}"))?;
+            let removed = store.remove_repo_role(&org, &repo.id, &member)?;
+            store.append_audit(&AuditEntry {
+                org_id: Some(org),
+                actor_member_id: None,
+                action: "repo_role.remove".to_string(),
+                detail: format!(
+                    "repo={} member={member} removed={removed} via=admin-cli",
+                    repo.id
+                ),
+            })?;
+            println!("Revoke on repo {}: removed={removed}", repo.id);
+        }
+        AdminAction::ListRepoRoles { org, repo } => {
+            let repo = store
+                .find_repo(&org, &repo)?
+                .ok_or_else(|| anyhow::anyhow!("repo {repo} not found in org {org}"))?;
+            let grants = store.list_repo_roles(&org, &repo.id)?;
+            if grants.is_empty() {
+                println!("No per-repo grants on repo {}", repo.id);
+            } else {
+                println!("Per-repo grants on repo {}:", repo.id);
+                for g in grants {
+                    println!(
+                        "  member={} role={} updated_at={}",
+                        g.member_id, g.role, g.updated_at
+                    );
+                }
+            }
         }
     }
     Ok(())

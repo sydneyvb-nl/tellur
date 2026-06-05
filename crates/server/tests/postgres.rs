@@ -182,6 +182,45 @@ fn full_store_surface() {
     assert_eq!(store.list_policies(&org_a.id).unwrap().len(), 1);
     assert!(store.get_policy(&org_b.id, "default").unwrap().is_none());
 
+    // ── Per-repo RBAC (additive grants) ──────────────────────────────────────
+    let viewer = store.create_member(&org_a.id, "vic", Role::Viewer).unwrap();
+    assert!(
+        store
+            .get_repo_role(&org_a.id, &repo.id, &viewer)
+            .unwrap()
+            .is_none()
+    );
+    store
+        .set_repo_role(&org_a.id, &repo.id, &viewer, Role::Contributor)
+        .unwrap();
+    assert_eq!(
+        store.get_repo_role(&org_a.id, &repo.id, &viewer).unwrap(),
+        Some(Role::Contributor)
+    );
+    // Upsert: re-granting changes the role in place.
+    store
+        .set_repo_role(&org_a.id, &repo.id, &viewer, Role::Admin)
+        .unwrap();
+    let grants = store.list_repo_roles(&org_a.id, &repo.id).unwrap();
+    assert_eq!(grants.len(), 1);
+    assert_eq!(grants[0].role, "admin");
+    // Cross-tenant grants are refused (repo not in org_b).
+    assert!(
+        store
+            .set_repo_role(&org_b.id, &repo.id, &viewer, Role::Admin)
+            .is_err()
+    );
+    assert!(
+        store
+            .remove_repo_role(&org_a.id, &repo.id, &viewer)
+            .unwrap()
+    );
+    assert!(
+        !store
+            .remove_repo_role(&org_a.id, &repo.id, &viewer)
+            .unwrap()
+    );
+
     // ── Export portal ───────────────────────────────────────────────────────
     assert_eq!(store.export_events(&org_a.id).unwrap().len(), 3);
 
