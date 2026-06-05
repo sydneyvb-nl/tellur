@@ -227,3 +227,31 @@ fn tampering_breaks_event_chain() {
         "tampered payload must break the chain"
     );
 }
+
+#[test]
+fn health_check_requires_migrated_schema() {
+    let url = match std::env::var("TELLUR_TEST_DATABASE_URL") {
+        Ok(u) => u,
+        Err(_) => {
+            eprintln!("skipping: TELLUR_TEST_DATABASE_URL not set");
+            return;
+        }
+    };
+    let _guard = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    // Reachable but unmigrated: readiness must report not-ready, otherwise the
+    // backend would later fail real requests with missing-table errors.
+    let mut admin = Client::connect(&url, NoTls).expect("connect");
+    admin
+        .batch_execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+        .expect("reset schema");
+    let store = PostgresStore::connect(&url).expect("pool");
+    assert!(
+        store.health_check().is_err(),
+        "unmigrated schema must fail the health check"
+    );
+
+    // After migration the same check passes.
+    store.migrate().unwrap();
+    assert!(store.health_check().is_ok());
+}

@@ -6,9 +6,6 @@
 //! across pooled connections (the Postgres equivalent of SQLite's
 //! `BEGIN IMMEDIATE`). Uses `NoTls`: run behind a TLS-terminating proxy.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-
 use anyhow::{Context, Result, bail};
 use r2d2_postgres::PostgresConnectionManager;
 use r2d2_postgres::postgres::NoTls;
@@ -49,10 +46,17 @@ impl PostgresStore {
 }
 
 /// Derive a stable 64-bit advisory-lock key from a chain scope string.
+///
+/// Must be deterministic **across builds and Rust releases**: in a horizontally
+/// scaled / rolling deploy, every hub process has to map the same scope to the
+/// same lock integer, otherwise two writers could lock different keys for the
+/// same chain and append from the same head concurrently. `DefaultHasher` makes
+/// no such cross-version guarantee, so we derive the key from SHA-256 (via the
+/// core `hash_content`) truncated to 64 bits.
 fn advisory_key(scope: &str) -> i64 {
-    let mut h = DefaultHasher::new();
-    scope.hash(&mut h);
-    h.finish() as i64
+    let hex = ids::hash_content(scope);
+    let bytes = u64::from_str_radix(&hex[..16], 16).expect("hash_content returns hex");
+    bytes as i64
 }
 
 /// Read a chain head (tip hash + length) within a transaction, or genesis.
@@ -145,8 +149,16 @@ impl Store for PostgresStore {
     }
 
     fn health_check(&self) -> Result<()> {
+        // Verify the schema is migrated (not just that the DB is reachable), so
+        // a connected-but-unmigrated backend reports not-ready instead of
+        // failing real requests with missing-table errors.
         let mut client = self.client()?;
-        client.query_one("SELECT 1", &[]).context("health check")?;
+        client
+            .query_one(
+                "SELECT value FROM schema_meta WHERE key = 'schema_version'",
+                &[],
+            )
+            .context("database health check failed")?;
         Ok(())
     }
 
@@ -523,13 +535,18 @@ impl Store for PostgresStore {
             .get(0);
         let by_type = group_counts(&mut client, "event_type", org_id)?;
         let by_actor = group_counts(&mut client, "actor", org_id)?;
+        // Return this connection to the pool before `list_repos` checks out a
+        // second one; otherwise concurrent reports (>= pool size) could each
+        // hold one connection while waiting for another, deadlocking the pool.
+        drop(client);
+        let repos = self.list_repos(org_id)?;
         Ok(OrgReport {
             org_id: org_id.to_string(),
             total_events: total_events as u64,
             distinct_sessions: distinct_sessions as u64,
             by_type,
             by_actor,
-            repos: self.list_repos(org_id)?,
+            repos,
         })
     }
 
