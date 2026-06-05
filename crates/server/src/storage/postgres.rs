@@ -1,0 +1,774 @@
+//! Postgres implementation of [`Store`] — the horizontally-scalable backend.
+//!
+//! Mirrors `SqliteStore` semantics exactly (same hash chains, tenant scoping,
+//! and tamper-evidence) over a connection pool. Chain appends take a per-scope
+//! `pg_advisory_xact_lock` so the read-head + insert + head-update are atomic
+//! across pooled connections (the Postgres equivalent of SQLite's
+//! `BEGIN IMMEDIATE`). Uses `NoTls`: run behind a TLS-terminating proxy.
+
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
+use anyhow::{Context, Result, bail};
+use r2d2_postgres::PostgresConnectionManager;
+use r2d2_postgres::postgres::NoTls;
+use r2d2_postgres::postgres::types::ToSql;
+use tellur_core::schema::ids;
+use tellur_core::schema::types::FileAttribution;
+
+use super::{
+    AuditEntry, AuditRecord, IngestEvent, Org, OrgReport, PolicyDoc, PolicySummary, Repo,
+    RepoSummary, Store, StoredEvent,
+};
+use crate::auth::{self, GeneratedToken, Principal, Role};
+
+type Pool = r2d2::Pool<PostgresConnectionManager<NoTls>>;
+type PooledClient = r2d2::PooledConnection<PostgresConnectionManager<NoTls>>;
+
+/// A Postgres-backed store.
+pub struct PostgresStore {
+    pool: Pool,
+}
+
+impl PostgresStore {
+    /// Connect to `database_url` and build a connection pool.
+    pub fn connect(database_url: &str) -> Result<Self> {
+        let config: r2d2_postgres::postgres::Config = database_url
+            .parse()
+            .with_context(|| "invalid Postgres connection string")?;
+        let manager = PostgresConnectionManager::new(config, NoTls);
+        let pool = r2d2::Pool::builder()
+            .build(manager)
+            .context("failed to build Postgres connection pool")?;
+        Ok(Self { pool })
+    }
+
+    fn client(&self) -> Result<PooledClient> {
+        self.pool.get().context("failed to get Postgres connection")
+    }
+}
+
+/// Derive a stable 64-bit advisory-lock key from a chain scope string.
+fn advisory_key(scope: &str) -> i64 {
+    let mut h = DefaultHasher::new();
+    scope.hash(&mut h);
+    h.finish() as i64
+}
+
+/// Read a chain head (tip hash + length) within a transaction, or genesis.
+fn read_head(
+    tx: &mut r2d2_postgres::postgres::Transaction,
+    sql: &str,
+    key: &(dyn ToSql + Sync),
+) -> Result<(String, i64)> {
+    match tx.query_opt(sql, &[key])? {
+        Some(row) => Ok((row.get(0), row.get(1))),
+        None => Ok((String::new(), 0)),
+    }
+}
+
+impl Store for PostgresStore {
+    fn migrate(&self) -> Result<()> {
+        let mut client = self.client()?;
+        client
+            .batch_execute(
+                "CREATE TABLE IF NOT EXISTS schema_meta (
+                     key TEXT PRIMARY KEY, value TEXT NOT NULL
+                 );
+                 CREATE TABLE IF NOT EXISTS org (
+                     id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL
+                 );
+                 CREATE TABLE IF NOT EXISTS member (
+                     id TEXT PRIMARY KEY,
+                     org_id TEXT NOT NULL REFERENCES org(id),
+                     display_name TEXT NOT NULL, role TEXT NOT NULL, created_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_member_org ON member(org_id);
+                 CREATE TABLE IF NOT EXISTS api_token (
+                     token_id TEXT PRIMARY KEY,
+                     member_id TEXT NOT NULL REFERENCES member(id),
+                     secret_hash TEXT NOT NULL, created_at TEXT NOT NULL
+                 );
+                 CREATE TABLE IF NOT EXISTS audit_log (
+                     seq BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                     ts TEXT NOT NULL, org_id TEXT, actor_member_id TEXT,
+                     action TEXT NOT NULL, detail TEXT NOT NULL,
+                     prev_hash TEXT NOT NULL, entry_hash TEXT NOT NULL
+                 );
+                 CREATE TABLE IF NOT EXISTS audit_head (
+                     id INTEGER PRIMARY KEY CHECK (id = 1),
+                     head_hash TEXT NOT NULL, entry_count BIGINT NOT NULL
+                 );
+                 CREATE TABLE IF NOT EXISTS repo (
+                     id TEXT PRIMARY KEY,
+                     org_id TEXT NOT NULL REFERENCES org(id),
+                     name TEXT NOT NULL, created_at TEXT NOT NULL,
+                     UNIQUE (org_id, name)
+                 );
+                 CREATE TABLE IF NOT EXISTS event (
+                     seq BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                     id TEXT NOT NULL UNIQUE,
+                     org_id TEXT NOT NULL,
+                     repo_id TEXT NOT NULL REFERENCES repo(id),
+                     session_id TEXT NOT NULL, ts TEXT NOT NULL,
+                     event_type TEXT NOT NULL, actor TEXT NOT NULL, payload TEXT NOT NULL,
+                     prev_hash TEXT NOT NULL, entry_hash TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_event_repo ON event(repo_id, seq);
+                 CREATE INDEX IF NOT EXISTS idx_event_org ON event(org_id);
+                 CREATE TABLE IF NOT EXISTS event_head (
+                     repo_id TEXT PRIMARY KEY REFERENCES repo(id),
+                     head_hash TEXT NOT NULL, entry_count BIGINT NOT NULL
+                 );
+                 CREATE TABLE IF NOT EXISTS policy (
+                     org_id TEXT NOT NULL REFERENCES org(id),
+                     name TEXT NOT NULL, content TEXT NOT NULL,
+                     version BIGINT NOT NULL, updated_at TEXT NOT NULL,
+                     PRIMARY KEY (org_id, name)
+                 );
+                 CREATE TABLE IF NOT EXISTS attribution (
+                     org_id TEXT NOT NULL, repo_id TEXT NOT NULL REFERENCES repo(id),
+                     file_path TEXT NOT NULL, git_blob_sha TEXT NOT NULL,
+                     ranges_json TEXT NOT NULL, updated_at TEXT NOT NULL,
+                     PRIMARY KEY (org_id, repo_id, file_path)
+                 );",
+            )
+            .context("failed to create schema")?;
+        client
+            .execute(
+                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '7')
+                 ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                &[],
+            )
+            .context("failed to record schema version")?;
+        Ok(())
+    }
+
+    fn health_check(&self) -> Result<()> {
+        let mut client = self.client()?;
+        client.query_one("SELECT 1", &[]).context("health check")?;
+        Ok(())
+    }
+
+    fn create_org(&self, name: &str) -> Result<Org> {
+        let org = Org {
+            id: ids::generate_id("org"),
+            name: name.to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+        self.client()?
+            .execute(
+                "INSERT INTO org (id, name, created_at) VALUES ($1, $2, $3)",
+                &[&org.id, &org.name, &org.created_at],
+            )
+            .context("failed to create org")?;
+        Ok(org)
+    }
+
+    fn create_member(&self, org_id: &str, display_name: &str, role: Role) -> Result<String> {
+        let member_id = ids::generate_id("mbr");
+        self.client()?
+            .execute(
+                "INSERT INTO member (id, org_id, display_name, role, created_at)
+                 VALUES ($1, $2, $3, $4, $5)",
+                &[
+                    &member_id,
+                    &org_id,
+                    &display_name,
+                    &role.as_str(),
+                    &chrono::Utc::now().to_rfc3339(),
+                ],
+            )
+            .context("failed to create member (does the org exist?)")?;
+        Ok(member_id)
+    }
+
+    fn create_token(&self, member_id: &str) -> Result<GeneratedToken> {
+        let token = auth::generate_token()?;
+        self.client()?
+            .execute(
+                "INSERT INTO api_token (token_id, member_id, secret_hash, created_at)
+                 VALUES ($1, $2, $3, $4)",
+                &[
+                    &token.token_id,
+                    &member_id,
+                    &token.secret_hash,
+                    &chrono::Utc::now().to_rfc3339(),
+                ],
+            )
+            .context("failed to create token (does the member exist?)")?;
+        Ok(token)
+    }
+
+    fn authenticate(&self, token: &str) -> Result<Option<Principal>> {
+        let Some((token_id, secret)) = auth::parse_token(token) else {
+            return Ok(None);
+        };
+        let row = self.client()?.query_opt(
+            "SELECT t.secret_hash, m.id, m.org_id, m.role
+             FROM api_token t JOIN member m ON m.id = t.member_id
+             WHERE t.token_id = $1",
+            &[&token_id],
+        )?;
+        let Some(row) = row else { return Ok(None) };
+        let secret_hash: String = row.get(0);
+        if !auth::verify_secret(&secret, &secret_hash) {
+            return Ok(None);
+        }
+        Ok(Some(Principal {
+            org_id: row.get(2),
+            member_id: row.get(1),
+            role: Role::parse(&row.get::<_, String>(3))?,
+        }))
+    }
+
+    fn ensure_repo(&self, org_id: &str, name: &str) -> Result<Repo> {
+        let id = ids::generate_id("repo");
+        let mut client = self.client()?;
+        client
+            .execute(
+                "INSERT INTO repo (id, org_id, name, created_at) VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (org_id, name) DO NOTHING",
+                &[&id, &org_id, &name, &chrono::Utc::now().to_rfc3339()],
+            )
+            .context("failed to create repo")?;
+        let real_id: String = client
+            .query_one(
+                "SELECT id FROM repo WHERE org_id = $1 AND name = $2",
+                &[&org_id, &name],
+            )?
+            .get(0);
+        Ok(Repo {
+            id: real_id,
+            org_id: org_id.to_string(),
+            name: name.to_string(),
+        })
+    }
+
+    fn find_repo(&self, org_id: &str, repo: &str) -> Result<Option<Repo>> {
+        let mut client = self.client()?;
+        let row = client.query_opt(
+            "SELECT id, name FROM repo WHERE org_id = $1 AND (id = $2 OR name = $2)
+             ORDER BY (id = $2) DESC LIMIT 1",
+            &[&org_id, &repo],
+        )?;
+        Ok(row.map(|r| Repo {
+            id: r.get(0),
+            org_id: org_id.to_string(),
+            name: r.get(1),
+        }))
+    }
+
+    fn append_events(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        events: &[IngestEvent],
+    ) -> Result<Vec<String>> {
+        let mut client = self.client()?;
+        let mut tx = client.transaction()?;
+        tx.execute(
+            "SELECT pg_advisory_xact_lock($1)",
+            &[&advisory_key(&format!("event:{repo_id}"))],
+        )?;
+
+        let belongs = tx
+            .query_opt(
+                "SELECT 1 FROM repo WHERE id = $1 AND org_id = $2",
+                &[&repo_id, &org_id],
+            )?
+            .is_some();
+        if !belongs {
+            bail!("repo {repo_id} not found in org {org_id}");
+        }
+
+        let (mut prev, mut count) = read_head(
+            &mut tx,
+            "SELECT head_hash, entry_count FROM event_head WHERE repo_id = $1",
+            &repo_id,
+        )?;
+
+        let mut new_ids = Vec::with_capacity(events.len());
+        for ev in events {
+            let id = ids::generate_event_id();
+            let prev_opt = (!prev.is_empty()).then_some(prev.as_str());
+            let entry_hash = ids::hash_event(
+                &id,
+                &ev.session_id,
+                &ev.timestamp,
+                &ev.event_type,
+                &ev.actor,
+                &ev.payload,
+                prev_opt,
+            );
+            let payload_str = serde_json::to_string(&ev.payload)?;
+            tx.execute(
+                "INSERT INTO event
+                     (id, org_id, repo_id, session_id, ts, event_type, actor, payload,
+                      prev_hash, entry_hash)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                &[
+                    &id,
+                    &org_id,
+                    &repo_id,
+                    &ev.session_id,
+                    &ev.timestamp,
+                    &ev.event_type,
+                    &ev.actor,
+                    &payload_str,
+                    &prev,
+                    &entry_hash,
+                ],
+            )
+            .context("failed to insert event")?;
+            prev = entry_hash;
+            count += 1;
+            new_ids.push(id);
+        }
+        tx.execute(
+            "INSERT INTO event_head (repo_id, head_hash, entry_count) VALUES ($1, $2, $3)
+             ON CONFLICT (repo_id) DO UPDATE SET head_hash = excluded.head_hash,
+                                                 entry_count = excluded.entry_count",
+            &[&repo_id, &prev, &count],
+        )?;
+        tx.commit().context("failed to commit events")?;
+        Ok(new_ids)
+    }
+
+    fn event_count(&self, org_id: &str, repo_id: &str) -> Result<u64> {
+        let n: i64 = self
+            .client()?
+            .query_one(
+                "SELECT COUNT(*) FROM event WHERE org_id = $1 AND repo_id = $2",
+                &[&org_id, &repo_id],
+            )?
+            .get(0);
+        Ok(n as u64)
+    }
+
+    fn verify_event_chain(&self, org_id: &str, repo_id: &str) -> Result<bool> {
+        let mut client = self.client()?;
+        let rows = client.query(
+            "SELECT id, session_id, ts, event_type, actor, payload, prev_hash, entry_hash
+             FROM event WHERE org_id = $1 AND repo_id = $2 ORDER BY seq ASC",
+            &[&org_id, &repo_id],
+        )?;
+        let mut expected_prev = String::new();
+        let mut counted: i64 = 0;
+        for r in &rows {
+            let id: String = r.get(0);
+            let payload: String = r.get(5);
+            let prev_hash: String = r.get(6);
+            let entry_hash: String = r.get(7);
+            if prev_hash != expected_prev {
+                return Ok(false);
+            }
+            let payload_value: serde_json::Value = serde_json::from_str(&payload)
+                .with_context(|| format!("corrupt event payload for event {id}"))?;
+            let prev_opt = (!prev_hash.is_empty()).then_some(prev_hash.as_str());
+            let recomputed = ids::hash_event(
+                &id,
+                &r.get::<_, String>(1),
+                &r.get::<_, String>(2),
+                &r.get::<_, String>(3),
+                &r.get::<_, String>(4),
+                &payload_value,
+                prev_opt,
+            );
+            if recomputed != entry_hash {
+                return Ok(false);
+            }
+            expected_prev = entry_hash;
+            counted += 1;
+        }
+        let head = client.query_opt(
+            "SELECT head_hash, entry_count FROM event_head WHERE repo_id = $1",
+            &[&repo_id],
+        )?;
+        match head {
+            Some(row) => {
+                Ok(counted == row.get::<_, i64>(1) && expected_prev == row.get::<_, String>(0))
+            }
+            None => Ok(counted == 0),
+        }
+    }
+
+    fn put_attributions(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        files: &[FileAttribution],
+    ) -> Result<usize> {
+        let mut client = self.client()?;
+        let mut tx = client.transaction()?;
+        let belongs = tx
+            .query_opt(
+                "SELECT 1 FROM repo WHERE id = $1 AND org_id = $2",
+                &[&repo_id, &org_id],
+            )?
+            .is_some();
+        if !belongs {
+            bail!("repo {repo_id} not found in org {org_id}");
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        for file in files {
+            let ranges_json = serde_json::to_string(&file.ranges)?;
+            tx.execute(
+                "INSERT INTO attribution
+                     (org_id, repo_id, file_path, git_blob_sha, ranges_json, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 ON CONFLICT (org_id, repo_id, file_path) DO UPDATE SET
+                     git_blob_sha = excluded.git_blob_sha,
+                     ranges_json = excluded.ranges_json,
+                     updated_at = excluded.updated_at",
+                &[
+                    &org_id,
+                    &repo_id,
+                    &file.file_path,
+                    &file.git_blob_sha,
+                    &ranges_json,
+                    &now,
+                ],
+            )
+            .context("failed to upsert attribution")?;
+        }
+        tx.commit()?;
+        Ok(files.len())
+    }
+
+    fn list_attributions(&self, org_id: &str, repo_id: &str) -> Result<Vec<FileAttribution>> {
+        let rows = self.client()?.query(
+            "SELECT file_path, git_blob_sha, ranges_json, updated_at
+             FROM attribution WHERE org_id = $1 AND repo_id = $2 ORDER BY file_path",
+            &[&org_id, &repo_id],
+        )?;
+        let mut out = Vec::new();
+        for r in &rows {
+            let file_path: String = r.get(0);
+            let ranges_json: String = r.get(2);
+            let ranges = serde_json::from_str(&ranges_json)
+                .with_context(|| format!("corrupt attribution ranges for {file_path}"))?;
+            out.push(FileAttribution {
+                schema: "tellur.attribution.v1".to_string(),
+                file_path,
+                git_blob_sha: r.get(1),
+                ranges,
+                updated_at: r.get(3),
+            });
+        }
+        Ok(out)
+    }
+
+    fn list_repos(&self, org_id: &str) -> Result<Vec<RepoSummary>> {
+        let rows = self.client()?.query(
+            "SELECT r.id, r.name, COUNT(e.seq)
+             FROM repo r LEFT JOIN event e ON e.repo_id = r.id
+             WHERE r.org_id = $1 GROUP BY r.id, r.name ORDER BY r.name",
+            &[&org_id],
+        )?;
+        Ok(rows
+            .iter()
+            .map(|r| RepoSummary {
+                id: r.get(0),
+                name: r.get(1),
+                event_count: r.get::<_, i64>(2) as u64,
+            })
+            .collect())
+    }
+
+    fn list_events(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        limit: u32,
+        before_seq: Option<i64>,
+    ) -> Result<Vec<StoredEvent>> {
+        let cursor = before_seq.unwrap_or(i64::MAX);
+        let rows = self.client()?.query(
+            "SELECT seq, id, session_id, ts, event_type, actor, payload
+             FROM event WHERE org_id = $1 AND repo_id = $2 AND seq < $3
+             ORDER BY seq DESC LIMIT $4",
+            &[&org_id, &repo_id, &cursor, &(limit as i64)],
+        )?;
+        let mut out = Vec::new();
+        for r in &rows {
+            let id: String = r.get(1);
+            let payload_str: String = r.get(6);
+            let payload = serde_json::from_str(&payload_str)
+                .with_context(|| format!("corrupt event payload for event {id}"))?;
+            out.push(StoredEvent {
+                seq: r.get(0),
+                id,
+                repo_id: repo_id.to_string(),
+                session_id: r.get(2),
+                timestamp: r.get(3),
+                event_type: r.get(4),
+                actor: r.get(5),
+                payload,
+            });
+        }
+        Ok(out)
+    }
+
+    fn org_report(&self, org_id: &str) -> Result<OrgReport> {
+        let mut client = self.client()?;
+        let total_events: i64 = client
+            .query_one("SELECT COUNT(*) FROM event WHERE org_id = $1", &[&org_id])?
+            .get(0);
+        let distinct_sessions: i64 = client
+            .query_one(
+                "SELECT COUNT(DISTINCT session_id) FROM event WHERE org_id = $1",
+                &[&org_id],
+            )?
+            .get(0);
+        let by_type = group_counts(&mut client, "event_type", org_id)?;
+        let by_actor = group_counts(&mut client, "actor", org_id)?;
+        Ok(OrgReport {
+            org_id: org_id.to_string(),
+            total_events: total_events as u64,
+            distinct_sessions: distinct_sessions as u64,
+            by_type,
+            by_actor,
+            repos: self.list_repos(org_id)?,
+        })
+    }
+
+    fn put_policy(&self, org_id: &str, name: &str, content: &str) -> Result<i64> {
+        let mut client = self.client()?;
+        let mut tx = client.transaction()?;
+        tx.execute(
+            "SELECT pg_advisory_xact_lock($1)",
+            &[&advisory_key(&format!("policy:{org_id}:{name}"))],
+        )?;
+        let current: i64 = tx
+            .query_opt(
+                "SELECT version FROM policy WHERE org_id = $1 AND name = $2",
+                &[&org_id, &name],
+            )?
+            .map(|r| r.get(0))
+            .unwrap_or(0);
+        let version = current + 1;
+        tx.execute(
+            "INSERT INTO policy (org_id, name, content, version, updated_at)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (org_id, name) DO UPDATE SET content = excluded.content,
+                 version = excluded.version, updated_at = excluded.updated_at",
+            &[
+                &org_id,
+                &name,
+                &content,
+                &version,
+                &chrono::Utc::now().to_rfc3339(),
+            ],
+        )?;
+        tx.commit()?;
+        Ok(version)
+    }
+
+    fn list_policies(&self, org_id: &str) -> Result<Vec<PolicySummary>> {
+        let rows = self.client()?.query(
+            "SELECT name, version, updated_at FROM policy WHERE org_id = $1 ORDER BY name",
+            &[&org_id],
+        )?;
+        Ok(rows
+            .iter()
+            .map(|r| PolicySummary {
+                name: r.get(0),
+                version: r.get(1),
+                updated_at: r.get(2),
+            })
+            .collect())
+    }
+
+    fn get_policy(&self, org_id: &str, name: &str) -> Result<Option<PolicyDoc>> {
+        let row = self.client()?.query_opt(
+            "SELECT name, content, version, updated_at FROM policy
+             WHERE org_id = $1 AND name = $2",
+            &[&org_id, &name],
+        )?;
+        Ok(row.map(|r| PolicyDoc {
+            name: r.get(0),
+            content: r.get(1),
+            version: r.get(2),
+            updated_at: r.get(3),
+        }))
+    }
+
+    fn export_events(&self, org_id: &str) -> Result<Vec<StoredEvent>> {
+        let rows = self.client()?.query(
+            "SELECT seq, id, repo_id, session_id, ts, event_type, actor, payload
+             FROM event WHERE org_id = $1 ORDER BY seq ASC",
+            &[&org_id],
+        )?;
+        let mut out = Vec::new();
+        for r in &rows {
+            let id: String = r.get(1);
+            let payload_str: String = r.get(7);
+            let payload = serde_json::from_str(&payload_str)
+                .with_context(|| format!("corrupt event payload for event {id}"))?;
+            out.push(StoredEvent {
+                seq: r.get(0),
+                id,
+                repo_id: r.get(2),
+                session_id: r.get(3),
+                timestamp: r.get(4),
+                event_type: r.get(5),
+                actor: r.get(6),
+                payload,
+            });
+        }
+        Ok(out)
+    }
+
+    fn export_audit(&self, org_id: &str) -> Result<Vec<AuditRecord>> {
+        let rows = self.client()?.query(
+            "SELECT seq, ts, org_id, actor_member_id, action, detail, entry_hash
+             FROM audit_log WHERE org_id = $1 ORDER BY seq ASC",
+            &[&org_id],
+        )?;
+        Ok(rows
+            .iter()
+            .map(|r| AuditRecord {
+                seq: r.get(0),
+                ts: r.get(1),
+                org_id: r.get(2),
+                actor_member_id: r.get(3),
+                action: r.get(4),
+                detail: r.get(5),
+                entry_hash: r.get(6),
+            })
+            .collect())
+    }
+
+    fn append_audit(&self, entry: &AuditEntry) -> Result<()> {
+        let ts = chrono::Utc::now().to_rfc3339();
+        let mut client = self.client()?;
+        let mut tx = client.transaction()?;
+        tx.execute(
+            "SELECT pg_advisory_xact_lock($1)",
+            &[&advisory_key("audit")],
+        )?;
+        let (prev, count) = read_head(
+            &mut tx,
+            "SELECT head_hash, entry_count FROM audit_head WHERE id = $1",
+            &1i32,
+        )?;
+        let entry_hash = audit_hash(
+            &prev,
+            &ts,
+            entry.org_id.as_deref(),
+            entry.actor_member_id.as_deref(),
+            &entry.action,
+            &entry.detail,
+        );
+        tx.execute(
+            "INSERT INTO audit_log
+                 (ts, org_id, actor_member_id, action, detail, prev_hash, entry_hash)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            &[
+                &ts,
+                &entry.org_id,
+                &entry.actor_member_id,
+                &entry.action,
+                &entry.detail,
+                &prev,
+                &entry_hash,
+            ],
+        )
+        .context("failed to append audit entry")?;
+        tx.execute(
+            "INSERT INTO audit_head (id, head_hash, entry_count) VALUES (1, $1, $2)
+             ON CONFLICT (id) DO UPDATE SET head_hash = excluded.head_hash,
+                 entry_count = excluded.entry_count",
+            &[&entry_hash, &(count + 1)],
+        )?;
+        tx.commit().context("failed to commit audit entry")?;
+        Ok(())
+    }
+
+    fn audit_len(&self) -> Result<u64> {
+        let n: i64 = self
+            .client()?
+            .query_one("SELECT COUNT(*) FROM audit_log", &[])?
+            .get(0);
+        Ok(n as u64)
+    }
+
+    fn verify_audit_chain(&self) -> Result<bool> {
+        let mut client = self.client()?;
+        let rows = client.query(
+            "SELECT ts, org_id, actor_member_id, action, detail, prev_hash, entry_hash
+             FROM audit_log ORDER BY seq ASC",
+            &[],
+        )?;
+        let mut expected_prev = String::new();
+        let mut counted: i64 = 0;
+        for r in &rows {
+            let prev_hash: String = r.get(5);
+            let entry_hash: String = r.get(6);
+            if prev_hash != expected_prev {
+                return Ok(false);
+            }
+            let org_id: Option<String> = r.get(1);
+            let actor: Option<String> = r.get(2);
+            let recomputed = audit_hash(
+                &prev_hash,
+                &r.get::<_, String>(0),
+                org_id.as_deref(),
+                actor.as_deref(),
+                &r.get::<_, String>(3),
+                &r.get::<_, String>(4),
+            );
+            if recomputed != entry_hash {
+                return Ok(false);
+            }
+            expected_prev = entry_hash;
+            counted += 1;
+        }
+        let head = client.query_opt(
+            "SELECT head_hash, entry_count FROM audit_head WHERE id = 1",
+            &[],
+        )?;
+        match head {
+            Some(row) => {
+                Ok(counted == row.get::<_, i64>(1) && expected_prev == row.get::<_, String>(0))
+            }
+            None => Ok(counted == 0),
+        }
+    }
+}
+
+/// Audit entry hash (identical scheme to the SQLite backend).
+fn audit_hash(
+    prev: &str,
+    ts: &str,
+    org_id: Option<&str>,
+    actor: Option<&str>,
+    action: &str,
+    detail: &str,
+) -> String {
+    let material = format!(
+        "{prev}|{ts}|{}|{}|{action}|{detail}",
+        org_id.unwrap_or(""),
+        actor.unwrap_or("")
+    );
+    ids::hash_content(&material)
+}
+
+/// Count events grouped by an internal column, scoped to an org.
+fn group_counts(
+    client: &mut PooledClient,
+    column: &str,
+    org_id: &str,
+) -> Result<std::collections::BTreeMap<String, u64>> {
+    assert!(
+        matches!(column, "event_type" | "actor"),
+        "group_counts column must be allow-listed"
+    );
+    let sql = format!("SELECT {column}, COUNT(*) FROM event WHERE org_id = $1 GROUP BY {column}");
+    let rows = client.query(&sql, &[&org_id])?;
+    Ok(rows
+        .iter()
+        .map(|r| (r.get::<_, String>(0), r.get::<_, i64>(1) as u64))
+        .collect())
+}

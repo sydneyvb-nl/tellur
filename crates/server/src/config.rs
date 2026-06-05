@@ -10,8 +10,13 @@ use crate::error::ServerError;
 pub struct Config {
     /// Address to bind. Defaults to loopback.
     pub bind: SocketAddr,
-    /// SQLite database path (use `:memory:` for ephemeral).
+    /// SQLite database path (use `:memory:` for ephemeral). Ignored when
+    /// [`Config::database_url`] is set.
     pub db_path: PathBuf,
+    /// Optional Postgres connection string. When set, the server uses the
+    /// Postgres backend (horizontal scale) instead of the embedded SQLite
+    /// store. Sourced from `TELLUR_DATABASE_URL`.
+    pub database_url: Option<String>,
     /// Explicit opt-in required to bind a non-loopback address (B0 has no
     /// auth/TLS yet, so we refuse to expose the server by accident).
     pub allow_non_loopback: bool,
@@ -28,11 +33,15 @@ impl Config {
         let db_path = std::env::var("TELLUR_SERVER_DB")
             .unwrap_or_else(|_| "tellur-hub.db".to_string())
             .into();
+        let database_url = std::env::var("TELLUR_DATABASE_URL")
+            .ok()
+            .filter(|v| !v.is_empty());
         let allow_non_loopback = env_flag("TELLUR_SERVER_ALLOW_NON_LOOPBACK");
 
         let config = Self {
             bind,
             db_path,
+            database_url,
             allow_non_loopback,
         };
         config.validate()?;
@@ -66,6 +75,7 @@ mod tests {
         Config {
             bind: bind.parse().unwrap(),
             db_path: ":memory:".into(),
+            database_url: None,
             allow_non_loopback: allow,
         }
     }

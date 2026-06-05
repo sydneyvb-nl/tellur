@@ -1,11 +1,33 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-04 (Clawpatch report fixes; on feature branch)
+**Last updated:** 2026-06-05 (Tier 1 B5 Postgres backend; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-05 — Tier 1 B5 Postgres backend.** On branch `feat/server-postgres`.
+> The hub now has a second storage backend: `PostgresStore`
+> (`crates/server/src/storage/postgres.rs`) implements the full `Store` trait
+> over an `r2d2` connection pool (sync `postgres` client, `NoTls`). Backend
+> selection is by config — set `TELLUR_DATABASE_URL` and `build_state` uses
+> Postgres, otherwise the embedded SQLite store (zero-config) is used. Semantics
+> are mirrored exactly: same tenant scoping, the same server-side hash-chain
+> recomputation, and the same head-hash + length checkpoints for truncation
+> detection; the per-repo event chain and audit chain appends take a
+> `pg_advisory_xact_lock` so the read-head + insert + head-update stay atomic
+> across pooled connections (the Postgres equivalent of SQLite's
+> `BEGIN IMMEDIATE`). New integration tests (`crates/server/tests/postgres.rs`)
+> cover the whole trait surface + a tamper-detection case; they run only when
+> `TELLUR_TEST_DATABASE_URL` points at a disposable DB (the test resets the
+> `public` schema). CI gains a `postgres:16` service so those tests run on every
+> PR. Docs (README/AGENTS/THREAT_MODEL/compose) updated; the threat model now
+> records the hub↔Postgres link as a NoTls trust boundary (private network / TLS
+> proxy; connection string is a secret). Verified locally against a real
+> Postgres (`postgres://postgres@127.0.0.1:5433/tellur_test`): both PG tests
+> pass; 218 workspace tests; clippy `-D warnings` + cargo-deny green. (Docker
+> image build is verified in CI.) Next: B6 (enterprise SSO/OIDC + RBAC/SCIM).
+>
 > **2026-06-04 — B4 review fixes (Codex).** Addressed 3 P2 findings on PR #6:
 > org event exports now carry `repo_id` per event (multi-repo context);
 > `docs/THREAT_MODEL.md` updated for the policy-write + export endpoints
@@ -476,7 +498,7 @@ Tellur/
 | 43 | SLSA/SPDX export | 20 | ✅ Done | SLSA v1.0 provenance + SPDX 2.3 SBOM with AI metadata, 2 tests | |
 | 44 | HTTP daemon (axum) | 22 | ✅ Done | `tellur daemon` (loopback-only, token-auth, Host check). Server **recomputes the hash chain** via EventWriter — clients cannot forge provenance. 7 endpoints incl. `POST /webhook/{source}` for cloud-agent (Devin) live capture. |
 | 45 | MCP server | 23 | ✅ Done | `tellur mcp` — real stdio JSON-RPC 2.0 (initialize/tools/list/tools/call). 6 tools backed by actual index/policy/verify queries. |
-| 46 | Team/server mode | §6.11 / §16.2 L5 / §32 Step 20 | ✅ In preview | Tier 0 (`tellur team report`) and Tier 1 self-host hub (`crates/server` / `tellur-server`) are implemented through SQLite ingest/read/report/policy/export, metrics, Docker packaging, policy pull, and repo SLSA/SPDX export. Postgres and enterprise SSO remain roadmap items. |
+| 46 | Team/server mode | §6.11 / §16.2 L5 / §32 Step 20 | ✅ In preview | Tier 0 (`tellur team report`) and Tier 1 self-host hub (`crates/server` / `tellur-server`) are implemented through ingest/read/report/policy/export, metrics, Docker packaging, policy pull, and repo SLSA/SPDX export, on **either SQLite (default) or Postgres** (`TELLUR_DATABASE_URL`). Enterprise SSO/SCIM remains a roadmap item. |
 | 47 | Plugin/adapter SDK | §8.3 / §32 Step 18 | ❌ Not started | Requires stable adapter/event API |
 
 ### Phase 7: Distribution (PRD sectie 32.3)
@@ -496,8 +518,8 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 
 1. **Pricing / Business model** (PRD sectie 27-31) — niet relevant voor dev, Sydney beslist
 2. **Enterprise team/server follow-ups** (PRD §6.11 / §16.2 Layer 5 / §32 Step 20)
-   — Tier 0 and the SQLite self-host hub preview are implemented. Remaining
-   work: Postgres backend, durable jobs, and enterprise SSO/SCIM.
+   — Tier 0 and the self-host hub preview are implemented on both the SQLite and
+   Postgres backends. Remaining work: durable jobs and enterprise SSO/SCIM.
 3. **SOC 2 compliance** (PRD sectie 26) — far future
 4. **Plugin SDK** (PRD sectie 25) — API stabiliteit eerst nodig
 5. **Release signing** (PRD sectie 20) — na v1.0 (SLSA/SPDX *export* is wel klaar)
@@ -606,8 +628,11 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
    `/metrics`, heavy-op offload, Docker/Compose packaging + CI build, and the
    `tellur policy pull` client. **Attribution ingest + SLSA/SPDX export ✅**
    (branch `feat/server-b6-attribution-slsa`): per-repo SLSA v1.0 + SPDX from
-   ingested line-level attribution. Remaining: **Postgres backend + queued jobs**
-   (own PR — needs a DB/CI service). Then **B6** (SSO/RBAC/SCIM).
+   ingested line-level attribution. **Postgres backend ✅** (branch
+   `feat/server-postgres`): `PostgresStore` (r2d2 pool, NoTls) behind the same
+   `Store` trait, selected via `TELLUR_DATABASE_URL`, with a `postgres:16` CI
+   service running the integration tests. Remaining: **queued/durable jobs**.
+   Then **B6** (SSO/RBAC/SCIM).
 9. **Plugin SDK** — requires stable adapter/event API
 
 ---

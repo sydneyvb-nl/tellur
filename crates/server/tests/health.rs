@@ -19,6 +19,7 @@ fn state_with_store(store: SqliteStore) -> AppState {
     let config = Config {
         bind: "127.0.0.1:0".parse().unwrap(),
         db_path: ":memory:".into(),
+        database_url: None,
         allow_non_loopback: false,
     };
     AppState {
