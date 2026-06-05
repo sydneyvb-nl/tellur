@@ -177,6 +177,39 @@ async fn per_repo_contributor_grant_elevates_a_viewer() {
 }
 
 #[tokio::test]
+async fn unauthorized_write_is_denied_before_batch_validation() {
+    let s = setup();
+    // Contributor creates repo "app".
+    let app_events = format!("/v1/orgs/{}/repos/app/events", s.org_a);
+    req(
+        &s.state,
+        "POST",
+        &app_events,
+        &s.contributor_a.token,
+        Some(events()),
+    )
+    .await;
+
+    // A viewer (no grant) sending an *empty* batch must be denied (403), not get
+    // a 400 for the batch — authorization runs before request validation so the
+    // attempt is recorded.
+    let before = s.state.store.audit_len().unwrap();
+    let (status, _) = req(
+        &s.state,
+        "POST",
+        &app_events,
+        &s.viewer_a.token,
+        Some(json!({ "events": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(
+        s.state.store.audit_len().unwrap() > before,
+        "denied write must be audited"
+    );
+}
+
+#[tokio::test]
 async fn per_repo_admin_grant_allows_export() {
     let s = setup();
     let base = format!("/v1/orgs/{}/repos/app", s.org_a);

@@ -280,37 +280,27 @@ pub async fn ingest_events(
         return Err(ServerError::TooManyRequests);
     }
 
-    // Validate batch size before resolving/creating the repo, so an empty or
-    // oversized request never creates a repo as a side effect.
-    if req.events.is_empty() {
-        return Err(ServerError::BadRequest("no events provided".to_string()));
-    }
-    if req.events.len() > MAX_EVENTS_PER_REQUEST {
-        return Err(ServerError::BadRequest(format!(
-            "too many events: {} (max {MAX_EVENTS_PER_REQUEST})",
-            req.events.len()
-        )));
-    }
-
-    // Per-repo authorization. For an existing repo, an additive per-repo grant
-    // can elevate an org viewer to contributor. Creating a *new* repo always
-    // requires the org-baseline contributor role (no grant can exist yet).
-    let repo = match state
+    // Per-repo authorization runs *before* request validation, so an
+    // unauthorized write is always denied + audited (a bad batch size must not
+    // let an unauthorized caller skip the denial). For an existing repo an
+    // additive per-repo grant can elevate an org viewer to contributor; creating
+    // a *new* repo always requires the org-baseline contributor role (no grant
+    // can exist yet). The repo is resolved without creating it here.
+    let existing = state
         .store
         .find_repo(&org_id, &repo)
-        .map_err(ServerError::Internal)?
-    {
-        Some(existing) => {
-            if !effective_role(&state, &principal, &existing.id)?.allows(Role::Contributor) {
+        .map_err(ServerError::Internal)?;
+    match &existing {
+        Some(r) => {
+            if !effective_role(&state, &principal, &r.id)?.allows(Role::Contributor) {
                 return Err(deny(
                     &state,
                     &principal,
                     &org_id,
                     "ingest_denied",
-                    &format!("repo={} role={}", existing.id, principal.role.as_str()),
+                    &format!("repo={} role={}", r.id, principal.role.as_str()),
                 ));
             }
-            existing
         }
         None => {
             if !principal.role.allows(Role::Contributor) {
@@ -322,11 +312,28 @@ pub async fn ingest_events(
                     &format!("new_repo role={}", principal.role.as_str()),
                 ));
             }
-            state
-                .store
-                .ensure_repo(&org_id, &repo)
-                .map_err(ServerError::Internal)?
         }
+    }
+
+    // Validate batch size only after authorization, and before creating the repo
+    // so an empty or oversized request never creates a repo as a side effect.
+    if req.events.is_empty() {
+        return Err(ServerError::BadRequest("no events provided".to_string()));
+    }
+    if req.events.len() > MAX_EVENTS_PER_REQUEST {
+        return Err(ServerError::BadRequest(format!(
+            "too many events: {} (max {MAX_EVENTS_PER_REQUEST})",
+            req.events.len()
+        )));
+    }
+
+    // Authorized + valid: resolve (creating the repo if it did not exist).
+    let repo = match existing {
+        Some(r) => r,
+        None => state
+            .store
+            .ensure_repo(&org_id, &repo)
+            .map_err(ServerError::Internal)?,
     };
 
     // Redact secrets from inbound payloads before storage.
@@ -649,6 +656,40 @@ pub async fn ingest_attributions(
     if !state.rate_limiter.check(&principal.member_id) {
         return Err(ServerError::TooManyRequests);
     }
+
+    // Per-repo authorization first (mirroring event ingest), so an unauthorized
+    // write is always denied + audited regardless of request validity. An
+    // existing repo can be written by a per-repo contributor; creating a new
+    // repo requires the org-baseline contributor role. Resolved without creating.
+    let existing = state
+        .store
+        .find_repo(&org_id, &repo)
+        .map_err(ServerError::Internal)?;
+    match &existing {
+        Some(r) => {
+            if !effective_role(&state, &principal, &r.id)?.allows(Role::Contributor) {
+                return Err(deny(
+                    &state,
+                    &principal,
+                    &org_id,
+                    "attributions_denied",
+                    &format!("repo={} role={}", r.id, principal.role.as_str()),
+                ));
+            }
+        }
+        None => {
+            if !principal.role.allows(Role::Contributor) {
+                return Err(deny(
+                    &state,
+                    &principal,
+                    &org_id,
+                    "attributions_denied",
+                    &format!("new_repo role={}", principal.role.as_str()),
+                ));
+            }
+        }
+    }
+
     if req.attributions.is_empty() {
         return Err(ServerError::BadRequest(
             "no attributions provided".to_string(),
@@ -674,41 +715,13 @@ pub async fn ingest_attributions(
         }
     }
 
-    // Per-repo authorization (additive grants), mirroring event ingest: an
-    // existing repo can be written by a per-repo contributor; creating a new
-    // repo requires the org-baseline contributor role.
-    let repo = match state
-        .store
-        .find_repo(&org_id, &repo)
-        .map_err(ServerError::Internal)?
-    {
-        Some(existing) => {
-            if !effective_role(&state, &principal, &existing.id)?.allows(Role::Contributor) {
-                return Err(deny(
-                    &state,
-                    &principal,
-                    &org_id,
-                    "attributions_denied",
-                    &format!("repo={} role={}", existing.id, principal.role.as_str()),
-                ));
-            }
-            existing
-        }
-        None => {
-            if !principal.role.allows(Role::Contributor) {
-                return Err(deny(
-                    &state,
-                    &principal,
-                    &org_id,
-                    "attributions_denied",
-                    &format!("new_repo role={}", principal.role.as_str()),
-                ));
-            }
-            state
-                .store
-                .ensure_repo(&org_id, &repo)
-                .map_err(ServerError::Internal)?
-        }
+    // Authorized + valid: resolve (creating the repo if it did not exist).
+    let repo = match existing {
+        Some(r) => r,
+        None => state
+            .store
+            .ensure_repo(&org_id, &repo)
+            .map_err(ServerError::Internal)?,
     };
     let n = state
         .store
@@ -887,9 +900,12 @@ pub async fn set_repo_role(
     principal: Principal,
     Json(req): Json<SetRepoRoleRequest>,
 ) -> Result<Json<Value>, ServerError> {
+    // Authorize (org-admin + tenant) before validating the request body, so a
+    // cross-tenant attempt is denied + audited rather than short-circuited by a
+    // body 400.
+    let repo = admin_resolve_repo(&state, &principal, &org_id, &repo, "repo_role.set").await?;
     let role = Role::parse(&req.role)
         .map_err(|_| ServerError::BadRequest(format!("unknown role: {}", req.role)))?;
-    let repo = admin_resolve_repo(&state, &principal, &org_id, &repo, "repo_role.set").await?;
     state
         .store
         .set_repo_role(&org_id, &repo.id, &member_id, role)
@@ -946,6 +962,17 @@ pub async fn list_repo_roles(
     let grants = state
         .store
         .list_repo_roles(&org_id, &repo.id)
+        .map_err(ServerError::Internal)?;
+    // Grants are the repo-scoped authorization state; enumerating them is itself
+    // an auditable read (mirrors repo_role.set / repo_role.remove).
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id),
+            actor_member_id: Some(principal.member_id.clone()),
+            action: "repo_role.list".to_string(),
+            detail: format!("repo={} count={}", repo.id, grants.len()),
+        })
         .map_err(ServerError::Internal)?;
     Ok(Json(json!({ "repo_id": repo.id, "grants": grants })))
 }
