@@ -57,6 +57,16 @@ impl Role {
     pub fn allows(self, required: Role) -> bool {
         self.rank() >= required.rank()
     }
+
+    /// The more privileged of two roles. Used to combine an org-baseline role
+    /// with an additive per-repo grant (grants elevate, never restrict).
+    pub fn max(self, other: Role) -> Role {
+        if self.rank() >= other.rank() {
+            self
+        } else {
+            other
+        }
+    }
 }
 
 /// An authenticated caller: who they are, in which org, with what role.
@@ -144,6 +154,13 @@ mod tests {
         assert!(!Role::Viewer.allows(Role::Admin));
         assert_eq!(Role::parse("admin").unwrap(), Role::Admin);
         assert!(Role::parse("root").is_err());
+    }
+
+    #[test]
+    fn role_max_picks_higher_privilege() {
+        assert_eq!(Role::Viewer.max(Role::Contributor), Role::Contributor);
+        assert_eq!(Role::Admin.max(Role::Viewer), Role::Admin);
+        assert_eq!(Role::Contributor.max(Role::Contributor), Role::Contributor);
     }
 
     #[test]

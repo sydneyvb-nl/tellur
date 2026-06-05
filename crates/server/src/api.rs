@@ -76,6 +76,42 @@ fn ensure_org_role(
     Ok(())
 }
 
+/// Audit a denied access attempt and return the `403` to surface. If writing
+/// the audit entry fails, that becomes the (500) error instead — a denial must
+/// always be recorded.
+fn deny(
+    state: &AppState,
+    principal: &Principal,
+    attempted_org: &str,
+    action: &str,
+    detail: &str,
+) -> ServerError {
+    if let Err(e) = state.store.append_audit(&AuditEntry {
+        org_id: Some(principal.org_id.clone()),
+        actor_member_id: Some(principal.member_id.clone()),
+        action: action.to_string(),
+        detail: format!("attempted_org={attempted_org} {detail}"),
+    }) {
+        return ServerError::Internal(e);
+    }
+    ServerError::Forbidden
+}
+
+/// The caller's **effective** role on a repo: their org-baseline role combined
+/// with any additive per-repo grant (`max(org_role, grant)`). Grants only
+/// elevate; they never reduce a member below their org role.
+fn effective_role(
+    state: &AppState,
+    principal: &Principal,
+    repo_id: &str,
+) -> Result<Role, ServerError> {
+    let grant = state
+        .store
+        .get_repo_role(&principal.org_id, repo_id, &principal.member_id)
+        .map_err(ServerError::Internal)?;
+    Ok(grant.map_or(principal.role, |g| principal.role.max(g)))
+}
+
 /// Authenticate the caller from a `Authorization: Bearer <token>` header.
 /// Deny by default: any missing/invalid token is rejected.
 impl FromRequestParts<AppState> for Principal {
@@ -228,18 +264,15 @@ pub async fn ingest_events(
     principal: Principal,
     Json(req): Json<IngestRequest>,
 ) -> Result<Json<Value>, ServerError> {
-    // Tenant + role authorization (object + tenant, not just role).
-    if org_id != principal.org_id || !principal.role.allows(Role::Contributor) {
-        state
-            .store
-            .append_audit(&AuditEntry {
-                org_id: Some(principal.org_id.clone()),
-                actor_member_id: Some(principal.member_id.clone()),
-                action: "ingest_denied".to_string(),
-                detail: format!("attempted_org={org_id} role={}", principal.role.as_str()),
-            })
-            .map_err(ServerError::Internal)?;
-        return Err(ServerError::Forbidden);
+    // Tenant check first (object + tenant, not just role).
+    if org_id != principal.org_id {
+        return Err(deny(
+            &state,
+            &principal,
+            &org_id,
+            "ingest_denied",
+            &format!("role={}", principal.role.as_str()),
+        ));
     }
 
     // Per-member rate limit.
@@ -247,7 +280,43 @@ pub async fn ingest_events(
         return Err(ServerError::TooManyRequests);
     }
 
-    // Validate batch size.
+    // Per-repo authorization runs *before* request validation, so an
+    // unauthorized write is always denied + audited (a bad batch size must not
+    // let an unauthorized caller skip the denial). For an existing repo an
+    // additive per-repo grant can elevate an org viewer to contributor; creating
+    // a *new* repo always requires the org-baseline contributor role (no grant
+    // can exist yet). The repo is resolved without creating it here.
+    let existing = state
+        .store
+        .find_repo(&org_id, &repo)
+        .map_err(ServerError::Internal)?;
+    match &existing {
+        Some(r) => {
+            if !effective_role(&state, &principal, &r.id)?.allows(Role::Contributor) {
+                return Err(deny(
+                    &state,
+                    &principal,
+                    &org_id,
+                    "ingest_denied",
+                    &format!("repo={} role={}", r.id, principal.role.as_str()),
+                ));
+            }
+        }
+        None => {
+            if !principal.role.allows(Role::Contributor) {
+                return Err(deny(
+                    &state,
+                    &principal,
+                    &org_id,
+                    "ingest_denied",
+                    &format!("new_repo role={}", principal.role.as_str()),
+                ));
+            }
+        }
+    }
+
+    // Validate batch size only after authorization, and before creating the repo
+    // so an empty or oversized request never creates a repo as a side effect.
     if req.events.is_empty() {
         return Err(ServerError::BadRequest("no events provided".to_string()));
     }
@@ -258,10 +327,14 @@ pub async fn ingest_events(
         )));
     }
 
-    let repo = state
-        .store
-        .ensure_repo(&org_id, &repo)
-        .map_err(ServerError::Internal)?;
+    // Authorized + valid: resolve (creating the repo if it did not exist).
+    let repo = match existing {
+        Some(r) => r,
+        None => state
+            .store
+            .ensure_repo(&org_id, &repo)
+            .map_err(ServerError::Internal)?,
+    };
 
     // Redact secrets from inbound payloads before storage.
     let engine = RedactionEngine::default_engine();
@@ -571,21 +644,52 @@ pub async fn ingest_attributions(
     principal: Principal,
     Json(req): Json<IngestAttributionsRequest>,
 ) -> Result<Json<Value>, ServerError> {
-    if org_id != principal.org_id || !principal.role.allows(Role::Contributor) {
-        state
-            .store
-            .append_audit(&AuditEntry {
-                org_id: Some(principal.org_id.clone()),
-                actor_member_id: Some(principal.member_id.clone()),
-                action: "attributions_denied".to_string(),
-                detail: format!("attempted_org={org_id} role={}", principal.role.as_str()),
-            })
-            .map_err(ServerError::Internal)?;
-        return Err(ServerError::Forbidden);
+    if org_id != principal.org_id {
+        return Err(deny(
+            &state,
+            &principal,
+            &org_id,
+            "attributions_denied",
+            &format!("role={}", principal.role.as_str()),
+        ));
     }
     if !state.rate_limiter.check(&principal.member_id) {
         return Err(ServerError::TooManyRequests);
     }
+
+    // Per-repo authorization first (mirroring event ingest), so an unauthorized
+    // write is always denied + audited regardless of request validity. An
+    // existing repo can be written by a per-repo contributor; creating a new
+    // repo requires the org-baseline contributor role. Resolved without creating.
+    let existing = state
+        .store
+        .find_repo(&org_id, &repo)
+        .map_err(ServerError::Internal)?;
+    match &existing {
+        Some(r) => {
+            if !effective_role(&state, &principal, &r.id)?.allows(Role::Contributor) {
+                return Err(deny(
+                    &state,
+                    &principal,
+                    &org_id,
+                    "attributions_denied",
+                    &format!("repo={} role={}", r.id, principal.role.as_str()),
+                ));
+            }
+        }
+        None => {
+            if !principal.role.allows(Role::Contributor) {
+                return Err(deny(
+                    &state,
+                    &principal,
+                    &org_id,
+                    "attributions_denied",
+                    &format!("new_repo role={}", principal.role.as_str()),
+                ));
+            }
+        }
+    }
+
     if req.attributions.is_empty() {
         return Err(ServerError::BadRequest(
             "no attributions provided".to_string(),
@@ -611,10 +715,14 @@ pub async fn ingest_attributions(
         }
     }
 
-    let repo = state
-        .store
-        .ensure_repo(&org_id, &repo)
-        .map_err(ServerError::Internal)?;
+    // Authorized + valid: resolve (creating the repo if it did not exist).
+    let repo = match existing {
+        Some(r) => r,
+        None => state
+            .store
+            .ensure_repo(&org_id, &repo)
+            .map_err(ServerError::Internal)?,
+    };
     let n = state
         .store
         .put_attributions(&org_id, &repo.id, &req.attributions)
@@ -694,15 +802,52 @@ async fn export_attributions(
     repo_name: &str,
     action: &str,
 ) -> Result<(crate::storage::Repo, Vec<FileAttribution>), ServerError> {
-    ensure_org_role(state, principal, org_id, Role::Admin, action)?;
+    // Same-org check up front.
+    if org_id != principal.org_id {
+        return Err(deny(
+            state,
+            principal,
+            org_id,
+            "access_denied",
+            &format!("{action} role={}", principal.role.as_str()),
+        ));
+    }
     if !state.rate_limiter.check(&principal.member_id) {
         return Err(ServerError::TooManyRequests);
     }
-    let repo = state
+    // Admin-level authorization, allowing an additive per-repo admin grant. We
+    // only disclose a missing repo (404) to callers who are already org admins;
+    // anyone else gets a 403 so repo existence is not leaked by status code.
+    let repo = match state
         .store
         .find_repo(org_id, repo_name)
         .map_err(ServerError::Internal)?
-        .ok_or(ServerError::NotFound)?;
+    {
+        Some(r) => {
+            if !effective_role(state, principal, &r.id)?.allows(Role::Admin) {
+                return Err(deny(
+                    state,
+                    principal,
+                    org_id,
+                    "access_denied",
+                    &format!("{action} repo={} role={}", r.id, principal.role.as_str()),
+                ));
+            }
+            r
+        }
+        None => {
+            if principal.role.allows(Role::Admin) {
+                return Err(ServerError::NotFound);
+            }
+            return Err(deny(
+                state,
+                principal,
+                org_id,
+                "access_denied",
+                &format!("{action} repo={repo_name} role={}", principal.role.as_str()),
+            ));
+        }
+    };
     let attrs = run_blocking({
         let store = state.store.clone();
         let org = org_id.to_string();
@@ -721,6 +866,115 @@ async fn export_attributions(
         })
         .map_err(ServerError::Internal)?;
     Ok((repo, attrs))
+}
+
+// ─── Per-repo role administration (org admin) ────────────────────────────────
+
+/// Wire format for granting a per-repo role.
+#[derive(Debug, Deserialize)]
+pub struct SetRepoRoleRequest {
+    pub role: String,
+}
+
+/// Resolve a repo for an org-admin management action, or 403/404.
+async fn admin_resolve_repo(
+    state: &AppState,
+    principal: &Principal,
+    org_id: &str,
+    repo_ref: &str,
+    action: &str,
+) -> Result<crate::storage::Repo, ServerError> {
+    ensure_org_role(state, principal, org_id, Role::Admin, action)?;
+    state
+        .store
+        .find_repo(org_id, repo_ref)
+        .map_err(ServerError::Internal)?
+        .ok_or(ServerError::NotFound)
+}
+
+/// `PUT /v1/orgs/{org}/repos/{repo}/roles/{member_id}` — grant a member an
+/// additive per-repo role (org admin only).
+pub async fn set_repo_role(
+    State(state): State<AppState>,
+    Path((org_id, repo, member_id)): Path<(String, String, String)>,
+    principal: Principal,
+    Json(req): Json<SetRepoRoleRequest>,
+) -> Result<Json<Value>, ServerError> {
+    // Authorize (org-admin + tenant) before validating the request body, so a
+    // cross-tenant attempt is denied + audited rather than short-circuited by a
+    // body 400.
+    let repo = admin_resolve_repo(&state, &principal, &org_id, &repo, "repo_role.set").await?;
+    let role = Role::parse(&req.role)
+        .map_err(|_| ServerError::BadRequest(format!("unknown role: {}", req.role)))?;
+    state
+        .store
+        .set_repo_role(&org_id, &repo.id, &member_id, role)
+        .map_err(|e| ServerError::BadRequest(e.to_string()))?;
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id),
+            actor_member_id: Some(principal.member_id.clone()),
+            action: "repo_role.set".to_string(),
+            detail: format!("repo={} member={member_id} role={}", repo.id, role.as_str()),
+        })
+        .map_err(ServerError::Internal)?;
+    Ok(Json(json!({
+        "repo_id": repo.id,
+        "member_id": member_id,
+        "role": role.as_str(),
+    })))
+}
+
+/// `DELETE /v1/orgs/{org}/repos/{repo}/roles/{member_id}` — revoke a per-repo
+/// grant (org admin only). The member keeps their org-baseline role.
+pub async fn remove_repo_role(
+    State(state): State<AppState>,
+    Path((org_id, repo, member_id)): Path<(String, String, String)>,
+    principal: Principal,
+) -> Result<Json<Value>, ServerError> {
+    let repo = admin_resolve_repo(&state, &principal, &org_id, &repo, "repo_role.remove").await?;
+    let removed = state
+        .store
+        .remove_repo_role(&org_id, &repo.id, &member_id)
+        .map_err(ServerError::Internal)?;
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id),
+            actor_member_id: Some(principal.member_id.clone()),
+            action: "repo_role.remove".to_string(),
+            detail: format!("repo={} member={member_id} removed={removed}", repo.id),
+        })
+        .map_err(ServerError::Internal)?;
+    Ok(Json(
+        json!({ "repo_id": repo.id, "member_id": member_id, "removed": removed }),
+    ))
+}
+
+/// `GET /v1/orgs/{org}/repos/{repo}/roles` — list per-repo grants (org admin).
+pub async fn list_repo_roles(
+    State(state): State<AppState>,
+    Path((org_id, repo)): Path<(String, String)>,
+    principal: Principal,
+) -> Result<Json<Value>, ServerError> {
+    let repo = admin_resolve_repo(&state, &principal, &org_id, &repo, "repo_role.list").await?;
+    let grants = state
+        .store
+        .list_repo_roles(&org_id, &repo.id)
+        .map_err(ServerError::Internal)?;
+    // Grants are the repo-scoped authorization state; enumerating them is itself
+    // an auditable read (mirrors repo_role.set / repo_role.remove).
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id),
+            actor_member_id: Some(principal.member_id.clone()),
+            action: "repo_role.list".to_string(),
+            detail: format!("repo={} count={}", repo.id, grants.len()),
+        })
+        .map_err(ServerError::Internal)?;
+    Ok(Json(json!({ "repo_id": repo.id, "grants": grants })))
 }
 
 /// Recursively redact secret-looking strings anywhere in a JSON value.

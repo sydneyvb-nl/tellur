@@ -15,7 +15,7 @@ use tellur_core::schema::types::FileAttribution;
 
 use super::{
     AuditEntry, AuditRecord, IngestEvent, Org, OrgReport, PolicyDoc, PolicySummary, Repo,
-    RepoSummary, Store, StoredEvent,
+    RepoRoleGrant, RepoSummary, Store, StoredEvent,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
@@ -135,12 +135,20 @@ impl Store for PostgresStore {
                      file_path TEXT NOT NULL, git_blob_sha TEXT NOT NULL,
                      ranges_json TEXT NOT NULL, updated_at TEXT NOT NULL,
                      PRIMARY KEY (org_id, repo_id, file_path)
-                 );",
+                 );
+                 CREATE TABLE IF NOT EXISTS repo_role (
+                     org_id TEXT NOT NULL REFERENCES org(id),
+                     repo_id TEXT NOT NULL REFERENCES repo(id),
+                     member_id TEXT NOT NULL REFERENCES member(id),
+                     role TEXT NOT NULL, updated_at TEXT NOT NULL,
+                     PRIMARY KEY (repo_id, member_id)
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_repo_role_repo ON repo_role(repo_id);",
             )
             .context("failed to create schema")?;
         client
             .execute(
-                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '7')
+                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '8')
                  ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                 &[],
             )
@@ -269,6 +277,80 @@ impl Store for PostgresStore {
             org_id: org_id.to_string(),
             name: r.get(1),
         }))
+    }
+
+    fn set_repo_role(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        member_id: &str,
+        role: Role,
+    ) -> Result<()> {
+        let mut client = self.client()?;
+        let repo_ok = client
+            .query_opt(
+                "SELECT 1 FROM repo WHERE id = $1 AND org_id = $2",
+                &[&repo_id, &org_id],
+            )?
+            .is_some();
+        if !repo_ok {
+            bail!("repo {repo_id} not found in org {org_id}");
+        }
+        let member_ok = client
+            .query_opt(
+                "SELECT 1 FROM member WHERE id = $1 AND org_id = $2",
+                &[&member_id, &org_id],
+            )?
+            .is_some();
+        if !member_ok {
+            bail!("member {member_id} not found in org {org_id}");
+        }
+        client.execute(
+            "INSERT INTO repo_role (org_id, repo_id, member_id, role, updated_at)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (repo_id, member_id) DO UPDATE SET role = excluded.role,
+                                                            updated_at = excluded.updated_at",
+            &[
+                &org_id,
+                &repo_id,
+                &member_id,
+                &role.as_str(),
+                &chrono::Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn remove_repo_role(&self, org_id: &str, repo_id: &str, member_id: &str) -> Result<bool> {
+        let n = self.client()?.execute(
+            "DELETE FROM repo_role WHERE org_id = $1 AND repo_id = $2 AND member_id = $3",
+            &[&org_id, &repo_id, &member_id],
+        )?;
+        Ok(n > 0)
+    }
+
+    fn get_repo_role(&self, org_id: &str, repo_id: &str, member_id: &str) -> Result<Option<Role>> {
+        let row = self.client()?.query_opt(
+            "SELECT role FROM repo_role WHERE org_id = $1 AND repo_id = $2 AND member_id = $3",
+            &[&org_id, &repo_id, &member_id],
+        )?;
+        row.map(|r| Role::parse(&r.get::<_, String>(0))).transpose()
+    }
+
+    fn list_repo_roles(&self, org_id: &str, repo_id: &str) -> Result<Vec<RepoRoleGrant>> {
+        let rows = self.client()?.query(
+            "SELECT member_id, role, updated_at FROM repo_role
+             WHERE org_id = $1 AND repo_id = $2 ORDER BY member_id",
+            &[&org_id, &repo_id],
+        )?;
+        Ok(rows
+            .iter()
+            .map(|r| RepoRoleGrant {
+                member_id: r.get(0),
+                role: r.get(1),
+                updated_at: r.get(2),
+            })
+            .collect())
     }
 
     fn append_events(

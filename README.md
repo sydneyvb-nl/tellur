@@ -487,7 +487,13 @@ export, metrics, packaging, `policy pull`). Storage runs on the embedded SQLite
 backend by default (zero-config, single-node) or on **Postgres** for horizontal
 scale — set `TELLUR_DATABASE_URL` (e.g. `postgres://user:pass@host:5432/tellur`)
 to switch. Postgres is reached over NoTls, so keep it on a private network or
-front it with a TLS-terminating proxy. Enterprise SSO/SCIM is upcoming.
+front it with a TLS-terminating proxy. Authorization is RBAC (`viewer` /
+`contributor` / `admin`) with **fine-grained, additive per-repo grants**: an org
+admin can elevate a member on a specific repo (e.g. make an org viewer a
+contributor or admin on one repo) via
+`PUT /v1/orgs/{org}/repos/{repo}/roles/{member}` or the
+`tellur-server admin grant-repo-role` CLI; grants only elevate, never restrict.
+Enterprise SSO/OIDC and SCIM provisioning are upcoming.
 
 ## Development
 
