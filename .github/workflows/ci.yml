@@ -12,6 +12,25 @@ jobs:
   rust:
     name: fmt + clippy + test
     runs-on: ubuntu-latest
+    # Postgres backend integration tests (crates/server/tests/postgres.rs) run
+    # against this disposable service; they reset the schema, so it must stay a
+    # throwaway DB. Without TELLUR_TEST_DATABASE_URL those tests no-op.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tellur_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TELLUR_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/tellur_test
     steps:
       - uses: actions/checkout@v5
       # Toolchain version is pinned in rust-toolchain.toml so CI and local stay

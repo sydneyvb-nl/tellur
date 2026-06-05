@@ -15,7 +15,9 @@ use anyhow::Result;
 use crate::auth::{GeneratedToken, Principal, Role};
 
 mod chain;
+pub mod postgres;
 pub mod sqlite;
+pub use postgres::PostgresStore;
 pub use sqlite::SqliteStore;
 
 /// An organization (tenant).

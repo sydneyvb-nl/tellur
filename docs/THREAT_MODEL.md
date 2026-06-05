@@ -30,7 +30,14 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    org/repo data disclosure). Operational
    endpoints (`/healthz`, `/readyz`, `/metrics`) are unauthenticated but expose
    only liveness and aggregate counters — no tenant data.
-4. **Hub → storage** — SQLite/Postgres; tenant isolation enforced here.
+4. **Hub → storage** — SQLite (embedded, same host) or Postgres (network, via
+   `TELLUR_DATABASE_URL`); tenant isolation enforced here. The Postgres client
+   connects with **NoTls**, so the hub↔Postgres link is a trust boundary that
+   must be kept on a private network or fronted by a TLS-terminating proxy; the
+   connection string is a secret (provide it via env/secret store, never commit
+   it). The same server-side hash-chain recomputation + head checkpoints apply
+   regardless of backend, so a compromised DB cannot silently forge provenance
+   without detection by `verify_*_chain`.
 
 ## STRIDE analysis (hub focus)
 

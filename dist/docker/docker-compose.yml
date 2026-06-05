@@ -1,12 +1,18 @@
-# Example Compose file for self-hosting the Tellur team hub (SQLite-backed).
+# Example Compose file for self-hosting the Tellur team hub.
 # Run from this directory:  docker compose up --build
 #
 # Bootstrap (in another shell) once it's running:
 #   docker compose exec tellur-hub tellur-server admin create-org --name "Acme"
 #   docker compose exec tellur-hub tellur-server admin create-token --org <id> --role admin
 #
-# For production, front this with a TLS-terminating reverse proxy. A Postgres
-# backend + compose service arrives with the scale (B5-pg) work.
+# For production, front this with a TLS-terminating reverse proxy.
+#
+# Storage backend:
+#   - Default (this file): embedded SQLite on the tellur-data volume — zero-config,
+#     single-node.
+#   - Horizontal scale: set TELLUR_DATABASE_URL to a Postgres connection string
+#     and uncomment the `postgres` service + `depends_on` below. The server talks
+#     to Postgres over NoTls, so keep it on a private network / behind a proxy.
 
 services:
   tellur-hub:
@@ -21,7 +27,29 @@ services:
     environment:
       TELLUR_SERVER_BIND: "0.0.0.0:4920"
       TELLUR_SERVER_ALLOW_NON_LOOPBACK: "1"
+      # Uncomment to use the Postgres backend instead of SQLite:
+      # TELLUR_DATABASE_URL: "postgres://tellur:tellur@postgres:5432/tellur"
+    # depends_on:
+    #   postgres:
+    #     condition: service_healthy
     restart: unless-stopped
+
+  # Uncomment to run a Postgres backend alongside the hub.
+  # postgres:
+  #   image: postgres:16
+  #   environment:
+  #     POSTGRES_USER: tellur
+  #     POSTGRES_PASSWORD: tellur
+  #     POSTGRES_DB: tellur
+  #   volumes:
+  #     - tellur-pg:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U tellur"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   restart: unless-stopped
 
 volumes:
   tellur-data:
+  # tellur-pg:

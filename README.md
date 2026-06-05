@@ -483,8 +483,11 @@ docker compose -f dist/docker/docker-compose.yml up --build
 ```
 
 Implemented through milestone B5 (identity/tenancy, ingest, read/report, policy &
-export, metrics, packaging, `policy pull`). A Postgres backend and SSO are
-upcoming.
+export, metrics, packaging, `policy pull`). Storage runs on the embedded SQLite
+backend by default (zero-config, single-node) or on **Postgres** for horizontal
+scale — set `TELLUR_DATABASE_URL` (e.g. `postgres://user:pass@host:5432/tellur`)
+to switch. Postgres is reached over NoTls, so keep it on a private network or
+front it with a TLS-terminating proxy. Enterprise SSO/SCIM is upcoming.
 
 ## Development
 
@@ -518,7 +521,7 @@ metadata, not the raw prompt text.
 
 ## Roadmap
 
-- Postgres-backed team/server storage and enterprise SSO
+- Enterprise SSO/SCIM for the team/server hub
 - Live lifecycle-hook capture (beyond import) for editors that expose it
 - Richer policy templates for security-sensitive repositories
 - Packaged releases for npm, Homebrew, and GitHub Releases

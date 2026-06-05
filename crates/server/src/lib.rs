@@ -27,12 +27,28 @@ use std::sync::Arc;
 use anyhow::Result;
 
 /// Open + migrate the store and assemble application state.
+///
+/// Selects the backend by configuration: `TELLUR_DATABASE_URL` ⇒ Postgres
+/// (horizontal scale), otherwise the embedded SQLite store (zero-config
+/// single-node).
 pub fn build_state(config: Config) -> Result<AppState> {
     use storage::Store as _;
-    let store = storage::SqliteStore::open(&config.db_path)?;
-    store.migrate()?;
+    let store: Arc<dyn storage::Store> = match &config.database_url {
+        Some(url) => {
+            tracing::info!("using Postgres storage backend");
+            let store = storage::PostgresStore::connect(url)?;
+            store.migrate()?;
+            Arc::new(store)
+        }
+        None => {
+            tracing::info!(db = %config.db_path.display(), "using SQLite storage backend");
+            let store = storage::SqliteStore::open(&config.db_path)?;
+            store.migrate()?;
+            Arc::new(store)
+        }
+    };
     Ok(AppState {
-        store: Arc::new(store),
+        store,
         config: Arc::new(config),
         rate_limiter: Arc::new(ratelimit::RateLimiter::new(
             120,
