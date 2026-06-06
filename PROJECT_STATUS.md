@@ -1,11 +1,30 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-06 (Tier 1 B6 OIDC SSO; on feature branch)
+**Last updated:** 2026-06-06 (Tier 1 B6 SCIM — B6 complete; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-06 — Tier 1 B6 (enterprise) — SCIM 2.0 provisioning (B6 complete).**
+> On branch `feat/server-b6-scim`. New `scim` module exposes `/scim/v2/Users`
+> (list/create/get/PUT/PATCH/DELETE) so an IdP can auto-provision and, crucially,
+> **deprovision** hub members. Auth is a dedicated, org-scoped SCIM bearer token
+> (`scim_token` table, Argon2id-hashed, minted via `tellur-server admin
+> create-scim-token`); the org comes from the token, never the URL. A SCIM user
+> maps to a member + SSO identity: `userName`→email, `displayName`/`name`→display
+> name, optional `roles`→org role (default `viewer`), `externalId` round-tripped.
+> Schema v11 adds `member.active` + `member_identity.external_id`; **all three
+> auth paths (API token, session, SSO email lookup) now filter `active`**, so
+> `DELETE`/`PATCH active=false` revokes a member across every credential type
+> immediately. SQLite + Postgres parity. Scope: Users only — Group-based role
+> sync is deferred (documented). Verified: `tests/scim.rs` (provision → list/get
+> /filter, duplicate→409, bad/no token→401, deactivate→auth fails but still
+> listed, PATCH reactivate+role change, tenant isolation) + `scim` unit tests +
+> Postgres parity; 243 workspace tests; clippy -D warnings + cargo-deny green; PG
+> tests pass against a local Postgres. **B6 (enterprise) is now complete**
+> (per-repo RBAC + OIDC SSO + SCIM). Remaining hub work: queued/durable jobs.
+>
 > **2026-06-06 — Tier 1 B6 (enterprise) — OIDC SSO.** On branch
 > `feat/server-b6-oidc-sso`. Browser single sign-on via OIDC Authorization Code
 > + PKCE. New `oidc` module: PKCE (S256), authorize-URL builder, ID-token claim
@@ -540,7 +559,7 @@ Tellur/
 | 43 | SLSA/SPDX export | 20 | ✅ Done | SLSA v1.0 provenance + SPDX 2.3 SBOM with AI metadata, 2 tests | |
 | 44 | HTTP daemon (axum) | 22 | ✅ Done | `tellur daemon` (loopback-only, token-auth, Host check). Server **recomputes the hash chain** via EventWriter — clients cannot forge provenance. 7 endpoints incl. `POST /webhook/{source}` for cloud-agent (Devin) live capture. |
 | 45 | MCP server | 23 | ✅ Done | `tellur mcp` — real stdio JSON-RPC 2.0 (initialize/tools/list/tools/call). 6 tools backed by actual index/policy/verify queries. |
-| 46 | Team/server mode | §6.11 / §16.2 L5 / §32 Step 20 | ✅ In preview | Tier 0 (`tellur team report`) and Tier 1 self-host hub (`crates/server` / `tellur-server`) are implemented through ingest/read/report/policy/export, metrics, Docker packaging, policy pull, and repo SLSA/SPDX export, on **either SQLite (default) or Postgres** (`TELLUR_DATABASE_URL`). Enterprise SSO/SCIM remains a roadmap item. |
+| 46 | Team/server mode | §6.11 / §16.2 L5 / §32 Step 20 | ✅ In preview | Tier 0 (`tellur team report`) and Tier 1 self-host hub (`crates/server` / `tellur-server`) are implemented through ingest/read/report/policy/export, metrics, Docker packaging, policy pull, and repo SLSA/SPDX export, on **either SQLite (default) or Postgres** (`TELLUR_DATABASE_URL`), plus enterprise per-repo RBAC, OIDC SSO, and SCIM user provisioning. Remaining: durable jobs and SCIM Group sync. |
 | 47 | Plugin/adapter SDK | §8.3 / §32 Step 18 | ❌ Not started | Requires stable adapter/event API |
 
 ### Phase 7: Distribution (PRD sectie 32.3)
@@ -561,7 +580,8 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 1. **Pricing / Business model** (PRD sectie 27-31) — niet relevant voor dev, Sydney beslist
 2. **Enterprise team/server follow-ups** (PRD §6.11 / §16.2 Layer 5 / §32 Step 20)
    — Tier 0 and the self-host hub preview are implemented on both the SQLite and
-   Postgres backends. Remaining work: durable jobs and enterprise SSO/SCIM.
+   Postgres backends, with enterprise RBAC/SSO/SCIM. Remaining work: durable
+   jobs and SCIM Group-based role sync.
 3. **SOC 2 compliance** (PRD sectie 26) — far future
 4. **Plugin SDK** (PRD sectie 25) — API stabiliteit eerst nodig
 5. **Release signing** (PRD sectie 20) — na v1.0 (SLSA/SPDX *export* is wel klaar)
@@ -673,12 +693,14 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
    ingested line-level attribution. **Postgres backend ✅** (branch
    `feat/server-postgres`): `PostgresStore` (r2d2 pool, NoTls) behind the same
    `Store` trait, selected via `TELLUR_DATABASE_URL`, with a `postgres:16` CI
-   service running the integration tests. **B6 (enterprise) in progress:**
-   **fine-grained per-repo RBAC ✅** (branch `feat/server-b6-repo-rbac`) —
-   additive per-repo role grants (`max(org_role, grant)`) + admin management
-   endpoints/CLI; **OIDC SSO ✅** (branch `feat/server-b6-oidc-sso`) — code+PKCE
-   browser login, opaque session cookies, email-provisioned members. Remaining
-   B6 slice: **SCIM**. Also still open: **queued/durable jobs**.
+   service running the integration tests. **B6 (enterprise) ✅ complete:**
+   **fine-grained per-repo RBAC** (branch `feat/server-b6-repo-rbac`) — additive
+   per-repo role grants (`max(org_role, grant)`); **OIDC SSO**
+   (branch `feat/server-b6-oidc-sso`) — code+PKCE browser login, opaque session
+   cookies, email-provisioned members; **SCIM 2.0** (branch `feat/server-b6-scim`)
+   — `/scim/v2/Users` provisioning/deprovisioning via an org-scoped token, with
+   `member.active` gating all auth paths. Still open: **queued/durable jobs**;
+   SCIM Group-based role sync.
 9. **Plugin SDK** — requires stable adapter/event API
 
 ---

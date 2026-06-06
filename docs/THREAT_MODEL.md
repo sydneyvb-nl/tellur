@@ -31,7 +31,13 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    endpoints (`/healthz`, `/readyz`, `/metrics`) are unauthenticated but expose
    only liveness and aggregate counters — no tenant data. **SSO endpoints**
    (`/auth/login`, `/auth/callback`, `/auth/logout`) are unauthenticated entry
-   points for the browser OIDC flow (404 when SSO is not configured).
+   points for the browser OIDC flow (404 when SSO is not configured). **SCIM
+   provisioning** (`/scim/v2/Users`) authenticates with a dedicated, org-scoped
+   bearer token (separate from member tokens, stored Argon2id-hashed); the org
+   is derived from the token (never the URL), so an IdP can only provision into
+   its own tenant. Deprovisioning (`DELETE` / `PATCH active=false`) sets
+   `member.active = false`, which all auth paths (API token, session, SSO email)
+   reject — so revocation is immediate across every credential type.
 4. **Hub → IdP** (Tier 2, optional) — when SSO is configured the hub calls the
    OIDC issuer's discovery + token endpoints over **TLS** (OIDC Authorization
    Code + PKCE). The ID token is obtained on this direct TLS channel, so its

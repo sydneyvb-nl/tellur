@@ -500,8 +500,16 @@ contributor or admin on one repo) via
 (`HttpOnly`/`Secure`/`SameSite=Lax`). There is no open self-registration —
 pre-provision who may sign in with `tellur-server admin add-member --org <id>
 --name <name> --email <email> --role <role>`; the member is matched by verified
-email on first login and bound to their stable OIDC subject thereafter. SCIM
-provisioning is upcoming.
+email on first login and bound to their stable OIDC subject thereafter.
+
+**SCIM 2.0 provisioning** lets an IdP manage users automatically. Mint an
+org-scoped token with `tellur-server admin create-scim-token --org <id>` and
+point your IdP at `/scim/v2/Users` with it as the bearer token. Creating a user
+provisions a member (userName→email, optional `roles`→org role, default
+`viewer`); deprovisioning (`DELETE` or `PATCH active=false`) deactivates the
+member so every credential type — API token, dashboard session, and SSO — is
+revoked immediately. (User provisioning is implemented; Group-based role sync is
+a roadmap item.)
 
 ## Development
 
@@ -535,7 +543,7 @@ metadata, not the raw prompt text.
 
 ## Roadmap
 
-- SCIM provisioning for the team/server hub (SSO via OIDC is implemented)
+- SCIM Group-based role sync for the team/server hub (User provisioning + OIDC SSO are implemented)
 - Live lifecycle-hook capture (beyond import) for editors that expose it
 - Richer policy templates for security-sensitive repositories
 - Packaged releases for npm, Homebrew, and GitHub Releases

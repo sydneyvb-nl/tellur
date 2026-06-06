@@ -15,7 +15,7 @@ use tellur_core::schema::types::FileAttribution;
 
 use super::{
     AuditEntry, AuditRecord, IngestEvent, LoginTx, Org, OrgReport, PolicyDoc, PolicySummary, Repo,
-    RepoRoleGrant, RepoSummary, Store, StoredEvent,
+    RepoRoleGrant, RepoSummary, ScimUser, Store, StoredEvent,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
@@ -85,7 +85,8 @@ impl Store for PostgresStore {
                  CREATE TABLE IF NOT EXISTS member (
                      id TEXT PRIMARY KEY,
                      org_id TEXT NOT NULL REFERENCES org(id),
-                     display_name TEXT NOT NULL, role TEXT NOT NULL, created_at TEXT NOT NULL
+                     display_name TEXT NOT NULL, role TEXT NOT NULL, created_at TEXT NOT NULL,
+                     active BOOLEAN NOT NULL DEFAULT TRUE
                  );
                  CREATE INDEX IF NOT EXISTS idx_member_org ON member(org_id);
                  CREATE TABLE IF NOT EXISTS api_token (
@@ -147,7 +148,13 @@ impl Store for PostgresStore {
                  CREATE TABLE IF NOT EXISTS member_identity (
                      member_id TEXT PRIMARY KEY REFERENCES member(id),
                      email TEXT UNIQUE, oidc_issuer TEXT, oidc_subject TEXT,
+                     external_id TEXT,
                      UNIQUE (oidc_issuer, oidc_subject)
+                 );
+                 CREATE TABLE IF NOT EXISTS scim_token (
+                     token_id TEXT PRIMARY KEY,
+                     org_id TEXT NOT NULL REFERENCES org(id),
+                     secret_hash TEXT NOT NULL, created_at TEXT NOT NULL
                  );
                  CREATE TABLE IF NOT EXISTS oidc_login (
                      state TEXT PRIMARY KEY, pkce_verifier TEXT NOT NULL,
@@ -163,7 +170,7 @@ impl Store for PostgresStore {
             .context("failed to create schema")?;
         client
             .execute(
-                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '10')
+                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '11')
                  ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                 &[],
             )
@@ -242,7 +249,7 @@ impl Store for PostgresStore {
         let row = self.client()?.query_opt(
             "SELECT t.secret_hash, m.id, m.org_id, m.role
              FROM api_token t JOIN member m ON m.id = t.member_id
-             WHERE t.token_id = $1",
+             WHERE t.token_id = $1 AND m.active = TRUE",
             &[&token_id],
         )?;
         let Some(row) = row else { return Ok(None) };
@@ -886,7 +893,7 @@ impl Store for PostgresStore {
         principal_row(
             &mut self.client()?,
             "SELECT m.id, m.org_id, m.role FROM member m
-             JOIN member_identity i ON i.member_id = m.id WHERE i.email = $1",
+             JOIN member_identity i ON i.member_id = m.id WHERE i.email = $1 AND m.active = TRUE",
             email,
         )
     }
@@ -899,7 +906,7 @@ impl Store for PostgresStore {
         let row = self.client()?.query_opt(
             "SELECT m.id, m.org_id, m.role FROM member m
              JOIN member_identity i ON i.member_id = m.id
-             WHERE i.oidc_issuer = $1 AND i.oidc_subject = $2",
+             WHERE i.oidc_issuer = $1 AND i.oidc_subject = $2 AND m.active = TRUE",
             &[&issuer, &subject],
         )?;
         match row {
@@ -990,7 +997,7 @@ impl Store for PostgresStore {
         let row = self.client()?.query_opt(
             "SELECT m.id, m.org_id, m.role FROM session s
              JOIN member m ON m.id = s.member_id
-             WHERE s.id = $1 AND s.expires_at > $2",
+             WHERE s.id = $1 AND s.expires_at > $2 AND m.active = TRUE",
             &[&session_id, &now],
         )?;
         match row {
@@ -1008,6 +1015,168 @@ impl Store for PostgresStore {
             .client()?
             .execute("DELETE FROM session WHERE id = $1", &[&session_id])?;
         Ok(n > 0)
+    }
+
+    fn create_scim_token(&self, org_id: &str) -> Result<GeneratedToken> {
+        let token = auth::generate_token()?;
+        self.client()?
+            .execute(
+                "INSERT INTO scim_token (token_id, org_id, secret_hash, created_at)
+                 VALUES ($1, $2, $3, $4)",
+                &[
+                    &token.token_id,
+                    &org_id,
+                    &token.secret_hash,
+                    &chrono::Utc::now().to_rfc3339(),
+                ],
+            )
+            .context("failed to create SCIM token (does the org exist?)")?;
+        Ok(token)
+    }
+
+    fn authenticate_scim(&self, token: &str) -> Result<Option<String>> {
+        let Some((token_id, secret)) = auth::parse_token(token) else {
+            return Ok(None);
+        };
+        let row = self.client()?.query_opt(
+            "SELECT secret_hash, org_id FROM scim_token WHERE token_id = $1",
+            &[&token_id],
+        )?;
+        let Some(row) = row else { return Ok(None) };
+        let secret_hash: String = row.get(0);
+        if !auth::verify_secret(&secret, &secret_hash) {
+            return Ok(None);
+        }
+        Ok(Some(row.get(1)))
+    }
+
+    fn scim_create_user(
+        &self,
+        org_id: &str,
+        email: &str,
+        display_name: &str,
+        role: Role,
+        external_id: Option<&str>,
+    ) -> Result<ScimUser> {
+        let member_id = ids::generate_id("mbr");
+        let mut client = self.client()?;
+        let mut tx = client.transaction()?;
+        tx.execute(
+            "INSERT INTO member (id, org_id, display_name, role, created_at, active)
+             VALUES ($1, $2, $3, $4, $5, TRUE)",
+            &[
+                &member_id,
+                &org_id,
+                &display_name,
+                &role.as_str(),
+                &chrono::Utc::now().to_rfc3339(),
+            ],
+        )
+        .context("failed to create member")?;
+        tx.execute(
+            "INSERT INTO member_identity (member_id, email, external_id) VALUES ($1, $2, $3)",
+            &[&member_id, &email, &external_id],
+        )
+        .context("failed to set member email (already in use?)")?;
+        tx.commit()?;
+        Ok(ScimUser {
+            member_id,
+            email: email.to_string(),
+            display_name: display_name.to_string(),
+            role,
+            active: true,
+            external_id: external_id.map(str::to_string),
+        })
+    }
+
+    fn scim_list_users(&self, org_id: &str, email_filter: Option<&str>) -> Result<Vec<ScimUser>> {
+        let rows = self.client()?.query(
+            "SELECT m.id, m.display_name, m.role, m.active, i.email, i.external_id
+             FROM member m JOIN member_identity i ON i.member_id = m.id
+             WHERE m.org_id = $1 AND ($2::text IS NULL OR i.email = $2)
+             ORDER BY i.email",
+            &[&org_id, &email_filter],
+        )?;
+        let mut out = Vec::new();
+        for r in &rows {
+            out.push(ScimUser {
+                member_id: r.get(0),
+                display_name: r.get(1),
+                role: Role::parse(&r.get::<_, String>(2))?,
+                active: r.get(3),
+                email: r.get(4),
+                external_id: r.get(5),
+            });
+        }
+        Ok(out)
+    }
+
+    fn scim_get_user(&self, org_id: &str, member_id: &str) -> Result<Option<ScimUser>> {
+        let row = self.client()?.query_opt(
+            "SELECT m.display_name, m.role, m.active, i.email, i.external_id
+             FROM member m JOIN member_identity i ON i.member_id = m.id
+             WHERE m.org_id = $1 AND m.id = $2",
+            &[&org_id, &member_id],
+        )?;
+        match row {
+            Some(r) => Ok(Some(ScimUser {
+                member_id: member_id.to_string(),
+                display_name: r.get(0),
+                role: Role::parse(&r.get::<_, String>(1))?,
+                active: r.get(2),
+                email: r.get(3),
+                external_id: r.get(4),
+            })),
+            None => Ok(None),
+        }
+    }
+
+    fn scim_update_user(
+        &self,
+        org_id: &str,
+        member_id: &str,
+        display_name: Option<&str>,
+        role: Option<Role>,
+        active: Option<bool>,
+        external_id: Option<&str>,
+    ) -> Result<Option<ScimUser>> {
+        {
+            let mut client = self.client()?;
+            let exists = client
+                .query_opt(
+                    "SELECT 1 FROM member WHERE id = $1 AND org_id = $2",
+                    &[&member_id, &org_id],
+                )?
+                .is_some();
+            if !exists {
+                return Ok(None);
+            }
+            if let Some(name) = display_name {
+                client.execute(
+                    "UPDATE member SET display_name = $2 WHERE id = $1",
+                    &[&member_id, &name],
+                )?;
+            }
+            if let Some(r) = role {
+                client.execute(
+                    "UPDATE member SET role = $2 WHERE id = $1",
+                    &[&member_id, &r.as_str()],
+                )?;
+            }
+            if let Some(a) = active {
+                client.execute(
+                    "UPDATE member SET active = $2 WHERE id = $1",
+                    &[&member_id, &a],
+                )?;
+            }
+            if let Some(ext) = external_id {
+                client.execute(
+                    "UPDATE member_identity SET external_id = $2 WHERE member_id = $1",
+                    &[&member_id, &ext],
+                )?;
+            }
+        }
+        self.scim_get_user(org_id, member_id)
     }
 }
 

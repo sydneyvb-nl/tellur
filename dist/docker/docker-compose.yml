@@ -36,6 +36,9 @@ services:
       # TELLUR_OIDC_CLIENT_ID: "tellur-hub"
       # TELLUR_OIDC_CLIENT_SECRET: "change-me"
       # TELLUR_OIDC_REDIRECT_URI: "https://hub.example.com/auth/callback"
+      # SCIM 2.0 provisioning needs no env: mint an org-scoped token with
+      # `tellur-server admin create-scim-token --org <id>` and point your IdP at
+      # /scim/v2/Users using it as the bearer token.
     # depends_on:
     #   postgres:
     #     condition: service_healthy

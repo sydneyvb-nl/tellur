@@ -50,6 +50,11 @@ enum AdminAction {
         #[arg(long)]
         file: std::path::PathBuf,
     },
+    /// Mint an org-scoped SCIM provisioning token (printed once) for an IdP.
+    CreateScimToken {
+        #[arg(long)]
+        org: String,
+    },
     /// Provision an SSO member (email-mapped, no API token) so they may sign in
     /// via the configured IdP.
     AddMember {
@@ -156,6 +161,17 @@ fn run_admin(config: Config, action: AdminAction) -> Result<()> {
                 detail: format!("name={name} version={version} via=admin-cli"),
             })?;
             println!("Stored policy \"{name}\" version {version}");
+        }
+        AdminAction::CreateScimToken { org } => {
+            let token = store.create_scim_token(&org)?;
+            store.append_audit(&AuditEntry {
+                org_id: Some(org),
+                actor_member_id: None,
+                action: "scim_token.create".to_string(),
+                detail: "via=admin-cli".to_string(),
+            })?;
+            println!("SCIM provisioning token (store it now — shown only once):");
+            println!("  {}", token.plaintext);
         }
         AdminAction::AddMember {
             org,
