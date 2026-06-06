@@ -23,6 +23,8 @@ pub struct AppState {
     pub rate_limiter: Arc<RateLimiter>,
     /// In-process metrics, exposed at `/metrics`.
     pub metrics: Arc<Metrics>,
+    /// OIDC SSO runtime, present only when SSO is configured.
+    pub oidc: Option<Arc<crate::oidc::OidcRuntime>>,
 }
 
 /// Maximum accepted request body size (1 MiB).
@@ -35,6 +37,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/metrics", get(metrics))
+        // OIDC SSO (browser): unauthenticated entry points; 404 when SSO is off.
+        .route("/auth/login", get(crate::api::oidc_login))
+        .route("/auth/callback", get(crate::api::oidc_callback))
+        .route("/auth/logout", get(crate::api::oidc_logout))
         .route("/v1/me", get(crate::api::me))
         .route("/v1/orgs/{org_id}/me", get(crate::api::org_me))
         .route("/v1/orgs/{org_id}/repos", get(crate::api::list_repos))

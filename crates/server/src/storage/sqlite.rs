@@ -11,13 +11,13 @@ use tellur_core::schema::types::FileAttribution;
 
 use super::chain;
 use super::{
-    AuditEntry, AuditRecord, IngestEvent, Org, OrgReport, PolicyDoc, PolicySummary, Repo,
+    AuditEntry, AuditRecord, IngestEvent, LoginTx, Org, OrgReport, PolicyDoc, PolicySummary, Repo,
     RepoRoleGrant, RepoSummary, Store, StoredEvent,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
-const SCHEMA_VERSION: &str = "8";
+const SCHEMA_VERSION: &str = "10";
 
 /// A SQLite-backed store. The connection is behind a `Mutex` so the store is
 /// `Send + Sync` and usable as `Arc<dyn Store>`.
@@ -191,7 +191,35 @@ impl Store for SqliteStore {
                  updated_at TEXT NOT NULL,
                  PRIMARY KEY (repo_id, member_id)
              );
-             CREATE INDEX IF NOT EXISTS idx_repo_role_repo ON repo_role(repo_id);",
+             CREATE INDEX IF NOT EXISTS idx_repo_role_repo ON repo_role(repo_id);
+             -- SSO identity: maps a member to a (globally unique) email and an
+             -- optional OIDC subject bound on first login. Separate from member
+             -- so the core identity table is untouched.
+             CREATE TABLE IF NOT EXISTS member_identity (
+                 member_id    TEXT PRIMARY KEY REFERENCES member(id),
+                 email        TEXT UNIQUE,
+                 oidc_issuer  TEXT,
+                 oidc_subject TEXT,
+                 -- A subject is only unique within an issuer.
+                 UNIQUE (oidc_issuer, oidc_subject)
+             );
+             -- Pending OIDC login transactions (CSRF state -> PKCE/nonce +
+             -- a browser-binding secret matched against a login cookie).
+             CREATE TABLE IF NOT EXISTS oidc_login (
+                 state           TEXT PRIMARY KEY,
+                 pkce_verifier   TEXT NOT NULL,
+                 nonce           TEXT NOT NULL,
+                 browser_binding TEXT NOT NULL,
+                 created_at      TEXT NOT NULL
+             );
+             -- Browser sessions (opaque id -> member, with expiry).
+             CREATE TABLE IF NOT EXISTS session (
+                 id         TEXT PRIMARY KEY,
+                 member_id  TEXT NOT NULL REFERENCES member(id),
+                 created_at TEXT NOT NULL,
+                 expires_at TEXT NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_session_member ON session(member_id);",
         )
         .context("failed to create schema")?;
         conn.execute(
@@ -955,6 +983,220 @@ impl Store for SqliteStore {
                 Ok((prev_hash, entry_hash, recomputed))
             },
         )
+    }
+
+    fn provision_member(
+        &self,
+        org_id: &str,
+        display_name: &str,
+        role: Role,
+        email: &str,
+    ) -> Result<String> {
+        let member_id = ids::generate_id("mbr");
+        let mut guard = self.conn()?;
+        // Atomic: a failed identity insert (e.g. duplicate email) must roll back
+        // the member row, so we never leave a half-provisioned account.
+        let tx = guard.transaction()?;
+        tx.execute(
+            "INSERT INTO member (id, org_id, display_name, role, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                member_id,
+                org_id,
+                display_name,
+                role.as_str(),
+                chrono::Utc::now().to_rfc3339()
+            ],
+        )
+        .context("failed to create member (does the org exist?)")?;
+        tx.execute(
+            "INSERT INTO member_identity (member_id, email) VALUES (?1, ?2)",
+            params![member_id, email],
+        )
+        .context("failed to set member email (already in use?)")?;
+        tx.commit()?;
+        Ok(member_id)
+    }
+
+    fn find_member_by_email(&self, email: &str) -> Result<Option<Principal>> {
+        let conn = self.conn()?;
+        principal_row(
+            &conn,
+            "SELECT m.id, m.org_id, m.role FROM member m
+             JOIN member_identity i ON i.member_id = m.id WHERE i.email = ?1",
+            email,
+        )
+    }
+
+    fn find_member_by_oidc_subject(
+        &self,
+        issuer: &str,
+        subject: &str,
+    ) -> Result<Option<Principal>> {
+        let conn = self.conn()?;
+        let row = conn
+            .query_row(
+                "SELECT m.id, m.org_id, m.role FROM member m
+                 JOIN member_identity i ON i.member_id = m.id
+                 WHERE i.oidc_issuer = ?1 AND i.oidc_subject = ?2",
+                params![issuer, subject],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        match row {
+            Some((member_id, org_id, role)) => Ok(Some(Principal {
+                org_id,
+                member_id,
+                role: Role::parse(&role)?,
+            })),
+            None => Ok(None),
+        }
+    }
+
+    fn bind_oidc_subject(&self, member_id: &str, issuer: &str, subject: &str) -> Result<bool> {
+        // Only bind when no subject is set yet; never overwrite an existing
+        // binding (that would let a different IdP account on the same email take
+        // over the member).
+        let n = self.conn()?.execute(
+            "UPDATE member_identity SET oidc_issuer = ?2, oidc_subject = ?3
+             WHERE member_id = ?1 AND oidc_subject IS NULL",
+            params![member_id, issuer, subject],
+        )?;
+        Ok(n > 0)
+    }
+
+    fn put_login(
+        &self,
+        state: &str,
+        pkce_verifier: &str,
+        nonce: &str,
+        browser_binding: &str,
+    ) -> Result<()> {
+        self.conn()?.execute(
+            "INSERT INTO oidc_login (state, pkce_verifier, nonce, browser_binding, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                state,
+                pkce_verifier,
+                nonce,
+                browser_binding,
+                chrono::Utc::now().to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn count_logins(&self) -> Result<u64> {
+        let n: i64 = self
+            .conn()?
+            .query_row("SELECT COUNT(*) FROM oidc_login", [], |r| r.get(0))?;
+        Ok(n as u64)
+    }
+
+    fn prune_expired_logins(&self, ttl_secs: i64) -> Result<u64> {
+        let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(ttl_secs)).to_rfc3339();
+        let n = self.conn()?.execute(
+            "DELETE FROM oidc_login WHERE created_at < ?1",
+            params![cutoff],
+        )?;
+        Ok(n as u64)
+    }
+
+    fn take_login(&self, state: &str) -> Result<Option<LoginTx>> {
+        let conn = self.conn()?;
+        let tx = conn
+            .query_row(
+                "SELECT pkce_verifier, nonce, browser_binding, created_at
+                 FROM oidc_login WHERE state = ?1",
+                params![state],
+                |r| {
+                    Ok(LoginTx {
+                        pkce_verifier: r.get(0)?,
+                        nonce: r.get(1)?,
+                        browser_binding: r.get(2)?,
+                        created_at: r.get(3)?,
+                    })
+                },
+            )
+            .optional()?;
+        if tx.is_some() {
+            conn.execute("DELETE FROM oidc_login WHERE state = ?1", params![state])?;
+        }
+        Ok(tx)
+    }
+
+    fn create_session(&self, member_id: &str, ttl_secs: i64) -> Result<String> {
+        let id = ids::generate_id("sess");
+        let now = chrono::Utc::now();
+        let expires = now + chrono::Duration::seconds(ttl_secs);
+        self.conn()?.execute(
+            "INSERT INTO session (id, member_id, created_at, expires_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![id, member_id, now.to_rfc3339(), expires.to_rfc3339()],
+        )?;
+        Ok(id)
+    }
+
+    fn session_principal(&self, session_id: &str) -> Result<Option<Principal>> {
+        let conn = self.conn()?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let row = conn
+            .query_row(
+                "SELECT m.id, m.org_id, m.role FROM session s
+                 JOIN member m ON m.id = s.member_id
+                 WHERE s.id = ?1 AND s.expires_at > ?2",
+                params![session_id, now],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        match row {
+            Some((member_id, org_id, role)) => Ok(Some(Principal {
+                org_id,
+                member_id,
+                role: Role::parse(&role)?,
+            })),
+            None => Ok(None),
+        }
+    }
+
+    fn delete_session(&self, session_id: &str) -> Result<bool> {
+        let n = self
+            .conn()?
+            .execute("DELETE FROM session WHERE id = ?1", params![session_id])?;
+        Ok(n > 0)
+    }
+}
+
+/// Helper: read at most one `(member_id, org_id, role)` row into a [`Principal`].
+fn principal_row(conn: &Connection, sql: &str, key: &str) -> Result<Option<Principal>> {
+    let row = conn
+        .query_row(sql, params![key], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })
+        .optional()?;
+    match row {
+        Some((member_id, org_id, role)) => Ok(Some(Principal {
+            org_id,
+            member_id,
+            role: Role::parse(&role)?,
+        })),
+        None => Ok(None),
     }
 }
 

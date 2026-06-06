@@ -29,8 +29,26 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    (`GET .../export/events|audit` and per-repo `.../export/slsa|spdx` — admin,
    org/repo data disclosure). Operational
    endpoints (`/healthz`, `/readyz`, `/metrics`) are unauthenticated but expose
-   only liveness and aggregate counters — no tenant data.
-4. **Hub → storage** — SQLite (embedded, same host) or Postgres (network, via
+   only liveness and aggregate counters — no tenant data. **SSO endpoints**
+   (`/auth/login`, `/auth/callback`, `/auth/logout`) are unauthenticated entry
+   points for the browser OIDC flow (404 when SSO is not configured).
+4. **Hub → IdP** (Tier 2, optional) — when SSO is configured the hub calls the
+   OIDC issuer's discovery + token endpoints over **TLS** (OIDC Authorization
+   Code + PKCE). The ID token is obtained on this direct TLS channel, so its
+   integrity rests on TLS server validation (OIDC Core §3.1.3.7); the hub still
+   validates `iss`/`aud`/`exp` and the per-login `nonce`. Because that integrity
+   depends on TLS, the hub **rejects non-HTTPS** issuer/authorization/token
+   endpoints (loopback `http` is allowed only for local dev). The client secret
+   is a secret (env/secret store). No open self-registration: only
+   pre-provisioned members (by verified email) may sign in, and the OIDC subject
+   is bound on first login and never silently re-bound (a second IdP account on
+   the same email is refused). The discovered metadata `issuer` must match the
+   configured issuer, and subject bindings are keyed by `(issuer, subject)` (a
+   `sub` is only unique per issuer). The callback is bound to the initiating
+   browser via a short-lived `HttpOnly`/`Secure` login cookie matched against a
+   server-stored secret (defeats login-CSRF / session fixation from a forwarded
+   callback URL). Anonymous `/auth/login` rows are TTL-pruned and hard-capped.
+5. **Hub → storage** — SQLite (embedded, same host) or Postgres (network, via
    `TELLUR_DATABASE_URL`); tenant isolation enforced here. The Postgres client
    connects with **NoTls**, so the hub↔Postgres link is a trust boundary that
    must be kept on a private network or fronted by a TLS-terminating proxy; the
@@ -43,7 +61,7 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
 
 | Category | Threat | Mitigation |
 | --- | --- | --- |
-| **Spoofing** | Forged identity / stolen token | Per-user tokens hashed at rest (Argon2id), short-lived session cookies (HttpOnly/Secure/SameSite=strict); OIDC SSO in Tier 2; deny-by-default. |
+| **Spoofing** | Forged identity / stolen token | Per-user tokens hashed at rest (Argon2id); **OIDC SSO** (Authorization Code + PKCE, with CSRF `state` and replay-binding `nonce`) issues opaque, server-stored **session cookies** (`HttpOnly`/`Secure`/`SameSite=Lax`, expiring) — no token in the cookie, revocable by deleting the session; sign-in is restricted to pre-provisioned members (verified email), so a valid IdP account alone cannot self-register. Deny-by-default extractor accepts either a bearer token or a session cookie. |
 | **Tampering** | Forged or altered provenance; modified data in transit | On ingest the server **recomputes the per-repo hash chain** (`hash_event`) — client-supplied hashes are ignored. Both the audit log and each repo's event chain persist a **head-hash + length checkpoint** so tail truncation / rollback to an earlier prefix is detected by `verify_*_chain`. TLS 1.3 in transit; append-only logs. |
 | **Repudiation** | "I didn't do that" | Tamper-evident, hash-chained **audit log** of auth/data/policy/export events; ingests, **reads**, reports, and access denials are all recorded. Corrupt stored payloads surface as errors rather than silent nulls. |
 | **Information disclosure** | Secrets/PII leak via ingested payloads, logs, cross-tenant reads, or bulk export | Inbound ingest payloads are **recursively secret-redacted** before storage; hub stores no raw prompts by default; **data-layer tenant scoping** (every query filtered by `org_id`) prevents BOLA; org-wide **export endpoints are admin-only, rate-limited, and audited**; no secrets/PII in logs; encryption at rest. |

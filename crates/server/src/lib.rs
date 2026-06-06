@@ -13,6 +13,7 @@ pub mod auth;
 pub mod config;
 pub mod error;
 pub mod metrics;
+pub mod oidc;
 pub mod ratelimit;
 pub mod storage;
 
@@ -47,6 +48,12 @@ pub fn build_state(config: Config) -> Result<AppState> {
             Arc::new(store)
         }
     };
+    // OIDC SSO is enabled only when fully configured (TELLUR_OIDC_*).
+    let oidc = oidc::OidcConfig::from_env().map(|cfg| {
+        tracing::info!(issuer = %cfg.issuer, "OIDC SSO enabled");
+        Arc::new(oidc::OidcRuntime::new(cfg, Arc::new(oidc::HttpOidcClient)))
+    });
+
     Ok(AppState {
         store,
         config: Arc::new(config),
@@ -55,6 +62,7 @@ pub fn build_state(config: Config) -> Result<AppState> {
             std::time::Duration::from_secs(60),
         )),
         metrics: Arc::new(metrics::Metrics::new()),
+        oidc,
     })
 }
 

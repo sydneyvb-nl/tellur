@@ -29,6 +29,13 @@ services:
       TELLUR_SERVER_ALLOW_NON_LOOPBACK: "1"
       # Uncomment to use the Postgres backend instead of SQLite:
       # TELLUR_DATABASE_URL: "postgres://tellur:tellur@postgres:5432/tellur"
+      # Uncomment to enable OIDC SSO (all four required). Provision who may sign
+      # in with `tellur-server admin add-member --email ...`. Keep the client
+      # secret in a secret store, and serve the hub over HTTPS (Secure cookie).
+      # TELLUR_OIDC_ISSUER: "https://idp.example.com"
+      # TELLUR_OIDC_CLIENT_ID: "tellur-hub"
+      # TELLUR_OIDC_CLIENT_SECRET: "change-me"
+      # TELLUR_OIDC_REDIRECT_URI: "https://hub.example.com/auth/callback"
     # depends_on:
     #   postgres:
     #     condition: service_healthy

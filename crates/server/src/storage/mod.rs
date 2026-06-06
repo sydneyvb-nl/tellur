@@ -97,6 +97,17 @@ pub struct PolicySummary {
     pub updated_at: String,
 }
 
+/// A pending OIDC login transaction (CSRF `state` → PKCE/nonce binding).
+#[derive(Debug, Clone)]
+pub struct LoginTx {
+    pub pkce_verifier: String,
+    pub nonce: String,
+    /// Secret tied to the initiating browser (matched against a login cookie on
+    /// callback to prevent login-CSRF / session fixation).
+    pub browser_binding: String,
+    pub created_at: String,
+}
+
 /// A per-repo role grant: a member's elevated role on a specific repo.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct RepoRoleGrant {
@@ -253,4 +264,61 @@ pub trait Store: Send + Sync {
 
     /// Recompute the audit hash chain and report whether it is intact.
     fn verify_audit_chain(&self) -> Result<bool>;
+
+    // ─── SSO: identity, login transactions, sessions ─────────────────────────
+
+    /// Provision an SSO-capable member with a (globally unique) email and no API
+    /// token. Returns the new member id. Used to pre-authorize who may sign in
+    /// via the IdP (no open self-registration).
+    fn provision_member(
+        &self,
+        org_id: &str,
+        display_name: &str,
+        role: Role,
+        email: &str,
+    ) -> Result<String>;
+
+    /// Resolve a verified email to a principal, if a member is provisioned.
+    fn find_member_by_email(&self, email: &str) -> Result<Option<Principal>>;
+
+    /// Resolve a bound `(issuer, subject)` to a principal, if any. The subject is
+    /// only unique within an issuer, so both are required.
+    fn find_member_by_oidc_subject(&self, issuer: &str, subject: &str)
+    -> Result<Option<Principal>>;
+
+    /// Bind an `(issuer, subject)` to a member **only if none is bound yet**.
+    /// Returns `true` if it bound, `false` if the member already has a (different)
+    /// binding — preventing a second IdP account on the same email from taking
+    /// over the member.
+    fn bind_oidc_subject(&self, member_id: &str, issuer: &str, subject: &str) -> Result<bool>;
+
+    /// Persist a pending login transaction keyed by its CSRF `state`, including
+    /// the browser-binding secret.
+    fn put_login(
+        &self,
+        state: &str,
+        pkce_verifier: &str,
+        nonce: &str,
+        browser_binding: &str,
+    ) -> Result<()>;
+
+    /// Count outstanding login transactions (for a hard anti-flood cap).
+    fn count_logins(&self) -> Result<u64>;
+
+    /// Delete login transactions older than `ttl_secs` (bounds the table against
+    /// anonymous `/auth/login` floods). Returns the number removed.
+    fn prune_expired_logins(&self, ttl_secs: i64) -> Result<u64>;
+
+    /// Atomically consume a login transaction by `state` (delete + return).
+    fn take_login(&self, state: &str) -> Result<Option<LoginTx>>;
+
+    /// Create a session for a member, expiring `ttl_secs` from now. Returns the
+    /// opaque session id (used as the cookie value).
+    fn create_session(&self, member_id: &str, ttl_secs: i64) -> Result<String>;
+
+    /// Resolve a non-expired session id to a principal.
+    fn session_principal(&self, session_id: &str) -> Result<Option<Principal>>;
+
+    /// Delete a session (logout). Returns `true` if one existed.
+    fn delete_session(&self, session_id: &str) -> Result<bool>;
 }
