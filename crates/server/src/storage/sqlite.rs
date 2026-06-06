@@ -988,8 +988,11 @@ impl Store for SqliteStore {
         email: &str,
     ) -> Result<String> {
         let member_id = ids::generate_id("mbr");
-        let conn = self.conn()?;
-        conn.execute(
+        let mut guard = self.conn()?;
+        // Atomic: a failed identity insert (e.g. duplicate email) must roll back
+        // the member row, so we never leave a half-provisioned account.
+        let tx = guard.transaction()?;
+        tx.execute(
             "INSERT INTO member (id, org_id, display_name, role, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
@@ -1001,11 +1004,12 @@ impl Store for SqliteStore {
             ],
         )
         .context("failed to create member (does the org exist?)")?;
-        conn.execute(
+        tx.execute(
             "INSERT INTO member_identity (member_id, email) VALUES (?1, ?2)",
             params![member_id, email],
         )
         .context("failed to set member email (already in use?)")?;
+        tx.commit()?;
         Ok(member_id)
     }
 
@@ -1029,16 +1033,16 @@ impl Store for SqliteStore {
         )
     }
 
-    fn bind_oidc_subject(&self, member_id: &str, subject: &str) -> Result<()> {
-        let conn = self.conn()?;
-        let n = conn.execute(
-            "UPDATE member_identity SET oidc_subject = ?2 WHERE member_id = ?1",
+    fn bind_oidc_subject(&self, member_id: &str, subject: &str) -> Result<bool> {
+        // Only bind when no subject is set yet; never overwrite an existing
+        // binding (that would let a different IdP account on the same email take
+        // over the member).
+        let n = self.conn()?.execute(
+            "UPDATE member_identity SET oidc_subject = ?2
+             WHERE member_id = ?1 AND oidc_subject IS NULL",
             params![member_id, subject],
         )?;
-        if n == 0 {
-            bail!("member {member_id} has no SSO identity row");
-        }
-        Ok(())
+        Ok(n > 0)
     }
 
     fn put_login(&self, state: &str, pkce_verifier: &str, nonce: &str) -> Result<()> {
@@ -1048,6 +1052,15 @@ impl Store for SqliteStore {
             params![state, pkce_verifier, nonce, chrono::Utc::now().to_rfc3339()],
         )?;
         Ok(())
+    }
+
+    fn prune_expired_logins(&self, ttl_secs: i64) -> Result<u64> {
+        let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(ttl_secs)).to_rfc3339();
+        let n = self.conn()?.execute(
+            "DELETE FROM oidc_login WHERE created_at < ?1",
+            params![cutoff],
+        )?;
+        Ok(n as u64)
     }
 
     fn take_login(&self, state: &str) -> Result<Option<LoginTx>> {

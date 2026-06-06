@@ -243,7 +243,9 @@ fn full_store_surface() {
             .unwrap()
             .is_none()
     );
-    store.bind_oidc_subject(&sso, "idp-1").unwrap();
+    assert!(store.bind_oidc_subject(&sso, "idp-1").unwrap());
+    // Re-binding a different subject must be refused (no takeover).
+    assert!(!store.bind_oidc_subject(&sso, "idp-2").unwrap());
     assert_eq!(
         store
             .find_member_by_oidc_subject("idp-1")
@@ -252,6 +254,10 @@ fn full_store_surface() {
             .member_id,
         sso
     );
+    // Stale login rows are pruned by TTL.
+    store.put_login("old-state", "v", "n").unwrap();
+    assert_eq!(store.prune_expired_logins(-1).unwrap(), 1);
+    assert!(store.take_login("old-state").unwrap().is_none());
 
     // Login transaction is consumed exactly once.
     store.put_login("state-1", "verifier-1", "nonce-1").unwrap();

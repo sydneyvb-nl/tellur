@@ -1038,6 +1038,12 @@ pub async fn list_repo_roles(
 /// a login transaction (CSRF state → PKCE/nonce) and redirects to the IdP.
 pub async fn oidc_login(State(state): State<AppState>) -> Result<Response, ServerError> {
     let oidc = state.oidc.clone().ok_or(ServerError::NotFound)?;
+    // Opportunistically prune stale login rows so anonymous /auth/login traffic
+    // can't grow the table without bound.
+    state
+        .store
+        .prune_expired_logins(oidc::LOGIN_TTL_SECS)
+        .map_err(ServerError::Internal)?;
     let pkce = Pkce::generate();
     let state_tok = oidc::random_token(24);
     let nonce = oidc::random_token(24);
@@ -1167,10 +1173,16 @@ fn resolve_sso_member(state: &AppState, claims: &oidc::IdClaims) -> Result<Princ
         .map_err(ServerError::Internal)?
     {
         Some(p) => {
-            state
+            // Bind the subject on first login only. If the member already has a
+            // (different) bound subject, refuse — a second IdP account on the
+            // same email must not take over the member.
+            let bound = state
                 .store
                 .bind_oidc_subject(&p.member_id, &claims.subject)
                 .map_err(ServerError::Internal)?;
+            if !bound {
+                return Err(ServerError::Forbidden);
+            }
             Ok(p)
         }
         None => Err(ServerError::Forbidden),

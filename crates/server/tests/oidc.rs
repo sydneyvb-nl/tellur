@@ -256,6 +256,21 @@ async fn unprovisioned_or_unverified_email_is_rejected() {
 }
 
 #[tokio::test]
+async fn second_idp_subject_for_same_email_cannot_take_over() {
+    let s = setup();
+    s.store
+        .provision_member(&s.org, "Alice", Role::Admin, "alice@corp.test")
+        .unwrap();
+    // First login binds subject A.
+    let (status, _) = login_get_session(&s, "subject-A", "alice@corp.test", true).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    // A different IdP subject with the same verified email is refused (403).
+    let (status, cookie) = login_get_session(&s, "subject-B", "alice@corp.test", true).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(cookie.is_none());
+}
+
+#[tokio::test]
 async fn callback_with_unknown_state_is_rejected() {
     let s = setup();
     // No prior /auth/login → state is unknown (CSRF / replay).

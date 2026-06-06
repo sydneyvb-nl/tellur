@@ -144,12 +144,18 @@ impl OidcRuntime {
         }
     }
 
-    /// Resolve discovery, caching the first successful result.
+    /// Resolve discovery, caching the first successful result. Enforces HTTPS on
+    /// the issuer and all discovered endpoints: ID-token integrity relies on the
+    /// TLS channel (we don't verify the JWT signature locally), so a plaintext
+    /// issuer/endpoint would let a network attacker forge a login.
     pub fn discovery(&self) -> Result<Discovery> {
         if let Some(d) = self.cached.lock().unwrap().clone() {
             return Ok(d);
         }
+        require_https("issuer", &self.config.issuer)?;
         let disc = self.client.discover(&self.config.issuer)?;
+        require_https("authorization_endpoint", &disc.authorization_endpoint)?;
+        require_https("token_endpoint", &disc.token_endpoint)?;
         *self.cached.lock().unwrap() = Some(disc.clone());
         Ok(disc)
     }
@@ -184,6 +190,17 @@ impl Pkce {
             challenge,
         }
     }
+}
+
+/// Reject a non-HTTPS URL (loopback `http://127.0.0.1` / `http://localhost` is
+/// allowed for local development/testing only).
+fn require_https(what: &str, url: &str) -> Result<()> {
+    let is_https = url.starts_with("https://");
+    let is_local_http = url.starts_with("http://127.0.0.1") || url.starts_with("http://localhost");
+    if !is_https && !is_local_http {
+        bail!("OIDC {what} must use https (got {url})");
+    }
+    Ok(())
 }
 
 /// A high-entropy URL-safe random token (used for state, nonce, PKCE verifier,
@@ -411,5 +428,14 @@ mod tests {
     fn rejects_malformed_token() {
         assert!(parse_and_validate_id_token("not.a", "i", "c", "n", 0).is_err());
         assert!(parse_and_validate_id_token("a.b.c", "i", "c", "n", 0).is_err());
+    }
+
+    #[test]
+    fn require_https_rejects_plaintext_endpoints() {
+        assert!(require_https("issuer", "https://idp.example").is_ok());
+        assert!(require_https("issuer", "http://idp.example").is_err());
+        // Loopback http is allowed for local dev/testing only.
+        assert!(require_https("token", "http://127.0.0.1:8080/token").is_ok());
+        assert!(require_https("token", "http://localhost/token").is_ok());
     }
 }

@@ -898,15 +898,14 @@ impl Store for PostgresStore {
         )
     }
 
-    fn bind_oidc_subject(&self, member_id: &str, subject: &str) -> Result<()> {
+    fn bind_oidc_subject(&self, member_id: &str, subject: &str) -> Result<bool> {
+        // Only bind when no subject is set yet (see SQLite impl for rationale).
         let n = self.client()?.execute(
-            "UPDATE member_identity SET oidc_subject = $2 WHERE member_id = $1",
+            "UPDATE member_identity SET oidc_subject = $2
+             WHERE member_id = $1 AND oidc_subject IS NULL",
             &[&member_id, &subject],
         )?;
-        if n == 0 {
-            bail!("member {member_id} has no SSO identity row");
-        }
-        Ok(())
+        Ok(n > 0)
     }
 
     fn put_login(&self, state: &str, pkce_verifier: &str, nonce: &str) -> Result<()> {
@@ -921,6 +920,14 @@ impl Store for PostgresStore {
             ],
         )?;
         Ok(())
+    }
+
+    fn prune_expired_logins(&self, ttl_secs: i64) -> Result<u64> {
+        let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(ttl_secs)).to_rfc3339();
+        let n = self
+            .client()?
+            .execute("DELETE FROM oidc_login WHERE created_at < $1", &[&cutoff])?;
+        Ok(n)
     }
 
     fn take_login(&self, state: &str) -> Result<Option<LoginTx>> {

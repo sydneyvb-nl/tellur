@@ -36,9 +36,13 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    OIDC issuer's discovery + token endpoints over **TLS** (OIDC Authorization
    Code + PKCE). The ID token is obtained on this direct TLS channel, so its
    integrity rests on TLS server validation (OIDC Core §3.1.3.7); the hub still
-   validates `iss`/`aud`/`exp` and the per-login `nonce`. The client secret is a
-   secret (env/secret store). No open self-registration: only pre-provisioned
-   members (by verified email) may sign in.
+   validates `iss`/`aud`/`exp` and the per-login `nonce`. Because that integrity
+   depends on TLS, the hub **rejects non-HTTPS** issuer/authorization/token
+   endpoints (loopback `http` is allowed only for local dev). The client secret
+   is a secret (env/secret store). No open self-registration: only
+   pre-provisioned members (by verified email) may sign in, and the OIDC subject
+   is bound on first login and never silently re-bound (a second IdP account on
+   the same email is refused). Anonymous `/auth/login` rows are TTL-pruned.
 5. **Hub → storage** — SQLite (embedded, same host) or Postgres (network, via
    `TELLUR_DATABASE_URL`); tenant isolation enforced here. The Postgres client
    connects with **NoTls**, so the hub↔Postgres link is a trust boundary that

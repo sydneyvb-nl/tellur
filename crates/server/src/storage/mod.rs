@@ -281,11 +281,18 @@ pub trait Store: Send + Sync {
     /// Resolve a bound OIDC subject to a principal, if any.
     fn find_member_by_oidc_subject(&self, subject: &str) -> Result<Option<Principal>>;
 
-    /// Bind an OIDC subject to a member (on first successful login).
-    fn bind_oidc_subject(&self, member_id: &str, subject: &str) -> Result<()>;
+    /// Bind an OIDC subject to a member **only if none is bound yet**. Returns
+    /// `true` if it bound, `false` if the member already has a (different)
+    /// subject — preventing a second IdP account on the same email from taking
+    /// over the member.
+    fn bind_oidc_subject(&self, member_id: &str, subject: &str) -> Result<bool>;
 
     /// Persist a pending login transaction keyed by its CSRF `state`.
     fn put_login(&self, state: &str, pkce_verifier: &str, nonce: &str) -> Result<()>;
+
+    /// Delete login transactions older than `ttl_secs` (bounds the table against
+    /// anonymous `/auth/login` floods). Returns the number removed.
+    fn prune_expired_logins(&self, ttl_secs: i64) -> Result<u64>;
 
     /// Atomically consume a login transaction by `state` (delete + return).
     fn take_login(&self, state: &str) -> Result<Option<LoginTx>>;
