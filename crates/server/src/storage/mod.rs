@@ -108,6 +108,17 @@ pub struct LoginTx {
     pub created_at: String,
 }
 
+/// A SCIM-managed user (read model mapping a member + its SSO identity).
+#[derive(Debug, Clone)]
+pub struct ScimUser {
+    pub member_id: String,
+    pub email: String,
+    pub display_name: String,
+    pub role: Role,
+    pub active: bool,
+    pub external_id: Option<String>,
+}
+
 /// A per-repo role grant: a member's elevated role on a specific repo.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct RepoRoleGrant {
@@ -321,4 +332,43 @@ pub trait Store: Send + Sync {
 
     /// Delete a session (logout). Returns `true` if one existed.
     fn delete_session(&self, session_id: &str) -> Result<bool>;
+
+    // ─── SCIM 2.0 provisioning ───────────────────────────────────────────────
+
+    /// Mint an org-scoped SCIM provisioning token (plaintext returned once).
+    fn create_scim_token(&self, org_id: &str) -> Result<GeneratedToken>;
+
+    /// Resolve a SCIM bearer token to its org id, or `None`.
+    fn authenticate_scim(&self, token: &str) -> Result<Option<String>>;
+
+    /// Provision a SCIM user (creates an active member + SSO identity). Errors if
+    /// the email is already in use (the caller maps that to 409 Conflict).
+    fn scim_create_user(
+        &self,
+        org_id: &str,
+        email: &str,
+        display_name: &str,
+        role: Role,
+        external_id: Option<&str>,
+    ) -> Result<ScimUser>;
+
+    /// List SCIM users in an org, optionally filtered by exact `userName`/email.
+    fn scim_list_users(&self, org_id: &str, email_filter: Option<&str>) -> Result<Vec<ScimUser>>;
+
+    /// Fetch one SCIM user by member id (tenant-scoped).
+    fn scim_get_user(&self, org_id: &str, member_id: &str) -> Result<Option<ScimUser>>;
+
+    /// Update a SCIM user's mutable fields (any `Some` is applied). Returns the
+    /// updated user, or `None` if it does not exist in the org.
+    #[allow(clippy::too_many_arguments)]
+    fn scim_update_user(
+        &self,
+        org_id: &str,
+        member_id: &str,
+        email: Option<&str>,
+        display_name: Option<&str>,
+        role: Option<Role>,
+        active: Option<bool>,
+        external_id: Option<&str>,
+    ) -> Result<Option<ScimUser>>;
 }

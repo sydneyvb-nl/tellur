@@ -82,6 +82,18 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/orgs/{org_id}/export/audit",
             get(crate::api::export_audit),
         )
+        // SCIM 2.0 provisioning (org derived from the SCIM bearer token).
+        .route(
+            "/scim/v2/Users",
+            get(crate::scim::list_users).post(crate::scim::create_user),
+        )
+        .route(
+            "/scim/v2/Users/{id}",
+            get(crate::scim::get_user)
+                .put(crate::scim::replace_user)
+                .patch(crate::scim::patch_user)
+                .delete(crate::scim::delete_user),
+        )
         // Cap request bodies (defense against unrestricted resource consumption).
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)

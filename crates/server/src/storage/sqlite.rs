@@ -12,12 +12,12 @@ use tellur_core::schema::types::FileAttribution;
 use super::chain;
 use super::{
     AuditEntry, AuditRecord, IngestEvent, LoginTx, Org, OrgReport, PolicyDoc, PolicySummary, Repo,
-    RepoRoleGrant, RepoSummary, Store, StoredEvent,
+    RepoRoleGrant, RepoSummary, ScimUser, Store, StoredEvent,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
-const SCHEMA_VERSION: &str = "10";
+const SCHEMA_VERSION: &str = "11";
 
 /// A SQLite-backed store. The connection is behind a `Mutex` so the store is
 /// `Send + Sync` and usable as `Arc<dyn Store>`.
@@ -51,6 +51,24 @@ impl SqliteStore {
             .lock()
             .map_err(|_| anyhow::anyhow!("database connection lock poisoned"))
     }
+}
+
+/// Add a column to a table if it is not already present (idempotent migration).
+/// Table/column/definition are always internal constants, never user input.
+fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
+    debug_assert!(matches!(table, "member" | "member_identity" | "oidc_login"));
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let present = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .filter_map(std::result::Result::ok)
+        .any(|name| name == column);
+    if !present {
+        conn.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )?;
+    }
+    Ok(())
 }
 
 /// Compute an audit entry hash over the previous hash and the entry fields.
@@ -108,7 +126,9 @@ impl Store for SqliteStore {
                  org_id       TEXT NOT NULL REFERENCES org(id),
                  display_name TEXT NOT NULL,
                  role         TEXT NOT NULL,
-                 created_at   TEXT NOT NULL
+                 created_at   TEXT NOT NULL,
+                 -- Deactivated members cannot authenticate (SCIM deprovisioning).
+                 active       INTEGER NOT NULL DEFAULT 1
              );
              CREATE INDEX IF NOT EXISTS idx_member_org ON member(org_id);
              CREATE TABLE IF NOT EXISTS api_token (
@@ -200,8 +220,16 @@ impl Store for SqliteStore {
                  email        TEXT UNIQUE,
                  oidc_issuer  TEXT,
                  oidc_subject TEXT,
+                 external_id  TEXT,
                  -- A subject is only unique within an issuer.
                  UNIQUE (oidc_issuer, oidc_subject)
+             );
+             -- Org-scoped SCIM provisioning tokens (secret stored hashed).
+             CREATE TABLE IF NOT EXISTS scim_token (
+                 token_id    TEXT PRIMARY KEY,
+                 org_id      TEXT NOT NULL REFERENCES org(id),
+                 secret_hash TEXT NOT NULL,
+                 created_at  TEXT NOT NULL
              );
              -- Pending OIDC login transactions (CSRF state -> PKCE/nonce +
              -- a browser-binding secret matched against a login cookie).
@@ -222,6 +250,28 @@ impl Store for SqliteStore {
              CREATE INDEX IF NOT EXISTS idx_session_member ON session(member_id);",
         )
         .context("failed to create schema")?;
+
+        // Additive migrations for columns introduced after a table's first
+        // version. `CREATE TABLE IF NOT EXISTS` is a no-op on an already-created
+        // table, so columns added later must be applied with guarded ALTERs or
+        // an upgraded database would be missing them (e.g. `member.active`, which
+        // every auth lookup now queries).
+        ensure_column(&conn, "member", "active", "INTEGER NOT NULL DEFAULT 1")?;
+        ensure_column(&conn, "member_identity", "oidc_issuer", "TEXT")?;
+        ensure_column(&conn, "member_identity", "external_id", "TEXT")?;
+        ensure_column(
+            &conn,
+            "oidc_login",
+            "browser_binding",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        // Composite uniqueness for (issuer, subject) also applies to upgraded
+        // DBs (inline UNIQUE in CREATE only covers fresh installs).
+        conn.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_member_identity_oidc
+                 ON member_identity(oidc_issuer, oidc_subject);",
+        )?;
+
         conn.execute(
             "INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -304,7 +354,7 @@ impl Store for SqliteStore {
             conn.query_row(
                 "SELECT t.secret_hash, m.id, m.org_id, m.role
                  FROM api_token t JOIN member m ON m.id = t.member_id
-                 WHERE t.token_id = ?1",
+                 WHERE t.token_id = ?1 AND m.active = 1",
                 [token_id],
                 |r| {
                     Ok((
@@ -1023,7 +1073,7 @@ impl Store for SqliteStore {
         principal_row(
             &conn,
             "SELECT m.id, m.org_id, m.role FROM member m
-             JOIN member_identity i ON i.member_id = m.id WHERE i.email = ?1",
+             JOIN member_identity i ON i.member_id = m.id WHERE i.email = ?1 AND m.active = 1",
             email,
         )
     }
@@ -1038,7 +1088,7 @@ impl Store for SqliteStore {
             .query_row(
                 "SELECT m.id, m.org_id, m.role FROM member m
                  JOIN member_identity i ON i.member_id = m.id
-                 WHERE i.oidc_issuer = ?1 AND i.oidc_subject = ?2",
+                 WHERE i.oidc_issuer = ?1 AND i.oidc_subject = ?2 AND m.active = 1",
                 params![issuer, subject],
                 |r| {
                     Ok((
@@ -1150,7 +1200,7 @@ impl Store for SqliteStore {
             .query_row(
                 "SELECT m.id, m.org_id, m.role FROM session s
                  JOIN member m ON m.id = s.member_id
-                 WHERE s.id = ?1 AND s.expires_at > ?2",
+                 WHERE s.id = ?1 AND s.expires_at > ?2 AND m.active = 1",
                 params![session_id, now],
                 |r| {
                     Ok((
@@ -1176,6 +1226,209 @@ impl Store for SqliteStore {
             .conn()?
             .execute("DELETE FROM session WHERE id = ?1", params![session_id])?;
         Ok(n > 0)
+    }
+
+    fn create_scim_token(&self, org_id: &str) -> Result<GeneratedToken> {
+        let token = auth::generate_token()?;
+        self.conn()?
+            .execute(
+                "INSERT INTO scim_token (token_id, org_id, secret_hash, created_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    token.token_id,
+                    org_id,
+                    token.secret_hash,
+                    chrono::Utc::now().to_rfc3339()
+                ],
+            )
+            .context("failed to create SCIM token (does the org exist?)")?;
+        Ok(token)
+    }
+
+    fn authenticate_scim(&self, token: &str) -> Result<Option<String>> {
+        let Some((token_id, secret)) = auth::parse_token(token) else {
+            return Ok(None);
+        };
+        let row: Option<(String, String)> = {
+            let conn = self.conn()?;
+            conn.query_row(
+                "SELECT secret_hash, org_id FROM scim_token WHERE token_id = ?1",
+                [token_id],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            )
+            .optional()
+            .context("SCIM token lookup failed")?
+        };
+        let Some((secret_hash, org_id)) = row else {
+            return Ok(None);
+        };
+        if !auth::verify_secret(&secret, &secret_hash) {
+            return Ok(None);
+        }
+        Ok(Some(org_id))
+    }
+
+    fn scim_create_user(
+        &self,
+        org_id: &str,
+        email: &str,
+        display_name: &str,
+        role: Role,
+        external_id: Option<&str>,
+    ) -> Result<ScimUser> {
+        let member_id = ids::generate_id("mbr");
+        let mut guard = self.conn()?;
+        let tx = guard.transaction()?;
+        tx.execute(
+            "INSERT INTO member (id, org_id, display_name, role, created_at, active)
+             VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+            params![
+                member_id,
+                org_id,
+                display_name,
+                role.as_str(),
+                chrono::Utc::now().to_rfc3339()
+            ],
+        )
+        .context("failed to create member")?;
+        tx.execute(
+            "INSERT INTO member_identity (member_id, email, external_id) VALUES (?1, ?2, ?3)",
+            params![member_id, email, external_id],
+        )
+        .context("failed to set member email (already in use?)")?;
+        tx.commit()?;
+        Ok(ScimUser {
+            member_id,
+            email: email.to_string(),
+            display_name: display_name.to_string(),
+            role,
+            active: true,
+            external_id: external_id.map(str::to_string),
+        })
+    }
+
+    fn scim_list_users(&self, org_id: &str, email_filter: Option<&str>) -> Result<Vec<ScimUser>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.display_name, m.role, m.active, i.email, i.external_id
+             FROM member m JOIN member_identity i ON i.member_id = m.id
+             WHERE m.org_id = ?1 AND (?2 IS NULL OR i.email = ?2)
+             ORDER BY i.email",
+        )?;
+        let rows = stmt.query_map(params![org_id, email_filter], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, Option<String>>(5)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (member_id, display_name, role, active, email, external_id) = row?;
+            out.push(ScimUser {
+                member_id,
+                email,
+                display_name,
+                role: Role::parse(&role)?,
+                active: active != 0,
+                external_id,
+            });
+        }
+        Ok(out)
+    }
+
+    fn scim_get_user(&self, org_id: &str, member_id: &str) -> Result<Option<ScimUser>> {
+        let conn = self.conn()?;
+        let row = conn
+            .query_row(
+                "SELECT m.display_name, m.role, m.active, i.email, i.external_id
+                 FROM member m JOIN member_identity i ON i.member_id = m.id
+                 WHERE m.org_id = ?1 AND m.id = ?2",
+                params![org_id, member_id],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+        match row {
+            Some((display_name, role, active, email, external_id)) => Ok(Some(ScimUser {
+                member_id: member_id.to_string(),
+                email,
+                display_name,
+                role: Role::parse(&role)?,
+                active: active != 0,
+                external_id,
+            })),
+            None => Ok(None),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn scim_update_user(
+        &self,
+        org_id: &str,
+        member_id: &str,
+        email: Option<&str>,
+        display_name: Option<&str>,
+        role: Option<Role>,
+        active: Option<bool>,
+        external_id: Option<&str>,
+    ) -> Result<Option<ScimUser>> {
+        {
+            let conn = self.conn()?;
+            // Verify the member exists in this org first (tenant scoping).
+            let exists: bool = conn
+                .query_row(
+                    "SELECT 1 FROM member WHERE id = ?1 AND org_id = ?2",
+                    params![member_id, org_id],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            if !exists {
+                return Ok(None);
+            }
+            if let Some(addr) = email {
+                conn.execute(
+                    "UPDATE member_identity SET email = ?2 WHERE member_id = ?1",
+                    params![member_id, addr],
+                )?;
+            }
+            if let Some(name) = display_name {
+                conn.execute(
+                    "UPDATE member SET display_name = ?2 WHERE id = ?1",
+                    params![member_id, name],
+                )?;
+            }
+            if let Some(r) = role {
+                conn.execute(
+                    "UPDATE member SET role = ?2 WHERE id = ?1",
+                    params![member_id, r.as_str()],
+                )?;
+            }
+            if let Some(a) = active {
+                conn.execute(
+                    "UPDATE member SET active = ?2 WHERE id = ?1",
+                    params![member_id, a as i64],
+                )?;
+            }
+            if let Some(ext) = external_id {
+                conn.execute(
+                    "UPDATE member_identity SET external_id = ?2 WHERE member_id = ?1",
+                    params![member_id, ext],
+                )?;
+            }
+        }
+        self.scim_get_user(org_id, member_id)
     }
 }
 
@@ -1208,6 +1461,40 @@ mod tests {
         let s = SqliteStore::open_in_memory().unwrap();
         s.migrate().unwrap();
         s
+    }
+
+    #[test]
+    fn migrate_upgrades_legacy_tables_with_new_columns() {
+        // Simulate a pre-v11 database: member without `active`, member_identity
+        // without oidc_issuer/external_id, oidc_login without browser_binding.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE org (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);
+             CREATE TABLE member (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, display_name TEXT NOT NULL, role TEXT NOT NULL, created_at TEXT NOT NULL);
+             CREATE TABLE member_identity (member_id TEXT PRIMARY KEY, email TEXT UNIQUE, oidc_subject TEXT UNIQUE);
+             CREATE TABLE oidc_login (state TEXT PRIMARY KEY, pkce_verifier TEXT NOT NULL, nonce TEXT NOT NULL, created_at TEXT NOT NULL);
+             INSERT INTO org VALUES ('o1','Acme','t');
+             INSERT INTO member VALUES ('m1','o1','Alice','admin','t');
+             INSERT INTO member_identity (member_id, email) VALUES ('m1','a@b.test');",
+        )
+        .unwrap();
+        let store = SqliteStore {
+            conn: Mutex::new(conn),
+        };
+        // migrate() must add the missing columns rather than just bump version.
+        store.migrate().unwrap();
+
+        // The pre-existing member is still authable (active defaulted to 1) and
+        // resolvable by email (auth paths query `m.active`).
+        assert!(store.find_member_by_email("a@b.test").unwrap().is_some());
+        // The new columns now exist and round-trip.
+        let token = store.create_token("m1").unwrap().plaintext;
+        assert!(store.authenticate(&token).unwrap().is_some());
+        store.put_login("s", "v", "n", "bind").unwrap();
+        assert_eq!(
+            store.take_login("s").unwrap().unwrap().browser_binding,
+            "bind"
+        );
     }
 
     #[test]

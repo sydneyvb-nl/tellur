@@ -15,6 +15,7 @@ pub mod error;
 pub mod metrics;
 pub mod oidc;
 pub mod ratelimit;
+pub mod scim;
 pub mod storage;
 
 pub use app::{AppState, build_router};
