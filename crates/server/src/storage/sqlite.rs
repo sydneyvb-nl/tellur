@@ -53,6 +53,24 @@ impl SqliteStore {
     }
 }
 
+/// Add a column to a table if it is not already present (idempotent migration).
+/// Table/column/definition are always internal constants, never user input.
+fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
+    debug_assert!(matches!(table, "member" | "member_identity" | "oidc_login"));
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let present = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .filter_map(std::result::Result::ok)
+        .any(|name| name == column);
+    if !present {
+        conn.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 /// Compute an audit entry hash over the previous hash and the entry fields.
 fn audit_hash(
     prev: &str,
@@ -232,6 +250,28 @@ impl Store for SqliteStore {
              CREATE INDEX IF NOT EXISTS idx_session_member ON session(member_id);",
         )
         .context("failed to create schema")?;
+
+        // Additive migrations for columns introduced after a table's first
+        // version. `CREATE TABLE IF NOT EXISTS` is a no-op on an already-created
+        // table, so columns added later must be applied with guarded ALTERs or
+        // an upgraded database would be missing them (e.g. `member.active`, which
+        // every auth lookup now queries).
+        ensure_column(&conn, "member", "active", "INTEGER NOT NULL DEFAULT 1")?;
+        ensure_column(&conn, "member_identity", "oidc_issuer", "TEXT")?;
+        ensure_column(&conn, "member_identity", "external_id", "TEXT")?;
+        ensure_column(
+            &conn,
+            "oidc_login",
+            "browser_binding",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        // Composite uniqueness for (issuer, subject) also applies to upgraded
+        // DBs (inline UNIQUE in CREATE only covers fresh installs).
+        conn.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_member_identity_oidc
+                 ON member_identity(oidc_issuer, oidc_subject);",
+        )?;
+
         conn.execute(
             "INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -1332,10 +1372,12 @@ impl Store for SqliteStore {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn scim_update_user(
         &self,
         org_id: &str,
         member_id: &str,
+        email: Option<&str>,
         display_name: Option<&str>,
         role: Option<Role>,
         active: Option<bool>,
@@ -1354,6 +1396,12 @@ impl Store for SqliteStore {
                 .is_some();
             if !exists {
                 return Ok(None);
+            }
+            if let Some(addr) = email {
+                conn.execute(
+                    "UPDATE member_identity SET email = ?2 WHERE member_id = ?1",
+                    params![member_id, addr],
+                )?;
             }
             if let Some(name) = display_name {
                 conn.execute(
@@ -1413,6 +1461,40 @@ mod tests {
         let s = SqliteStore::open_in_memory().unwrap();
         s.migrate().unwrap();
         s
+    }
+
+    #[test]
+    fn migrate_upgrades_legacy_tables_with_new_columns() {
+        // Simulate a pre-v11 database: member without `active`, member_identity
+        // without oidc_issuer/external_id, oidc_login without browser_binding.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE org (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);
+             CREATE TABLE member (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, display_name TEXT NOT NULL, role TEXT NOT NULL, created_at TEXT NOT NULL);
+             CREATE TABLE member_identity (member_id TEXT PRIMARY KEY, email TEXT UNIQUE, oidc_subject TEXT UNIQUE);
+             CREATE TABLE oidc_login (state TEXT PRIMARY KEY, pkce_verifier TEXT NOT NULL, nonce TEXT NOT NULL, created_at TEXT NOT NULL);
+             INSERT INTO org VALUES ('o1','Acme','t');
+             INSERT INTO member VALUES ('m1','o1','Alice','admin','t');
+             INSERT INTO member_identity (member_id, email) VALUES ('m1','a@b.test');",
+        )
+        .unwrap();
+        let store = SqliteStore {
+            conn: Mutex::new(conn),
+        };
+        // migrate() must add the missing columns rather than just bump version.
+        store.migrate().unwrap();
+
+        // The pre-existing member is still authable (active defaulted to 1) and
+        // resolvable by email (auth paths query `m.active`).
+        assert!(store.find_member_by_email("a@b.test").unwrap().is_some());
+        // The new columns now exist and round-trip.
+        let token = store.create_token("m1").unwrap().plaintext;
+        assert!(store.authenticate(&token).unwrap().is_some());
+        store.put_login("s", "v", "n", "bind").unwrap();
+        assert_eq!(
+            store.take_login("s").unwrap().unwrap().browser_binding,
+            "bind"
+        );
     }
 
     #[test]

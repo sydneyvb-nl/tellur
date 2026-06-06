@@ -326,6 +326,7 @@ fn full_store_surface() {
             &org_a.id,
             &su.member_id,
             None,
+            None,
             Some(Role::Admin),
             Some(false),
             None,
@@ -340,10 +341,30 @@ fn full_store_surface() {
             .unwrap()
             .is_none()
     );
+    // Email change via SCIM PUT is persisted (and reactivation).
+    let renamed = store
+        .scim_update_user(
+            &org_a.id,
+            &su.member_id,
+            Some("scim2@corp.test"),
+            None,
+            None,
+            Some(true),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(renamed.email, "scim2@corp.test");
+    assert!(
+        store
+            .find_member_by_email("scim2@corp.test")
+            .unwrap()
+            .is_some()
+    );
     // Cross-org update is refused (tenant scoping).
     assert!(
         store
-            .scim_update_user(&org_b.id, &su.member_id, None, None, Some(true), None)
+            .scim_update_user(&org_b.id, &su.member_id, None, None, None, Some(true), None)
             .unwrap()
             .is_none()
     );

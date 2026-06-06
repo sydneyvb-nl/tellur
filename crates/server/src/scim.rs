@@ -23,7 +23,11 @@ use serde_json::{Value, json};
 use crate::app::AppState;
 use crate::auth::Role;
 use crate::error::ServerError;
-use crate::storage::ScimUser;
+use crate::storage::{AuditEntry, ScimUser};
+
+/// Default/maximum SCIM page sizes.
+const DEFAULT_COUNT: usize = 100;
+const MAX_COUNT: usize = 200;
 
 const USER_SCHEMA: &str = "urn:ietf:params:scim:schemas:core:2.0:User";
 const LIST_SCHEMA: &str = "urn:ietf:params:scim:api:messages:2.0:ListResponse";
@@ -99,6 +103,26 @@ fn scim_error(status: StatusCode, detail: &str) -> Response {
     )
 }
 
+/// Record an IdP-driven SCIM mutation in the tamper-evident audit log (actor is
+/// the SCIM token, not a member). Best-effort: a failed audit becomes a 500 so
+/// provisioning changes are never silently unlogged.
+fn audit_scim(
+    state: &AppState,
+    org_id: &str,
+    action: &str,
+    detail: String,
+) -> Result<(), ServerError> {
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id.to_string()),
+            actor_member_id: None,
+            action: action.to_string(),
+            detail,
+        })
+        .map_err(ServerError::Internal)
+}
+
 /// Inbound SCIM User (POST/PUT). Unknown fields are ignored.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -163,20 +187,27 @@ impl UserInput {
 pub struct ListQuery {
     #[serde(default)]
     pub filter: Option<String>,
+    #[serde(rename = "startIndex", default)]
+    pub start_index: Option<i64>,
+    #[serde(default)]
+    pub count: Option<i64>,
 }
 
-/// Parse a SCIM `userName eq "x"` filter into the email value (the only filter
-/// we support; anything else yields no filter → full list).
+/// Parse a SCIM `userName eq "x"` filter into the email value. SCIM attribute
+/// names and operators are case-insensitive; the value casing is preserved.
+/// Anything other than a `userName eq` filter yields no filter (full list).
 fn parse_username_filter(filter: &str) -> Option<String> {
     let f = filter.trim();
-    let rest = f
-        .strip_prefix("userName eq ")
-        .or_else(|| f.strip_prefix("userName Eq "))?;
-    let v = rest.trim().trim_matches('"');
+    let prefix = "username eq ";
+    if !f.to_ascii_lowercase().starts_with(prefix) {
+        return None;
+    }
+    let v = f[prefix.len()..].trim().trim_matches('"');
     (!v.is_empty()).then(|| v.to_string())
 }
 
-/// `GET /scim/v2/Users` — list users (optionally filtered by `userName`).
+/// `GET /scim/v2/Users` — list users (optionally filtered by `userName`, with
+/// 1-based `startIndex`/`count` pagination).
 pub async fn list_users(
     auth: ScimAuth,
     State(state): State<AppState>,
@@ -187,15 +218,30 @@ pub async fn list_users(
         .store
         .scim_list_users(&auth.org_id, email_filter.as_deref())
         .map_err(ServerError::Internal)?;
-    let resources: Vec<Value> = users.iter().map(user_resource).collect();
+    let total = users.len();
+
+    // SCIM is 1-based; clamp inputs defensively.
+    let start_index = q.start_index.unwrap_or(1).max(1) as usize;
+    let count = q
+        .count
+        .map(|c| c.max(0) as usize)
+        .unwrap_or(DEFAULT_COUNT)
+        .min(MAX_COUNT);
+    let page: Vec<Value> = users
+        .iter()
+        .skip(start_index - 1)
+        .take(count)
+        .map(user_resource)
+        .collect();
+
     Ok(scim_json(
         StatusCode::OK,
         json!({
             "schemas": [LIST_SCHEMA],
-            "totalResults": resources.len(),
-            "startIndex": 1,
-            "itemsPerPage": resources.len(),
-            "Resources": resources,
+            "totalResults": total,
+            "startIndex": start_index,
+            "itemsPerPage": page.len(),
+            "Resources": page,
         }),
     ))
 }
@@ -237,12 +283,31 @@ pub async fn create_user(
             let user = if input.active == Some(false) {
                 state
                     .store
-                    .scim_update_user(&auth.org_id, &user.member_id, None, None, Some(false), None)
+                    .scim_update_user(
+                        &auth.org_id,
+                        &user.member_id,
+                        None,
+                        None,
+                        None,
+                        Some(false),
+                        None,
+                    )
                     .map_err(ServerError::Internal)?
                     .unwrap_or(user)
             } else {
                 user
             };
+            audit_scim(
+                &state,
+                &auth.org_id,
+                "scim.user.create",
+                format!(
+                    "member={} role={} active={}",
+                    user.member_id,
+                    user.role.as_str(),
+                    user.active
+                ),
+            )?;
             Ok(scim_json(StatusCode::CREATED, user_resource(&user)))
         }
         Err(_) => Ok(scim_error(
@@ -287,6 +352,8 @@ pub async fn replace_user(
         .scim_update_user(
             &auth.org_id,
             &id,
+            // A full PUT may rename the account / change its email.
+            input.email().as_deref(),
             display.as_deref(),
             input.role(),
             input.active,
@@ -294,7 +361,20 @@ pub async fn replace_user(
         )
         .map_err(ServerError::Internal)?;
     match updated {
-        Some(u) => Ok(scim_json(StatusCode::OK, user_resource(&u))),
+        Some(u) => {
+            audit_scim(
+                &state,
+                &auth.org_id,
+                "scim.user.replace",
+                format!(
+                    "member={} role={} active={}",
+                    u.member_id,
+                    u.role.as_str(),
+                    u.active
+                ),
+            )?;
+            Ok(scim_json(StatusCode::OK, user_resource(&u)))
+        }
         None => Ok(scim_error(StatusCode::NOT_FOUND, "user not found")),
     }
 }
@@ -332,9 +412,10 @@ pub async fn patch_user(
         if !matches!(op.op.to_ascii_lowercase().as_str(), "replace" | "add") {
             continue;
         }
-        match op.path.as_deref() {
+        // SCIM attribute paths are case-insensitive.
+        match op.path.as_deref().map(str::to_ascii_lowercase).as_deref() {
             Some("active") => active = op.value.as_bool().or(active),
-            Some("displayName") => display = op.value.as_str().map(str::to_string).or(display),
+            Some("displayname") => display = op.value.as_str().map(str::to_string).or(display),
             Some("roles") => {
                 role = role_from_value(&op.value).or(role);
             }
@@ -356,10 +437,31 @@ pub async fn patch_user(
 
     let updated = state
         .store
-        .scim_update_user(&auth.org_id, &id, display.as_deref(), role, active, None)
+        .scim_update_user(
+            &auth.org_id,
+            &id,
+            None,
+            display.as_deref(),
+            role,
+            active,
+            None,
+        )
         .map_err(ServerError::Internal)?;
     match updated {
-        Some(u) => Ok(scim_json(StatusCode::OK, user_resource(&u))),
+        Some(u) => {
+            audit_scim(
+                &state,
+                &auth.org_id,
+                "scim.user.patch",
+                format!(
+                    "member={} role={} active={}",
+                    u.member_id,
+                    u.role.as_str(),
+                    u.active
+                ),
+            )?;
+            Ok(scim_json(StatusCode::OK, user_resource(&u)))
+        }
         None => Ok(scim_error(StatusCode::NOT_FOUND, "user not found")),
     }
 }
@@ -385,10 +487,18 @@ pub async fn delete_user(
 ) -> Result<Response, ServerError> {
     let updated = state
         .store
-        .scim_update_user(&auth.org_id, &id, None, None, Some(false), None)
+        .scim_update_user(&auth.org_id, &id, None, None, None, Some(false), None)
         .map_err(ServerError::Internal)?;
     match updated {
-        Some(_) => Ok(StatusCode::NO_CONTENT.into_response()),
+        Some(u) => {
+            audit_scim(
+                &state,
+                &auth.org_id,
+                "scim.user.delete",
+                format!("member={} deactivated", u.member_id),
+            )?;
+            Ok(StatusCode::NO_CONTENT.into_response())
+        }
         None => Ok(scim_error(StatusCode::NOT_FOUND, "user not found")),
     }
 }

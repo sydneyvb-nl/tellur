@@ -268,3 +268,114 @@ async fn scim_token_is_tenant_scoped() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["totalResults"], 0);
 }
+
+#[tokio::test]
+async fn case_insensitive_filter_and_patch_and_email_change() {
+    let s = setup();
+    let (_, body) = scim(
+        &s.state,
+        "POST",
+        "/scim/v2/Users",
+        Some(&s.scim_token),
+        Some(user_body("dave@corp.test", "viewer")),
+    )
+    .await;
+    let id = body["id"].as_str().unwrap().to_string();
+
+    // Case-insensitive filter (attr/operator) still matches.
+    let (status, body) = scim(
+        &s.state,
+        "GET",
+        "/scim/v2/Users?filter=Username%20EQ%20%22dave@corp.test%22",
+        Some(&s.scim_token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["totalResults"], 1);
+
+    // Case-variant PATCH path ("Active") still deactivates.
+    let (status, body) = scim(
+        &s.state,
+        "PATCH",
+        &format!("/scim/v2/Users/{id}"),
+        Some(&s.scim_token),
+        Some(json!({ "Operations": [{ "op": "Replace", "path": "Active", "value": false }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["active"], false);
+    assert!(
+        s.store
+            .find_member_by_email("dave@corp.test")
+            .unwrap()
+            .is_none()
+    );
+
+    // PUT renames the account's email; the new address is then resolvable.
+    let (status, _) = scim(
+        &s.state,
+        "PUT",
+        &format!("/scim/v2/Users/{id}"),
+        Some(&s.scim_token),
+        Some(json!({
+            "userName": "dave2@corp.test",
+            "displayName": "Dave Two",
+            "active": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        s.store
+            .find_member_by_email("dave2@corp.test")
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn scim_mutations_are_audited() {
+    let s = setup();
+    let org = s.store.create_org("Audited").unwrap().id;
+    let token = s.store.create_scim_token(&org).unwrap().plaintext;
+    let before = s.store.export_audit(&org).unwrap().len();
+    scim(
+        &s.state,
+        "POST",
+        "/scim/v2/Users",
+        Some(&token),
+        Some(user_body("ed@corp.test", "viewer")),
+    )
+    .await;
+    let after = s.store.export_audit(&org).unwrap();
+    assert!(after.len() > before);
+    assert!(after.iter().any(|r| r.action == "scim.user.create"));
+}
+
+#[tokio::test]
+async fn list_honors_pagination() {
+    let s = setup();
+    for i in 0..5 {
+        scim(
+            &s.state,
+            "POST",
+            "/scim/v2/Users",
+            Some(&s.scim_token),
+            Some(user_body(&format!("u{i}@corp.test"), "viewer")),
+        )
+        .await;
+    }
+    let (status, body) = scim(
+        &s.state,
+        "GET",
+        "/scim/v2/Users?startIndex=2&count=2",
+        Some(&s.scim_token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["totalResults"], 5);
+    assert_eq!(body["startIndex"], 2);
+    assert_eq!(body["Resources"].as_array().unwrap().len(), 2);
+}

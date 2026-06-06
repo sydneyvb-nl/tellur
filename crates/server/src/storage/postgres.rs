@@ -168,6 +168,19 @@ impl Store for PostgresStore {
                  CREATE INDEX IF NOT EXISTS idx_session_member ON session(member_id);",
             )
             .context("failed to create schema")?;
+        // Additive migrations for columns introduced after a table's first
+        // version (CREATE TABLE IF NOT EXISTS no-ops on existing tables, so an
+        // upgraded DB would otherwise be missing e.g. member.active).
+        client
+            .batch_execute(
+                "ALTER TABLE member ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
+                 ALTER TABLE member_identity ADD COLUMN IF NOT EXISTS oidc_issuer TEXT;
+                 ALTER TABLE member_identity ADD COLUMN IF NOT EXISTS external_id TEXT;
+                 ALTER TABLE oidc_login ADD COLUMN IF NOT EXISTS browser_binding TEXT NOT NULL DEFAULT '';
+                 CREATE UNIQUE INDEX IF NOT EXISTS idx_member_identity_oidc
+                     ON member_identity(oidc_issuer, oidc_subject);",
+            )
+            .context("failed to apply column migrations")?;
         client
             .execute(
                 "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '11')
@@ -1131,10 +1144,12 @@ impl Store for PostgresStore {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn scim_update_user(
         &self,
         org_id: &str,
         member_id: &str,
+        email: Option<&str>,
         display_name: Option<&str>,
         role: Option<Role>,
         active: Option<bool>,
@@ -1150,6 +1165,12 @@ impl Store for PostgresStore {
                 .is_some();
             if !exists {
                 return Ok(None);
+            }
+            if let Some(addr) = email {
+                client.execute(
+                    "UPDATE member_identity SET email = $2 WHERE member_id = $1",
+                    &[&member_id, &addr],
+                )?;
             }
             if let Some(name) = display_name {
                 client.execute(

@@ -37,7 +37,9 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    is derived from the token (never the URL), so an IdP can only provision into
    its own tenant. Deprovisioning (`DELETE` / `PATCH active=false`) sets
    `member.active = false`, which all auth paths (API token, session, SSO email)
-   reject — so revocation is immediate across every credential type.
+   reject — so revocation is immediate across every credential type. All
+   IdP-driven SCIM mutations (create/replace/patch/delete) are written to the
+   tamper-evident audit log.
 4. **Hub → IdP** (Tier 2, optional) — when SSO is configured the hub calls the
    OIDC issuer's discovery + token endpoints over **TLS** (OIDC Authorization
    Code + PKCE). The ID token is obtained on this direct TLS channel, so its

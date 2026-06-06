@@ -360,10 +360,12 @@ pub trait Store: Send + Sync {
 
     /// Update a SCIM user's mutable fields (any `Some` is applied). Returns the
     /// updated user, or `None` if it does not exist in the org.
+    #[allow(clippy::too_many_arguments)]
     fn scim_update_user(
         &self,
         org_id: &str,
         member_id: &str,
+        email: Option<&str>,
         display_name: Option<&str>,
         role: Option<Role>,
         active: Option<bool>,
