@@ -209,8 +209,8 @@ async fn unauthenticated_policy_and_export_access_is_rejected() {
             None,
         ),
         ("GET", format!("/v1/orgs/{}/policies", s.org_a), None),
-        ("GET", format!("/v1/orgs/{}/export/events", s.org_a), None),
-        ("GET", format!("/v1/orgs/{}/export/audit", s.org_a), None),
+        ("POST", format!("/v1/orgs/{}/export/events", s.org_a), None),
+        ("POST", format!("/v1/orgs/{}/export/audit", s.org_a), None),
     ] {
         let (status, json) = req(&s.state, method, &uri, None, body).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {uri}");
@@ -219,33 +219,44 @@ async fn unauthenticated_policy_and_export_access_is_rejected() {
     }
 }
 
+/// Enqueue an export, run the worker once, and return the completed job body.
+async fn run_export(s: &Setup, kind: &str) -> Value {
+    let (status, json) = req(
+        &s.state,
+        "POST",
+        &format!("/v1/orgs/{}/export/{kind}", s.org_a),
+        Some(&s.admin_a),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let job_id = json["job_id"].as_str().unwrap().to_string();
+    // No background worker in tests — process the job deterministically.
+    assert!(tellur_server::jobs::process_one(&s.state.store).unwrap());
+    let (status, job) = req(
+        &s.state,
+        "GET",
+        &format!("/v1/orgs/{}/jobs/{job_id}", s.org_a),
+        Some(&s.admin_a),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(job["status"], "completed");
+    job
+}
+
 #[tokio::test]
 async fn admin_export_events_and_audit() {
     let s = setup();
-    let (status, json) = req(
-        &s.state,
-        "GET",
-        &format!("/v1/orgs/{}/export/events", s.org_a),
-        Some(&s.admin_a),
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["count"], 1);
-    assert_eq!(json["schema"], "tellur.server.export.events.v1");
+    let job = run_export(&s, "events").await;
+    assert_eq!(job["result"]["count"], 1);
+    assert_eq!(job["result"]["schema"], "tellur.server.export.events.v1");
     // Org-level export must carry repo identity per event.
-    assert!(json["events"][0]["repo_id"].as_str().is_some());
+    assert!(job["result"]["events"][0]["repo_id"].as_str().is_some());
 
-    let (status, json) = req(
-        &s.state,
-        "GET",
-        &format!("/v1/orgs/{}/export/audit", s.org_a),
-        Some(&s.admin_a),
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["chain_intact"], true);
+    let job = run_export(&s, "audit").await;
+    assert_eq!(job["result"]["chain_intact"], true);
 }
 
 #[tokio::test]
@@ -253,7 +264,7 @@ async fn export_requires_admin_and_same_org() {
     let s = setup();
     let (status, _) = req(
         &s.state,
-        "GET",
+        "POST",
         &format!("/v1/orgs/{}/export/events", s.org_a),
         Some(&s.viewer_a),
         None,
@@ -263,7 +274,7 @@ async fn export_requires_admin_and_same_org() {
 
     let (status, _) = req(
         &s.state,
-        "GET",
+        "POST",
         &format!("/v1/orgs/{}/export/audit", s.org_a),
         Some(&s.admin_b),
         None,

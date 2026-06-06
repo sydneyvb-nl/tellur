@@ -12,6 +12,7 @@ pub mod app;
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod jobs;
 pub mod metrics;
 pub mod oidc;
 pub mod ratelimit;
@@ -71,6 +72,10 @@ pub fn build_state(config: Config) -> Result<AppState> {
 pub async fn run(config: Config) -> Result<()> {
     let bind = config.bind;
     let state = build_state(config)?;
+
+    // Start the durable-job worker (processes queued exports in the background).
+    jobs::spawn_worker(state.store.clone());
+
     let app = build_router(state);
 
     let listener = tokio::net::TcpListener::bind(bind).await?;

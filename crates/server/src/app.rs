@@ -45,6 +45,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/orgs/{org_id}/me", get(crate::api::org_me))
         .route("/v1/orgs/{org_id}/repos", get(crate::api::list_repos))
         .route("/v1/orgs/{org_id}/report", get(crate::api::org_report))
+        .route("/v1/orgs/{org_id}/dashboard", get(crate::api::dashboard))
         .route(
             "/v1/orgs/{org_id}/repos/{repo}/events",
             post(crate::api::ingest_events).get(crate::api::list_events),
@@ -76,12 +77,13 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/v1/orgs/{org_id}/export/events",
-            get(crate::api::export_events),
+            post(crate::api::export_events),
         )
         .route(
             "/v1/orgs/{org_id}/export/audit",
-            get(crate::api::export_audit),
+            post(crate::api::export_audit),
         )
+        .route("/v1/orgs/{org_id}/jobs/{id}", get(crate::api::get_job))
         // SCIM 2.0 provisioning (org derived from the SCIM bearer token).
         .route(
             "/scim/v2/Users",
@@ -93,6 +95,17 @@ pub fn build_router(state: AppState) -> Router {
                 .put(crate::scim::replace_user)
                 .patch(crate::scim::patch_user)
                 .delete(crate::scim::delete_user),
+        )
+        .route(
+            "/scim/v2/Groups",
+            get(crate::scim::list_groups).post(crate::scim::create_group),
+        )
+        .route(
+            "/scim/v2/Groups/{id}",
+            get(crate::scim::get_group)
+                .put(crate::scim::replace_group)
+                .patch(crate::scim::patch_group)
+                .delete(crate::scim::delete_group),
         )
         // Cap request bodies (defense against unrestricted resource consumption).
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))

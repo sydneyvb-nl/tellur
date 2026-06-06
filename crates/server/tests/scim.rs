@@ -10,6 +10,7 @@ use axum::http::{
 };
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
+use tellur_server::auth::Role;
 use tellur_server::ratelimit::RateLimiter;
 use tellur_server::storage::{SqliteStore, Store};
 use tellur_server::{AppState, Config, build_router};
@@ -351,6 +352,102 @@ async fn scim_mutations_are_audited() {
     let after = s.store.export_audit(&org).unwrap();
     assert!(after.len() > before);
     assert!(after.iter().any(|r| r.action == "scim.user.create"));
+}
+
+#[tokio::test]
+async fn group_membership_drives_member_roles() {
+    let s = setup();
+    // Provision a user (defaults to viewer).
+    let (_, u) = scim(
+        &s.state,
+        "POST",
+        "/scim/v2/Users",
+        Some(&s.scim_token),
+        Some(user_body("gm@corp.test", "viewer")),
+    )
+    .await;
+    let uid = u["id"].as_str().unwrap().to_string();
+
+    // A "tellur-admin" group containing the user elevates them to admin.
+    let (status, g) = scim(
+        &s.state,
+        "POST",
+        "/scim/v2/Groups",
+        Some(&s.scim_token),
+        Some(json!({
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+            "displayName": "tellur-admin",
+            "members": [{ "value": uid }],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let gid = g["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        s.store
+            .find_member_by_email("gm@corp.test")
+            .unwrap()
+            .unwrap()
+            .role,
+        Role::Admin
+    );
+
+    // Duplicate group displayName → 409.
+    let (status, _) = scim(
+        &s.state,
+        "POST",
+        "/scim/v2/Groups",
+        Some(&s.scim_token),
+        Some(json!({ "displayName": "tellur-admin" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // Filtered list finds it.
+    let (status, body) = scim(
+        &s.state,
+        "GET",
+        "/scim/v2/Groups?filter=displayName%20eq%20%22tellur-admin%22",
+        Some(&s.scim_token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["totalResults"], 1);
+
+    // PATCH remove the member → role recomputed (no mapping group left, role
+    // stays at its last value: admin; documented behavior).
+    let (status, _) = scim(
+        &s.state,
+        "PATCH",
+        &format!("/scim/v2/Groups/{gid}"),
+        Some(&s.scim_token),
+        Some(json!({
+            "Operations": [{ "op": "remove", "path": format!("members[value eq \"{uid}\"]") }],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, g) = scim(
+        &s.state,
+        "GET",
+        &format!("/scim/v2/Groups/{gid}"),
+        Some(&s.scim_token),
+        None,
+    )
+    .await;
+    assert_eq!(g["members"].as_array().unwrap().len(), 0);
+
+    // Delete the group.
+    let (status, _) = scim(
+        &s.state,
+        "DELETE",
+        &format!("/scim/v2/Groups/{gid}"),
+        Some(&s.scim_token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]

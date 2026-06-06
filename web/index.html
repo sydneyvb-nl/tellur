@@ -520,8 +520,69 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
   });
 });
 
+// --- Team hub mode ---
+// When opened with ?hub=<base-url>&org=<org-id>, render an org-wide team
+// summary from the self-hosted Tellur hub instead of the local daemon. Uses the
+// browser session cookie set by the hub's OIDC SSO login (credentials:include),
+// so sign in at <hub>/auth/login first. A read API token may instead be passed
+// as ?token=<tlr_...> for non-SSO setups.
+function hubParams() {
+  const p = new URLSearchParams(window.location.search);
+  const hub = p.get('hub');
+  const org = p.get('org');
+  return hub && org ? { hub: hub.replace(/\/$/, ''), org, token: p.get('token') } : null;
+}
+
+async function loadHubDashboard({ hub, org, token }) {
+  const headers = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(`${hub}/v1/orgs/${encodeURIComponent(org)}/dashboard`, {
+    credentials: 'include',
+    headers,
+  });
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(`not authorized — sign in at ${hub}/auth/login`);
+  }
+  if (!res.ok) throw new Error(`hub returned ${res.status}`);
+  return res.json();
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function renderHubDashboard(data) {
+  const r = data.report || {};
+  const repos = (r.repos || [])
+    .map((x) => `<li><strong>${escapeHtml(x.name)}</strong> — ${Number(x.event_count) || 0} events</li>`)
+    .join('');
+  const recent = (data.recent_events || [])
+    .map((e) => `<li><code>${escapeHtml(e.type)}</code> by ${escapeHtml(e.actor)} ` +
+      `in ${escapeHtml(e.repo_id)} <span class="muted">${escapeHtml(e.timestamp)}</span></li>`)
+    .join('');
+  const main = document.getElementById('main-content');
+  main.innerHTML =
+    `<div class="session-detail">
+       <h2>Team activity — org ${escapeHtml(data.org_id)}</h2>
+       <p>${Number(r.total_events) || 0} events · ${Number(r.distinct_sessions) || 0} sessions · ${(r.repos||[]).length} repos</p>
+       <h3>Repositories</h3><ul>${repos || '<li class="muted">none</li>'}</ul>
+       <h3>Recent activity</h3><ul>${recent || '<li class="muted">none</li>'}</ul>
+     </div>`;
+}
+
 // --- Init ---
 async function init() {
+  const hub = hubParams();
+  if (hub) {
+    try {
+      renderHubDashboard(await loadHubDashboard(hub));
+    } catch (e) {
+      document.getElementById('main-content').innerHTML =
+        `<div class="session-detail"><h2>Tellur hub</h2><p>${escapeHtml(e.message)}</p></div>`;
+    }
+    return;
+  }
   sessions = await fetchSessions();
   renderSessionList();
 }
