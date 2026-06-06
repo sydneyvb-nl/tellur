@@ -42,7 +42,12 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    is a secret (env/secret store). No open self-registration: only
    pre-provisioned members (by verified email) may sign in, and the OIDC subject
    is bound on first login and never silently re-bound (a second IdP account on
-   the same email is refused). Anonymous `/auth/login` rows are TTL-pruned.
+   the same email is refused). The discovered metadata `issuer` must match the
+   configured issuer, and subject bindings are keyed by `(issuer, subject)` (a
+   `sub` is only unique per issuer). The callback is bound to the initiating
+   browser via a short-lived `HttpOnly`/`Secure` login cookie matched against a
+   server-stored secret (defeats login-CSRF / session fixation from a forwarded
+   callback URL). Anonymous `/auth/login` rows are TTL-pruned and hard-capped.
 5. **Hub → storage** — SQLite (embedded, same host) or Postgres (network, via
    `TELLUR_DATABASE_URL`); tenant isolation enforced here. The Postgres client
    connects with **NoTls**, so the hub↔Postgres link is a trust boundary that

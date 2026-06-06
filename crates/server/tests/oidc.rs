@@ -156,6 +156,14 @@ async fn login_get_session(
         .to_string();
     let state_tok = query_param(&location, "state").unwrap();
     let nonce = query_param(&location, "nonce").unwrap();
+    // The login response sets a browser-binding cookie we must echo back.
+    let login_cookie = resp
+        .headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|c| c.split(';').next())
+        .unwrap()
+        .to_string();
 
     // 2. The IdP would now mint an ID token bound to our nonce.
     *s.idp.next_id_token.lock().unwrap() = Some(id_token(sub, email, verified, &nonce));
@@ -165,6 +173,7 @@ async fn login_get_session(
         &s.state,
         Request::builder()
             .uri(format!("/auth/callback?code=abc&state={state_tok}"))
+            .header("cookie", login_cookie)
             .body(Body::empty())
             .unwrap(),
     )
@@ -268,6 +277,39 @@ async fn second_idp_subject_for_same_email_cannot_take_over() {
     let (status, cookie) = login_get_session(&s, "subject-B", "alice@corp.test", true).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(cookie.is_none());
+}
+
+#[tokio::test]
+async fn callback_without_browser_binding_cookie_is_rejected() {
+    let s = setup();
+    s.store
+        .provision_member(&s.org, "Alice", Role::Admin, "alice@corp.test")
+        .unwrap();
+    // Initiate login, capture the state but NOT the binding cookie (as an
+    // attacker who forwards only the callback URL to a victim would).
+    let resp = send(
+        &s.state,
+        Request::builder()
+            .uri("/auth/login")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    let location = resp.headers().get("location").unwrap().to_str().unwrap();
+    let state_tok = query_param(location, "state").unwrap();
+    let nonce = query_param(location, "nonce").unwrap();
+    *s.idp.next_id_token.lock().unwrap() = Some(id_token("sub", "alice@corp.test", true, &nonce));
+
+    // Callback without the login cookie is refused (login-CSRF defense).
+    let resp = send(
+        &s.state,
+        Request::builder()
+            .uri(format!("/auth/callback?code=abc&state={state_tok}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

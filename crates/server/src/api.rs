@@ -24,6 +24,14 @@ use crate::storage::{AuditEntry, IngestEvent};
 /// Name of the session cookie set after a successful SSO login.
 const SESSION_COOKIE: &str = "tellur_session";
 
+/// Name of the short-lived cookie that binds an OIDC login flow to the browser
+/// that initiated it (defends against login-CSRF / session fixation).
+const LOGIN_COOKIE: &str = "tellur_login";
+
+/// Hard cap on outstanding OIDC login transactions (anti-flood, in addition to
+/// the TTL prune). New `/auth/login` requests are refused past this.
+const MAX_OUTSTANDING_LOGINS: u64 = 10_000;
+
 /// Maximum events accepted in a single ingest request.
 const MAX_EVENTS_PER_REQUEST: usize = 1000;
 
@@ -174,18 +182,23 @@ impl FromRequestParts<AppState> for Principal {
     }
 }
 
-/// Extract the `tellur_session` value from the `Cookie` header, if present.
-fn session_cookie_value(headers: &axum::http::HeaderMap) -> Option<String> {
+/// Extract a named cookie value from the `Cookie` header, if present.
+fn cookie_value(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
     let header = headers.get(COOKIE)?.to_str().ok()?;
     for pair in header.split(';') {
         let pair = pair.trim();
-        if let Some(v) = pair.strip_prefix(&format!("{SESSION_COOKIE}="))
+        if let Some(v) = pair.strip_prefix(&format!("{name}="))
             && !v.is_empty()
         {
             return Some(v.to_string());
         }
     }
     None
+}
+
+/// Extract the session cookie value, if present.
+fn session_cookie_value(headers: &axum::http::HeaderMap) -> Option<String> {
+    cookie_value(headers, SESSION_COOKIE)
 }
 
 /// Build the `Set-Cookie` value for a new session.
@@ -196,6 +209,33 @@ fn session_cookie(sid: &str, max_age: i64) -> String {
 /// Build the `Set-Cookie` value that clears the session (logout).
 fn clear_session_cookie() -> String {
     format!("{SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0")
+}
+
+/// Build the `Set-Cookie` value for the login-binding cookie. Scoped to `/auth`
+/// so it is only sent to the callback.
+fn login_cookie(binding: &str) -> String {
+    format!(
+        "{LOGIN_COOKIE}={binding}; HttpOnly; Secure; SameSite=Lax; Path=/auth; Max-Age={}",
+        oidc::LOGIN_TTL_SECS
+    )
+}
+
+/// Build the `Set-Cookie` value that clears the login-binding cookie.
+fn clear_login_cookie() -> String {
+    format!("{LOGIN_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/auth; Max-Age=0")
+}
+
+/// Constant-time-ish equality for short secrets (avoids early-exit timing leak).
+fn secret_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 /// Whether a login transaction is older than its allowed lifetime.
@@ -1039,17 +1079,24 @@ pub async fn list_repo_roles(
 pub async fn oidc_login(State(state): State<AppState>) -> Result<Response, ServerError> {
     let oidc = state.oidc.clone().ok_or(ServerError::NotFound)?;
     // Opportunistically prune stale login rows so anonymous /auth/login traffic
-    // can't grow the table without bound.
+    // can't grow the table without bound, then enforce a hard cap.
     state
         .store
         .prune_expired_logins(oidc::LOGIN_TTL_SECS)
         .map_err(ServerError::Internal)?;
+    if state.store.count_logins().map_err(ServerError::Internal)? >= MAX_OUTSTANDING_LOGINS {
+        return Err(ServerError::TooManyRequests);
+    }
     let pkce = Pkce::generate();
     let state_tok = oidc::random_token(24);
     let nonce = oidc::random_token(24);
+    // Browser-binding secret: stored with the tx and set as a cookie; the
+    // callback must present a matching cookie, so a state value leaked/forwarded
+    // to a victim cannot complete the flow in their browser (login-CSRF).
+    let binding = oidc::random_token(24);
     state
         .store
-        .put_login(&state_tok, &pkce.verifier, &nonce)
+        .put_login(&state_tok, &pkce.verifier, &nonce, &binding)
         .map_err(ServerError::Internal)?;
     // Discovery may hit the network → run off the async worker.
     let url = run_blocking({
@@ -1069,7 +1116,13 @@ pub async fn oidc_login(State(state): State<AppState>) -> Result<Response, Serve
         }
     })
     .await?;
-    Ok(Redirect::to(&url).into_response())
+    let mut resp = Redirect::to(&url).into_response();
+    resp.headers_mut().insert(
+        SET_COOKIE,
+        HeaderValue::from_str(&login_cookie(&binding))
+            .map_err(|e| ServerError::Internal(e.into()))?,
+    );
+    Ok(resp)
 }
 
 /// Query parameters returned by the IdP to the redirect URI.
@@ -1087,6 +1140,7 @@ pub struct CallbackParams {
 /// validate the ID token, map to a provisioned member, and start a session.
 pub async fn oidc_callback(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Query(params): Query<CallbackParams>,
 ) -> Result<Response, ServerError> {
     let oidc = state.oidc.clone().ok_or(ServerError::NotFound)?;
@@ -1107,6 +1161,16 @@ pub async fn oidc_callback(
     if login_expired(&login.created_at) {
         return Err(ServerError::BadRequest("login state expired".to_string()));
     }
+    // The callback must come from the browser that initiated the flow: its
+    // login cookie must match the stored binding (defends against login-CSRF /
+    // session fixation where a leaked callback URL is opened in a victim's
+    // browser).
+    let presented = cookie_value(&headers, LOGIN_COOKIE).unwrap_or_default();
+    if !secret_eq(&presented, &login.browser_binding) {
+        return Err(ServerError::BadRequest(
+            "login binding mismatch".to_string(),
+        ));
+    }
     // Exchange the code for an ID token (network, over TLS).
     let id_token = run_blocking({
         let oidc = oidc.clone();
@@ -1126,7 +1190,7 @@ pub async fn oidc_callback(
     )
     .map_err(|_| ServerError::Unauthorized)?;
 
-    let principal = resolve_sso_member(&state, &claims)?;
+    let principal = resolve_sso_member(&state, &claims, &oidc.config.issuer)?;
     let sid = state
         .store
         .create_session(&principal.member_id, oidc::SESSION_TTL_SECS)
@@ -1142,9 +1206,16 @@ pub async fn oidc_callback(
         .map_err(ServerError::Internal)?;
 
     let mut resp = Redirect::to("/").into_response();
-    resp.headers_mut().insert(
+    let headers = resp.headers_mut();
+    headers.append(
         SET_COOKIE,
         HeaderValue::from_str(&session_cookie(&sid, oidc::SESSION_TTL_SECS))
+            .map_err(|e| ServerError::Internal(e.into()))?,
+    );
+    // Clear the now-consumed login-binding cookie.
+    headers.append(
+        SET_COOKIE,
+        HeaderValue::from_str(&clear_login_cookie())
             .map_err(|e| ServerError::Internal(e.into()))?,
     );
     Ok(resp)
@@ -1153,10 +1224,16 @@ pub async fn oidc_callback(
 /// Map validated ID-token claims to a provisioned member. No open
 /// self-registration: an unknown identity is rejected (403). On first login the
 /// OIDC subject is bound so later logins match by subject even if email changes.
-fn resolve_sso_member(state: &AppState, claims: &oidc::IdClaims) -> Result<Principal, ServerError> {
+fn resolve_sso_member(
+    state: &AppState,
+    claims: &oidc::IdClaims,
+    issuer: &str,
+) -> Result<Principal, ServerError> {
+    // Subjects are only unique within an issuer, so the binding is keyed by
+    // (issuer, subject).
     if let Some(p) = state
         .store
-        .find_member_by_oidc_subject(&claims.subject)
+        .find_member_by_oidc_subject(issuer, &claims.subject)
         .map_err(ServerError::Internal)?
     {
         return Ok(p);
@@ -1173,12 +1250,12 @@ fn resolve_sso_member(state: &AppState, claims: &oidc::IdClaims) -> Result<Princ
         .map_err(ServerError::Internal)?
     {
         Some(p) => {
-            // Bind the subject on first login only. If the member already has a
-            // (different) bound subject, refuse — a second IdP account on the
-            // same email must not take over the member.
+            // Bind the (issuer, subject) on first login only. If the member
+            // already has a (different) binding, refuse — a second IdP account
+            // on the same email must not take over the member.
             let bound = state
                 .store
-                .bind_oidc_subject(&p.member_id, &claims.subject)
+                .bind_oidc_subject(&p.member_id, issuer, &claims.subject)
                 .map_err(ServerError::Internal)?;
             if !bound {
                 return Err(ServerError::Forbidden);

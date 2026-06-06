@@ -102,6 +102,9 @@ pub struct PolicySummary {
 pub struct LoginTx {
     pub pkce_verifier: String,
     pub nonce: String,
+    /// Secret tied to the initiating browser (matched against a login cookie on
+    /// callback to prevent login-CSRF / session fixation).
+    pub browser_binding: String,
     pub created_at: String,
 }
 
@@ -278,17 +281,29 @@ pub trait Store: Send + Sync {
     /// Resolve a verified email to a principal, if a member is provisioned.
     fn find_member_by_email(&self, email: &str) -> Result<Option<Principal>>;
 
-    /// Resolve a bound OIDC subject to a principal, if any.
-    fn find_member_by_oidc_subject(&self, subject: &str) -> Result<Option<Principal>>;
+    /// Resolve a bound `(issuer, subject)` to a principal, if any. The subject is
+    /// only unique within an issuer, so both are required.
+    fn find_member_by_oidc_subject(&self, issuer: &str, subject: &str)
+    -> Result<Option<Principal>>;
 
-    /// Bind an OIDC subject to a member **only if none is bound yet**. Returns
-    /// `true` if it bound, `false` if the member already has a (different)
-    /// subject — preventing a second IdP account on the same email from taking
+    /// Bind an `(issuer, subject)` to a member **only if none is bound yet**.
+    /// Returns `true` if it bound, `false` if the member already has a (different)
+    /// binding — preventing a second IdP account on the same email from taking
     /// over the member.
-    fn bind_oidc_subject(&self, member_id: &str, subject: &str) -> Result<bool>;
+    fn bind_oidc_subject(&self, member_id: &str, issuer: &str, subject: &str) -> Result<bool>;
 
-    /// Persist a pending login transaction keyed by its CSRF `state`.
-    fn put_login(&self, state: &str, pkce_verifier: &str, nonce: &str) -> Result<()>;
+    /// Persist a pending login transaction keyed by its CSRF `state`, including
+    /// the browser-binding secret.
+    fn put_login(
+        &self,
+        state: &str,
+        pkce_verifier: &str,
+        nonce: &str,
+        browser_binding: &str,
+    ) -> Result<()>;
+
+    /// Count outstanding login transactions (for a hard anti-flood cap).
+    fn count_logins(&self) -> Result<u64>;
 
     /// Delete login transactions older than `ttl_secs` (bounds the table against
     /// anonymous `/auth/login` floods). Returns the number removed.

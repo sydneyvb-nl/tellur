@@ -146,11 +146,13 @@ impl Store for PostgresStore {
                  CREATE INDEX IF NOT EXISTS idx_repo_role_repo ON repo_role(repo_id);
                  CREATE TABLE IF NOT EXISTS member_identity (
                      member_id TEXT PRIMARY KEY REFERENCES member(id),
-                     email TEXT UNIQUE, oidc_subject TEXT UNIQUE
+                     email TEXT UNIQUE, oidc_issuer TEXT, oidc_subject TEXT,
+                     UNIQUE (oidc_issuer, oidc_subject)
                  );
                  CREATE TABLE IF NOT EXISTS oidc_login (
                      state TEXT PRIMARY KEY, pkce_verifier TEXT NOT NULL,
-                     nonce TEXT NOT NULL, created_at TEXT NOT NULL
+                     nonce TEXT NOT NULL, browser_binding TEXT NOT NULL,
+                     created_at TEXT NOT NULL
                  );
                  CREATE TABLE IF NOT EXISTS session (
                      id TEXT PRIMARY KEY, member_id TEXT NOT NULL REFERENCES member(id),
@@ -161,7 +163,7 @@ impl Store for PostgresStore {
             .context("failed to create schema")?;
         client
             .execute(
-                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '8')
+                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '10')
                  ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                 &[],
             )
@@ -889,37 +891,64 @@ impl Store for PostgresStore {
         )
     }
 
-    fn find_member_by_oidc_subject(&self, subject: &str) -> Result<Option<Principal>> {
-        principal_row(
-            &mut self.client()?,
+    fn find_member_by_oidc_subject(
+        &self,
+        issuer: &str,
+        subject: &str,
+    ) -> Result<Option<Principal>> {
+        let row = self.client()?.query_opt(
             "SELECT m.id, m.org_id, m.role FROM member m
-             JOIN member_identity i ON i.member_id = m.id WHERE i.oidc_subject = $1",
-            subject,
-        )
+             JOIN member_identity i ON i.member_id = m.id
+             WHERE i.oidc_issuer = $1 AND i.oidc_subject = $2",
+            &[&issuer, &subject],
+        )?;
+        match row {
+            Some(r) => Ok(Some(Principal {
+                member_id: r.get(0),
+                org_id: r.get(1),
+                role: Role::parse(&r.get::<_, String>(2))?,
+            })),
+            None => Ok(None),
+        }
     }
 
-    fn bind_oidc_subject(&self, member_id: &str, subject: &str) -> Result<bool> {
+    fn bind_oidc_subject(&self, member_id: &str, issuer: &str, subject: &str) -> Result<bool> {
         // Only bind when no subject is set yet (see SQLite impl for rationale).
         let n = self.client()?.execute(
-            "UPDATE member_identity SET oidc_subject = $2
+            "UPDATE member_identity SET oidc_issuer = $2, oidc_subject = $3
              WHERE member_id = $1 AND oidc_subject IS NULL",
-            &[&member_id, &subject],
+            &[&member_id, &issuer, &subject],
         )?;
         Ok(n > 0)
     }
 
-    fn put_login(&self, state: &str, pkce_verifier: &str, nonce: &str) -> Result<()> {
+    fn put_login(
+        &self,
+        state: &str,
+        pkce_verifier: &str,
+        nonce: &str,
+        browser_binding: &str,
+    ) -> Result<()> {
         self.client()?.execute(
-            "INSERT INTO oidc_login (state, pkce_verifier, nonce, created_at)
-             VALUES ($1, $2, $3, $4)",
+            "INSERT INTO oidc_login (state, pkce_verifier, nonce, browser_binding, created_at)
+             VALUES ($1, $2, $3, $4, $5)",
             &[
                 &state,
                 &pkce_verifier,
                 &nonce,
+                &browser_binding,
                 &chrono::Utc::now().to_rfc3339(),
             ],
         )?;
         Ok(())
+    }
+
+    fn count_logins(&self) -> Result<u64> {
+        let n: i64 = self
+            .client()?
+            .query_one("SELECT COUNT(*) FROM oidc_login", &[])?
+            .get(0);
+        Ok(n as u64)
     }
 
     fn prune_expired_logins(&self, ttl_secs: i64) -> Result<u64> {
@@ -933,13 +962,14 @@ impl Store for PostgresStore {
     fn take_login(&self, state: &str) -> Result<Option<LoginTx>> {
         let row = self.client()?.query_opt(
             "DELETE FROM oidc_login WHERE state = $1
-             RETURNING pkce_verifier, nonce, created_at",
+             RETURNING pkce_verifier, nonce, browser_binding, created_at",
             &[&state],
         )?;
         Ok(row.map(|r| LoginTx {
             pkce_verifier: r.get(0),
             nonce: r.get(1),
-            created_at: r.get(2),
+            browser_binding: r.get(2),
+            created_at: r.get(3),
         }))
     }
 

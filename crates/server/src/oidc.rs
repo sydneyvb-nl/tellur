@@ -154,6 +154,17 @@ impl OidcRuntime {
         }
         require_https("issuer", &self.config.issuer)?;
         let disc = self.client.discover(&self.config.issuer)?;
+        // The metadata's `issuer` must exactly match what we configured (OIDC
+        // Discovery §4.3). Otherwise a misconfigured/redirected discovery
+        // document could point us at a different provider whose tokens we would
+        // accept (we don't verify ID-token signatures locally).
+        if disc.issuer.trim_end_matches('/') != self.config.issuer.trim_end_matches('/') {
+            bail!(
+                "OIDC discovery issuer mismatch (configured {}, metadata {})",
+                self.config.issuer,
+                disc.issuer
+            );
+        }
         require_https("authorization_endpoint", &disc.authorization_endpoint)?;
         require_https("token_endpoint", &disc.token_endpoint)?;
         *self.cached.lock().unwrap() = Some(disc.clone());
@@ -192,15 +203,39 @@ impl Pkce {
     }
 }
 
-/// Reject a non-HTTPS URL (loopback `http://127.0.0.1` / `http://localhost` is
-/// allowed for local development/testing only).
+/// Reject a non-HTTPS URL. Plaintext `http` is allowed only when the host is
+/// *exactly* a loopback host (`localhost`, `127.0.0.1`, `::1`) — for local dev.
+/// The host is parsed (not prefix-matched) so `http://localhost.evil.example`
+/// and `http://127.0.0.1.evil.example` are correctly rejected.
 fn require_https(what: &str, url: &str) -> Result<()> {
-    let is_https = url.starts_with("https://");
-    let is_local_http = url.starts_with("http://127.0.0.1") || url.starts_with("http://localhost");
-    if !is_https && !is_local_http {
-        bail!("OIDC {what} must use https (got {url})");
+    if url.starts_with("https://") {
+        return Ok(());
     }
-    Ok(())
+    if let Some(rest) = url.strip_prefix("http://")
+        && is_loopback_host(rest)
+    {
+        return Ok(());
+    }
+    bail!("OIDC {what} must use https (got {url})");
+}
+
+/// Extract the host from a URL authority (`host[:port]/...`) and test whether it
+/// is exactly a loopback host. Userinfo (`user@`) is not accepted.
+fn is_loopback_host(after_scheme: &str) -> bool {
+    let authority = after_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(after_scheme);
+    if authority.contains('@') {
+        return false;
+    }
+    let host = if let Some(stripped) = authority.strip_prefix('[') {
+        // [::1]:port → ::1
+        stripped.split(']').next().unwrap_or("")
+    } else {
+        authority.split(':').next().unwrap_or(authority)
+    };
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
 
 /// A high-entropy URL-safe random token (used for state, nonce, PKCE verifier,

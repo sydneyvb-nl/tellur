@@ -237,30 +237,44 @@ fn full_store_surface() {
             .unwrap()
             .is_none()
     );
+    let issuer = "https://idp.test";
     assert!(
         store
-            .find_member_by_oidc_subject("idp-1")
+            .find_member_by_oidc_subject(issuer, "idp-1")
             .unwrap()
             .is_none()
     );
-    assert!(store.bind_oidc_subject(&sso, "idp-1").unwrap());
+    assert!(store.bind_oidc_subject(&sso, issuer, "idp-1").unwrap());
     // Re-binding a different subject must be refused (no takeover).
-    assert!(!store.bind_oidc_subject(&sso, "idp-2").unwrap());
+    assert!(!store.bind_oidc_subject(&sso, issuer, "idp-2").unwrap());
     assert_eq!(
         store
-            .find_member_by_oidc_subject("idp-1")
+            .find_member_by_oidc_subject(issuer, "idp-1")
             .unwrap()
             .unwrap()
             .member_id,
         sso
     );
-    // Stale login rows are pruned by TTL.
-    store.put_login("old-state", "v", "n").unwrap();
+    // The same subject at a *different* issuer is not the same identity.
+    assert!(
+        store
+            .find_member_by_oidc_subject("https://other.test", "idp-1")
+            .unwrap()
+            .is_none()
+    );
+    // Login tx carries the browser binding and is counted + TTL-pruned.
+    store.put_login("old-state", "v", "n", "bind-1").unwrap();
+    assert_eq!(store.count_logins().unwrap(), 1);
+    let tx = store.take_login("old-state").unwrap().unwrap();
+    assert_eq!(tx.browser_binding, "bind-1");
+    store.put_login("s2", "v", "n", "b2").unwrap();
     assert_eq!(store.prune_expired_logins(-1).unwrap(), 1);
-    assert!(store.take_login("old-state").unwrap().is_none());
+    assert_eq!(store.count_logins().unwrap(), 0);
 
     // Login transaction is consumed exactly once.
-    store.put_login("state-1", "verifier-1", "nonce-1").unwrap();
+    store
+        .put_login("state-1", "verifier-1", "nonce-1", "bind-x")
+        .unwrap();
     let tx = store.take_login("state-1").unwrap().unwrap();
     assert_eq!(tx.pkce_verifier, "verifier-1");
     assert_eq!(tx.nonce, "nonce-1");
