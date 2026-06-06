@@ -54,6 +54,7 @@ fn setup() -> Setup {
         config: Arc::new(config),
         rate_limiter: Arc::new(RateLimiter::new(1000, Duration::from_secs(60))),
         metrics: Arc::new(tellur_server::Metrics::new()),
+        oidc: None,
     };
     Setup {
         state,

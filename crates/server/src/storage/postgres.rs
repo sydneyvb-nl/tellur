@@ -14,7 +14,7 @@ use tellur_core::schema::ids;
 use tellur_core::schema::types::FileAttribution;
 
 use super::{
-    AuditEntry, AuditRecord, IngestEvent, Org, OrgReport, PolicyDoc, PolicySummary, Repo,
+    AuditEntry, AuditRecord, IngestEvent, LoginTx, Org, OrgReport, PolicyDoc, PolicySummary, Repo,
     RepoRoleGrant, RepoSummary, Store, StoredEvent,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
@@ -143,7 +143,20 @@ impl Store for PostgresStore {
                      role TEXT NOT NULL, updated_at TEXT NOT NULL,
                      PRIMARY KEY (repo_id, member_id)
                  );
-                 CREATE INDEX IF NOT EXISTS idx_repo_role_repo ON repo_role(repo_id);",
+                 CREATE INDEX IF NOT EXISTS idx_repo_role_repo ON repo_role(repo_id);
+                 CREATE TABLE IF NOT EXISTS member_identity (
+                     member_id TEXT PRIMARY KEY REFERENCES member(id),
+                     email TEXT UNIQUE, oidc_subject TEXT UNIQUE
+                 );
+                 CREATE TABLE IF NOT EXISTS oidc_login (
+                     state TEXT PRIMARY KEY, pkce_verifier TEXT NOT NULL,
+                     nonce TEXT NOT NULL, created_at TEXT NOT NULL
+                 );
+                 CREATE TABLE IF NOT EXISTS session (
+                     id TEXT PRIMARY KEY, member_id TEXT NOT NULL REFERENCES member(id),
+                     created_at TEXT NOT NULL, expires_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_session_member ON session(member_id);",
             )
             .context("failed to create schema")?;
         client
@@ -834,6 +847,143 @@ impl Store for PostgresStore {
             }
             None => Ok(counted == 0),
         }
+    }
+
+    fn provision_member(
+        &self,
+        org_id: &str,
+        display_name: &str,
+        role: Role,
+        email: &str,
+    ) -> Result<String> {
+        let member_id = ids::generate_id("mbr");
+        let mut client = self.client()?;
+        let mut tx = client.transaction()?;
+        tx.execute(
+            "INSERT INTO member (id, org_id, display_name, role, created_at)
+             VALUES ($1, $2, $3, $4, $5)",
+            &[
+                &member_id,
+                &org_id,
+                &display_name,
+                &role.as_str(),
+                &chrono::Utc::now().to_rfc3339(),
+            ],
+        )
+        .context("failed to create member (does the org exist?)")?;
+        tx.execute(
+            "INSERT INTO member_identity (member_id, email) VALUES ($1, $2)",
+            &[&member_id, &email],
+        )
+        .context("failed to set member email (already in use?)")?;
+        tx.commit()?;
+        Ok(member_id)
+    }
+
+    fn find_member_by_email(&self, email: &str) -> Result<Option<Principal>> {
+        principal_row(
+            &mut self.client()?,
+            "SELECT m.id, m.org_id, m.role FROM member m
+             JOIN member_identity i ON i.member_id = m.id WHERE i.email = $1",
+            email,
+        )
+    }
+
+    fn find_member_by_oidc_subject(&self, subject: &str) -> Result<Option<Principal>> {
+        principal_row(
+            &mut self.client()?,
+            "SELECT m.id, m.org_id, m.role FROM member m
+             JOIN member_identity i ON i.member_id = m.id WHERE i.oidc_subject = $1",
+            subject,
+        )
+    }
+
+    fn bind_oidc_subject(&self, member_id: &str, subject: &str) -> Result<()> {
+        let n = self.client()?.execute(
+            "UPDATE member_identity SET oidc_subject = $2 WHERE member_id = $1",
+            &[&member_id, &subject],
+        )?;
+        if n == 0 {
+            bail!("member {member_id} has no SSO identity row");
+        }
+        Ok(())
+    }
+
+    fn put_login(&self, state: &str, pkce_verifier: &str, nonce: &str) -> Result<()> {
+        self.client()?.execute(
+            "INSERT INTO oidc_login (state, pkce_verifier, nonce, created_at)
+             VALUES ($1, $2, $3, $4)",
+            &[
+                &state,
+                &pkce_verifier,
+                &nonce,
+                &chrono::Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn take_login(&self, state: &str) -> Result<Option<LoginTx>> {
+        let row = self.client()?.query_opt(
+            "DELETE FROM oidc_login WHERE state = $1
+             RETURNING pkce_verifier, nonce, created_at",
+            &[&state],
+        )?;
+        Ok(row.map(|r| LoginTx {
+            pkce_verifier: r.get(0),
+            nonce: r.get(1),
+            created_at: r.get(2),
+        }))
+    }
+
+    fn create_session(&self, member_id: &str, ttl_secs: i64) -> Result<String> {
+        let id = ids::generate_id("sess");
+        let now = chrono::Utc::now();
+        let expires = now + chrono::Duration::seconds(ttl_secs);
+        self.client()?.execute(
+            "INSERT INTO session (id, member_id, created_at, expires_at)
+             VALUES ($1, $2, $3, $4)",
+            &[&id, &member_id, &now.to_rfc3339(), &expires.to_rfc3339()],
+        )?;
+        Ok(id)
+    }
+
+    fn session_principal(&self, session_id: &str) -> Result<Option<Principal>> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let row = self.client()?.query_opt(
+            "SELECT m.id, m.org_id, m.role FROM session s
+             JOIN member m ON m.id = s.member_id
+             WHERE s.id = $1 AND s.expires_at > $2",
+            &[&session_id, &now],
+        )?;
+        match row {
+            Some(r) => Ok(Some(Principal {
+                member_id: r.get(0),
+                org_id: r.get(1),
+                role: Role::parse(&r.get::<_, String>(2))?,
+            })),
+            None => Ok(None),
+        }
+    }
+
+    fn delete_session(&self, session_id: &str) -> Result<bool> {
+        let n = self
+            .client()?
+            .execute("DELETE FROM session WHERE id = $1", &[&session_id])?;
+        Ok(n > 0)
+    }
+}
+
+/// Helper: read at most one `(member_id, org_id, role)` row into a [`Principal`].
+fn principal_row(client: &mut PooledClient, sql: &str, key: &str) -> Result<Option<Principal>> {
+    let row = client.query_opt(sql, &[&key])?;
+    match row {
+        Some(r) => Ok(Some(Principal {
+            member_id: r.get(0),
+            org_id: r.get(1),
+            role: Role::parse(&r.get::<_, String>(2))?,
+        })),
+        None => Ok(None),
     }
 }
 

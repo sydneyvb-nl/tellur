@@ -24,6 +24,9 @@ allow = [
     "Zlib",
     "MPL-2.0",
     "CC0-1.0",
+    # Permissive data license used by webpki-roots (TLS trust anchors pulled in
+    # by ureq/rustls for OIDC HTTPS).
+    "CDLA-Permissive-2.0",
 ]
 
 [licenses.private]

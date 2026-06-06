@@ -33,8 +33,14 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 postgres = "0.19"
 r2d2 = "0.8"
 r2d2_postgres = "0.18"
+# OIDC SSO: HTTPS client for IdP discovery/token exchange (rustls TLS), plus
+# base64url + sha2 for PKCE and ID-token (JWT) decoding.
+ureq = { version = "2", features = ["tls", "json"] }
+base64 = "0.22"
+sha2 = "0.10"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 tellur-core = { path = "../core" }
+base64 = "0.22"

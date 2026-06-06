@@ -30,6 +30,7 @@ fn state_with_store(store: SqliteStore) -> AppState {
             std::time::Duration::from_secs(60),
         )),
         metrics: Arc::new(tellur_server::Metrics::new()),
+        oidc: None,
     }
 }
 

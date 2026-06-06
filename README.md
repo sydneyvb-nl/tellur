@@ -493,7 +493,15 @@ admin can elevate a member on a specific repo (e.g. make an org viewer a
 contributor or admin on one repo) via
 `PUT /v1/orgs/{org}/repos/{repo}/roles/{member}` or the
 `tellur-server admin grant-repo-role` CLI; grants only elevate, never restrict.
-Enterprise SSO/OIDC and SCIM provisioning are upcoming.
+**Enterprise SSO** is supported via OIDC (Authorization Code + PKCE): set
+`TELLUR_OIDC_ISSUER` / `TELLUR_OIDC_CLIENT_ID` / `TELLUR_OIDC_CLIENT_SECRET` /
+`TELLUR_OIDC_REDIRECT_URI` to enable `/auth/login`, `/auth/callback`, and
+`/auth/logout`. A successful login issues an opaque, server-stored session cookie
+(`HttpOnly`/`Secure`/`SameSite=Lax`). There is no open self-registration —
+pre-provision who may sign in with `tellur-server admin add-member --org <id>
+--name <name> --email <email> --role <role>`; the member is matched by verified
+email on first login and bound to their stable OIDC subject thereafter. SCIM
+provisioning is upcoming.
 
 ## Development
 
@@ -527,7 +535,7 @@ metadata, not the raw prompt text.
 
 ## Roadmap
 
-- Enterprise SSO/SCIM for the team/server hub
+- SCIM provisioning for the team/server hub (SSO via OIDC is implemented)
 - Live lifecycle-hook capture (beyond import) for editors that expose it
 - Richer policy templates for security-sensitive repositories
 - Packaged releases for npm, Homebrew, and GitHub Releases

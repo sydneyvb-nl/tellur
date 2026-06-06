@@ -97,6 +97,14 @@ pub struct PolicySummary {
     pub updated_at: String,
 }
 
+/// A pending OIDC login transaction (CSRF `state` → PKCE/nonce binding).
+#[derive(Debug, Clone)]
+pub struct LoginTx {
+    pub pkce_verifier: String,
+    pub nonce: String,
+    pub created_at: String,
+}
+
 /// A per-repo role grant: a member's elevated role on a specific repo.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct RepoRoleGrant {
@@ -253,4 +261,42 @@ pub trait Store: Send + Sync {
 
     /// Recompute the audit hash chain and report whether it is intact.
     fn verify_audit_chain(&self) -> Result<bool>;
+
+    // ─── SSO: identity, login transactions, sessions ─────────────────────────
+
+    /// Provision an SSO-capable member with a (globally unique) email and no API
+    /// token. Returns the new member id. Used to pre-authorize who may sign in
+    /// via the IdP (no open self-registration).
+    fn provision_member(
+        &self,
+        org_id: &str,
+        display_name: &str,
+        role: Role,
+        email: &str,
+    ) -> Result<String>;
+
+    /// Resolve a verified email to a principal, if a member is provisioned.
+    fn find_member_by_email(&self, email: &str) -> Result<Option<Principal>>;
+
+    /// Resolve a bound OIDC subject to a principal, if any.
+    fn find_member_by_oidc_subject(&self, subject: &str) -> Result<Option<Principal>>;
+
+    /// Bind an OIDC subject to a member (on first successful login).
+    fn bind_oidc_subject(&self, member_id: &str, subject: &str) -> Result<()>;
+
+    /// Persist a pending login transaction keyed by its CSRF `state`.
+    fn put_login(&self, state: &str, pkce_verifier: &str, nonce: &str) -> Result<()>;
+
+    /// Atomically consume a login transaction by `state` (delete + return).
+    fn take_login(&self, state: &str) -> Result<Option<LoginTx>>;
+
+    /// Create a session for a member, expiring `ttl_secs` from now. Returns the
+    /// opaque session id (used as the cookie value).
+    fn create_session(&self, member_id: &str, ttl_secs: i64) -> Result<String>;
+
+    /// Resolve a non-expired session id to a principal.
+    fn session_principal(&self, session_id: &str) -> Result<Option<Principal>>;
+
+    /// Delete a session (logout). Returns `true` if one existed.
+    fn delete_session(&self, session_id: &str) -> Result<bool>;
 }

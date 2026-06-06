@@ -1,11 +1,33 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-05 (Tier 1 B6 per-repo RBAC; on feature branch)
+**Last updated:** 2026-06-06 (Tier 1 B6 OIDC SSO; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-06 — Tier 1 B6 (enterprise) — OIDC SSO.** On branch
+> `feat/server-b6-oidc-sso`. Browser single sign-on via OIDC Authorization Code
+> + PKCE. New `oidc` module: PKCE (S256), authorize-URL builder, ID-token claim
+> validation (`iss`/`aud`/`exp`/`nonce`) — signature integrity rests on the
+> TLS-secured direct token-endpoint channel (OIDC Core §3.1.3.7), documented in
+> the threat model. The IdP boundary is behind an `OidcClient` trait
+> (`HttpOidcClient` over ureq/rustls; a mock drives the tests with no network).
+> New routes `/auth/login`, `/auth/callback`, `/auth/logout`; the `Principal`
+> extractor now accepts an API bearer token **or** an opaque, DB-backed session
+> cookie (`HttpOnly`/`Secure`/`SameSite=Lax`, 8h). Schema v9 adds
+> `member_identity` (email + bound OIDC subject), `oidc_login` (CSRF state →
+> PKCE/nonce), and `session`; full SQLite + Postgres parity. No open
+> self-registration: sign-in is limited to members provisioned by verified email
+> (`tellur-server admin add-member`), with the OIDC subject bound on first login.
+> Deps: `ureq`(+rustls TLS), `base64`, `sha2`; `deny.toml` now allows
+> `CDLA-Permissive-2.0` (webpki-roots). Verified: `oidc` unit tests (PKCE,
+> authorize URL, claim validation good/bad), `tests/oidc.rs` end-to-end via mock
+> IdP (login→callback→session→/v1/me→logout, unprovisioned/unverified→403, CSRF
+> state→400, SSO-disabled→404, bearer still works), Postgres parity in
+> `tests/postgres.rs`; 235 workspace tests; clippy -D warnings + cargo-deny
+> green; PG tests pass against a local Postgres. Next B6 slice: SCIM.
+>
 > **2026-06-05 — Tier 1 B6 (enterprise) — fine-grained per-repo RBAC.** On
 > branch `feat/server-b6-repo-rbac`. First slice of B6: per-repo role grants on
 > top of the org-level RBAC. Grants are **additive** — a member's effective role
@@ -654,8 +676,9 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
    service running the integration tests. **B6 (enterprise) in progress:**
    **fine-grained per-repo RBAC ✅** (branch `feat/server-b6-repo-rbac`) —
    additive per-repo role grants (`max(org_role, grant)`) + admin management
-   endpoints/CLI; remaining B6 slices: **OIDC SSO**, then **SCIM**. Also still
-   open: **queued/durable jobs**.
+   endpoints/CLI; **OIDC SSO ✅** (branch `feat/server-b6-oidc-sso`) — code+PKCE
+   browser login, opaque session cookies, email-provisioned members. Remaining
+   B6 slice: **SCIM**. Also still open: **queued/durable jobs**.
 9. **Plugin SDK** — requires stable adapter/event API
 
 ---

@@ -50,6 +50,18 @@ enum AdminAction {
         #[arg(long)]
         file: std::path::PathBuf,
     },
+    /// Provision an SSO member (email-mapped, no API token) so they may sign in
+    /// via the configured IdP.
+    AddMember {
+        #[arg(long)]
+        org: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        email: String,
+        #[arg(long, value_enum)]
+        role: AdminRoleArg,
+    },
     /// Grant a member an additive per-repo role.
     GrantRepoRole {
         #[arg(long)]
@@ -144,6 +156,25 @@ fn run_admin(config: Config, action: AdminAction) -> Result<()> {
                 detail: format!("name={name} version={version} via=admin-cli"),
             })?;
             println!("Stored policy \"{name}\" version {version}");
+        }
+        AdminAction::AddMember {
+            org,
+            name,
+            email,
+            role,
+        } => {
+            let role = role.as_role();
+            let member = store.provision_member(&org, &name, role, &email)?;
+            store.append_audit(&AuditEntry {
+                org_id: Some(org),
+                actor_member_id: None,
+                action: "member.provision".to_string(),
+                detail: format!("member={member} role={} via=admin-cli", role.as_str()),
+            })?;
+            println!(
+                "Provisioned SSO member id={member} role={} (signs in via IdP)",
+                role.as_str()
+            );
         }
         AdminAction::GrantRepoRole {
             org,
