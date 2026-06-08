@@ -43,7 +43,9 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    reject — so revocation is immediate across every credential type. **SCIM
    Groups** (`/scim/v2/Groups`) drive org roles: a group `displayName` of
    `tellur-admin|tellur-contributor|tellur-viewer` sets its members' role
-   (recomputed on membership change). All IdP-driven SCIM mutations
+   (recomputed on membership change); removal from the last mapping group (or
+   its deletion) **revokes** the elevated role back to the `viewer` baseline, so
+   group sync leaves no stale access. All IdP-driven SCIM mutations
    (user/group create/replace/patch/delete) are written to the tamper-evident
    audit log. The browser dashboard (`web/`) is intended to be served
    **same-origin** with the hub so its session cookie is first-party and no CORS

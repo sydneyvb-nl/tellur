@@ -1554,6 +1554,14 @@ impl Store for SqliteStore {
         Ok(true)
     }
 
+    fn requeue_running_jobs(&self) -> Result<u64> {
+        let n = self.conn()?.execute(
+            "UPDATE job SET status = 'queued', updated_at = ?1 WHERE status = 'running'",
+            params![chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(n as u64)
+    }
+
     fn create_scim_token(&self, org_id: &str) -> Result<GeneratedToken> {
         let token = auth::generate_token()?;
         self.conn()?
@@ -1804,8 +1812,10 @@ fn set_group_members(
 }
 
 /// Recompute a member's org role from the role-mapping groups they belong to.
-/// Role = highest mapped group role. If the member is in no role-mapping group,
-/// their role is left unchanged (use SCIM User PATCH to lower it explicitly).
+/// With group sync, membership **owns** the role: it is set to the highest
+/// mapped group role, or to the `viewer` baseline when the member is in no
+/// role-mapping group — so removing the last `tellur-admin` group revokes the
+/// elevated role (no leftover access).
 fn recompute_member_role(conn: &Connection, member_id: &str) -> Result<()> {
     let mut stmt = conn.prepare(
         "SELECT g.display_name FROM scim_group_member gm
@@ -1815,18 +1825,16 @@ fn recompute_member_role(conn: &Connection, member_id: &str) -> Result<()> {
         .query_map(params![member_id], |r| r.get::<_, String>(0))?
         .filter_map(std::result::Result::ok)
         .collect();
-    let mut role: Option<Role> = None;
+    let mut role = Role::Viewer;
     for n in names {
         if let Some(r) = role_from_group_name(&n) {
-            role = Some(role.map_or(r, |cur| cur.max(r)));
+            role = role.max(r);
         }
     }
-    if let Some(r) = role {
-        conn.execute(
-            "UPDATE member SET role = ?2 WHERE id = ?1",
-            params![member_id, r.as_str()],
-        )?;
-    }
+    conn.execute(
+        "UPDATE member SET role = ?2 WHERE id = ?1",
+        params![member_id, role.as_str()],
+    )?;
     Ok(())
 }
 

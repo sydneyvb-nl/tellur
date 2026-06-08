@@ -55,6 +55,29 @@ fn jobs_are_tenant_scoped() {
 }
 
 #[test]
+fn running_jobs_are_requeued_on_startup() {
+    let store = store();
+    let org = store.create_org("A").unwrap().id;
+    let job_id = store.enqueue_job(&org, jobs::KIND_EXPORT_EVENTS).unwrap();
+    // Simulate a crash mid-flight: claimed (running) but never completed.
+    let claimed = store.claim_next_job().unwrap().unwrap();
+    assert_eq!(claimed.id, job_id);
+    assert!(store.claim_next_job().unwrap().is_none());
+
+    // On startup the worker requeues it, so it can be claimed and run again.
+    assert_eq!(store.requeue_running_jobs().unwrap(), 1);
+    assert_eq!(
+        store.get_job(&org, &job_id).unwrap().unwrap().status,
+        "queued"
+    );
+    assert!(jobs::process_one(&store).unwrap());
+    assert_eq!(
+        store.get_job(&org, &job_id).unwrap().unwrap().status,
+        "completed"
+    );
+}
+
+#[test]
 fn claim_is_fifo_and_exclusive() {
     let store = store();
     let org = store.create_org("A").unwrap().id;

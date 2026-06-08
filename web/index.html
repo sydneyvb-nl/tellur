@@ -530,7 +530,15 @@ function hubParams() {
   const p = new URLSearchParams(window.location.search);
   const hub = p.get('hub');
   const org = p.get('org');
-  return hub && org ? { hub: hub.replace(/\/$/, ''), org, token: p.get('token') } : null;
+  const token = p.get('token');
+  // Never leave an API token in the address bar / history / Referer: read it
+  // once, then scrub it from the URL before any network request runs.
+  if (token) {
+    p.delete('token');
+    const qs = p.toString();
+    history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
+  }
+  return hub && org ? { hub: hub.replace(/\/$/, ''), org, token } : null;
 }
 
 async function loadHubDashboard({ hub, org, token }) {
@@ -538,6 +546,7 @@ async function loadHubDashboard({ hub, org, token }) {
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(`${hub}/v1/orgs/${encodeURIComponent(org)}/dashboard`, {
     credentials: 'include',
+    referrerPolicy: 'no-referrer',
     headers,
   });
   if (res.status === 401 || res.status === 403) {

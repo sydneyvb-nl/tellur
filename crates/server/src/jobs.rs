@@ -67,6 +67,12 @@ fn run_job(store: &Arc<dyn Store>, job: &Job) -> Result<Value> {
 /// Spawn the background worker loop. Drains the queue, then idles between polls.
 pub fn spawn_worker(store: Arc<dyn Store>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        // Reclaim jobs left `running` by a previous process (crash/restart).
+        match store.requeue_running_jobs() {
+            Ok(n) if n > 0 => tracing::info!(requeued = n, "reclaimed in-flight jobs on startup"),
+            Ok(_) => {}
+            Err(e) => tracing::error!(error = %e, "failed to requeue running jobs on startup"),
+        }
         loop {
             // Drain all ready jobs, each on a blocking thread.
             loop {

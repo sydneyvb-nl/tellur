@@ -415,8 +415,8 @@ async fn group_membership_drives_member_roles() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["totalResults"], 1);
 
-    // PATCH remove the member → role recomputed (no mapping group left, role
-    // stays at its last value: admin; documented behavior).
+    // PATCH remove the member → role recomputed: no mapping group left, so the
+    // elevated role is revoked back to the viewer baseline.
     let (status, _) = scim(
         &s.state,
         "PATCH",
@@ -428,6 +428,14 @@ async fn group_membership_drives_member_roles() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        s.store
+            .find_member_by_email("gm@corp.test")
+            .unwrap()
+            .unwrap()
+            .role,
+        Role::Viewer
+    );
     let (_, g) = scim(
         &s.state,
         "GET",
@@ -448,6 +456,51 @@ async fn group_membership_drives_member_roles() {
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn group_pathless_add_is_incremental() {
+    let s = setup();
+    let (_, ua) = scim(
+        &s.state,
+        "POST",
+        "/scim/v2/Users",
+        Some(&s.scim_token),
+        Some(user_body("pa@corp.test", "viewer")),
+    )
+    .await;
+    let a = ua["id"].as_str().unwrap().to_string();
+    let (_, ub) = scim(
+        &s.state,
+        "POST",
+        "/scim/v2/Users",
+        Some(&s.scim_token),
+        Some(user_body("pb@corp.test", "viewer")),
+    )
+    .await;
+    let b = ub["id"].as_str().unwrap().to_string();
+
+    let (_, g) = scim(
+        &s.state,
+        "POST",
+        "/scim/v2/Groups",
+        Some(&s.scim_token),
+        Some(json!({ "displayName": "eng", "members": [{ "value": a }] })),
+    )
+    .await;
+    let gid = g["id"].as_str().unwrap().to_string();
+
+    // Pathless `add` with a Group object must union, not replace.
+    let (status, g) = scim(
+        &s.state,
+        "PATCH",
+        &format!("/scim/v2/Groups/{gid}"),
+        Some(&s.scim_token),
+        Some(json!({ "Operations": [{ "op": "add", "value": { "members": [{ "value": b }] } }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(g["members"].as_array().unwrap().len(), 2);
 }
 
 #[tokio::test]

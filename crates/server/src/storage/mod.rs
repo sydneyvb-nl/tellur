@@ -434,6 +434,11 @@ pub trait Store: Send + Sync {
     /// Fetch a job by id, tenant-scoped to its org.
     fn get_job(&self, org_id: &str, job_id: &str) -> Result<Option<Job>>;
 
+    /// Reset any `running` jobs back to `queued` (called on worker startup, so a
+    /// job that was in-flight when the process died is retried). Returns the
+    /// number requeued.
+    fn requeue_running_jobs(&self) -> Result<u64>;
+
     // ─── SCIM Groups (group-based role sync) ─────────────────────────────────
 
     /// Create a SCIM group with the given members, then recompute each member's

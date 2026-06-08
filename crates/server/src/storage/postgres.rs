@@ -1309,6 +1309,14 @@ impl Store for PostgresStore {
         Ok(true)
     }
 
+    fn requeue_running_jobs(&self) -> Result<u64> {
+        let n = self.client()?.execute(
+            "UPDATE job SET status = 'queued', updated_at = $1 WHERE status = 'running'",
+            &[&chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(n)
+    }
+
     fn create_scim_token(&self, org_id: &str) -> Result<GeneratedToken> {
         let token = auth::generate_token()?;
         self.client()?
@@ -1521,26 +1529,25 @@ fn pg_set_group_members(
     Ok(set)
 }
 
-/// Recompute a member's org role from the role-mapping groups they belong to
-/// (highest mapped group role; left unchanged if in no role-mapping group).
+/// Recompute a member's org role from the role-mapping groups they belong to.
+/// Membership owns the role: highest mapped group role, or the `viewer` baseline
+/// when no role-mapping group remains (so removal revokes elevated access).
 fn pg_recompute_member_role(c: &mut impl GenericClient, member_id: &str) -> Result<()> {
     let rows = c.query(
         "SELECT g.display_name FROM scim_group_member gm
          JOIN scim_group g ON g.id = gm.group_id WHERE gm.member_id = $1",
         &[&member_id],
     )?;
-    let mut role: Option<Role> = None;
+    let mut role = Role::Viewer;
     for r in &rows {
         if let Some(found) = role_from_group_name(&r.get::<_, String>(0)) {
-            role = Some(role.map_or(found, |cur| cur.max(found)));
+            role = role.max(found);
         }
     }
-    if let Some(r) = role {
-        c.execute(
-            "UPDATE member SET role = $2 WHERE id = $1",
-            &[&member_id, &r.as_str()],
-        )?;
-    }
+    c.execute(
+        "UPDATE member SET role = $2 WHERE id = $1",
+        &[&member_id, &role.as_str()],
+    )?;
     Ok(())
 }
 

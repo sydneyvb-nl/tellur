@@ -719,13 +719,19 @@ pub async fn patch_group(
             "replace" | "add" if lpath == "displayname" => {
                 display = op.value.as_str().map(str::to_string).or(display);
             }
-            // Pathless replace of a Group object.
+            // Pathless op carrying a partial Group object in `value`. A pathless
+            // `add` is incremental (union); only `replace` swaps the whole set.
             _ if op.path.is_none() => {
                 if let Some(d) = op.value.get("displayName").and_then(Value::as_str) {
                     display = Some(d.to_string());
                 }
                 if let Some(arr) = op.value.get("members") {
-                    members = member_values(arr).into_iter().collect();
+                    let incoming = member_values(arr);
+                    if opname == "replace" {
+                        members = incoming.into_iter().collect();
+                    } else {
+                        members.extend(incoming);
+                    }
                 }
             }
             _ => {}
