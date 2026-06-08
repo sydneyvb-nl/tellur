@@ -503,6 +503,310 @@ pub async fn delete_user(
     }
 }
 
+// ─── SCIM Groups (group-based role sync) ─────────────────────────────────────
+
+const GROUP_SCHEMA: &str = "urn:ietf:params:scim:schemas:core:2.0:Group";
+
+/// Render a stored group as a SCIM Group resource.
+fn group_resource(g: &crate::storage::ScimGroup) -> Value {
+    let members: Vec<Value> = g.members.iter().map(|m| json!({ "value": m })).collect();
+    json!({
+        "schemas": [GROUP_SCHEMA],
+        "id": g.id,
+        "externalId": g.external_id,
+        "displayName": g.display_name,
+        "members": members,
+        "meta": { "resourceType": "Group", "location": format!("/scim/v2/Groups/{}", g.id) },
+    })
+}
+
+/// Inbound SCIM Group (POST/PUT).
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct GroupInput {
+    #[serde(rename = "displayName")]
+    pub display_name: Option<String>,
+    #[serde(rename = "externalId")]
+    pub external_id: Option<String>,
+    pub members: Option<Vec<MemberRef>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MemberRef {
+    pub value: String,
+}
+
+fn member_ids(refs: &Option<Vec<MemberRef>>) -> Vec<String> {
+    refs.as_ref()
+        .map(|v| v.iter().map(|m| m.value.clone()).collect())
+        .unwrap_or_default()
+}
+
+/// `GET /scim/v2/Groups` — list groups (optionally filtered by displayName).
+pub async fn list_groups(
+    auth: ScimAuth,
+    State(state): State<AppState>,
+    Query(q): Query<ListQuery>,
+) -> Result<Response, ServerError> {
+    let name_filter = q.filter.as_deref().and_then(parse_displayname_filter);
+    let groups = state
+        .store
+        .scim_list_groups(&auth.org_id, name_filter.as_deref())
+        .map_err(ServerError::Internal)?;
+    let total = groups.len();
+    let start_index = q.start_index.unwrap_or(1).max(1) as usize;
+    let count = q
+        .count
+        .map(|c| c.max(0) as usize)
+        .unwrap_or(DEFAULT_COUNT)
+        .min(MAX_COUNT);
+    let page: Vec<Value> = groups
+        .iter()
+        .skip(start_index - 1)
+        .take(count)
+        .map(group_resource)
+        .collect();
+    Ok(scim_json(
+        StatusCode::OK,
+        json!({
+            "schemas": [LIST_SCHEMA],
+            "totalResults": total,
+            "startIndex": start_index,
+            "itemsPerPage": page.len(),
+            "Resources": page,
+        }),
+    ))
+}
+
+/// Parse a `displayName eq "x"` filter (case-insensitive attr/operator).
+fn parse_displayname_filter(filter: &str) -> Option<String> {
+    let f = filter.trim();
+    let prefix = "displayname eq ";
+    if !f.to_ascii_lowercase().starts_with(prefix) {
+        return None;
+    }
+    let v = f[prefix.len()..].trim().trim_matches('"');
+    (!v.is_empty()).then(|| v.to_string())
+}
+
+/// `POST /scim/v2/Groups` — create a group (and sync member roles).
+pub async fn create_group(
+    auth: ScimAuth,
+    State(state): State<AppState>,
+    Json(input): Json<GroupInput>,
+) -> Result<Response, ServerError> {
+    let Some(name) = input.display_name.clone() else {
+        return Ok(scim_error(
+            StatusCode::BAD_REQUEST,
+            "displayName is required",
+        ));
+    };
+    match state.store.scim_create_group(
+        &auth.org_id,
+        &name,
+        input.external_id.as_deref(),
+        &member_ids(&input.members),
+    ) {
+        Ok(group) => {
+            audit_scim(
+                &state,
+                &auth.org_id,
+                "scim.group.create",
+                format!("group={} members={}", group.id, group.members.len()),
+            )?;
+            Ok(scim_json(StatusCode::CREATED, group_resource(&group)))
+        }
+        Err(e) => {
+            // Duplicate displayName → 409; a bad member ref → 400.
+            let msg = e.to_string();
+            if msg.contains("not found in org") {
+                Ok(scim_error(StatusCode::BAD_REQUEST, &msg))
+            } else {
+                Ok(scim_error(
+                    StatusCode::CONFLICT,
+                    "a group with this displayName already exists",
+                ))
+            }
+        }
+    }
+}
+
+/// `GET /scim/v2/Groups/{id}`.
+pub async fn get_group(
+    auth: ScimAuth,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, ServerError> {
+    match state
+        .store
+        .scim_get_group(&auth.org_id, &id)
+        .map_err(ServerError::Internal)?
+    {
+        Some(g) => Ok(scim_json(StatusCode::OK, group_resource(&g))),
+        None => Ok(scim_error(StatusCode::NOT_FOUND, "group not found")),
+    }
+}
+
+/// `PUT /scim/v2/Groups/{id}` — replace displayName/externalId/members.
+pub async fn replace_group(
+    auth: ScimAuth,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(input): Json<GroupInput>,
+) -> Result<Response, ServerError> {
+    let members = member_ids(&input.members);
+    let updated = state
+        .store
+        .scim_update_group(
+            &auth.org_id,
+            &id,
+            input.display_name.as_deref(),
+            input.external_id.as_deref(),
+            Some(&members),
+        )
+        .map_err(|e| ServerError::BadRequest(e.to_string()))?;
+    match updated {
+        Some(g) => {
+            audit_scim(
+                &state,
+                &auth.org_id,
+                "scim.group.replace",
+                format!("group={} members={}", g.id, g.members.len()),
+            )?;
+            Ok(scim_json(StatusCode::OK, group_resource(&g)))
+        }
+        None => Ok(scim_error(StatusCode::NOT_FOUND, "group not found")),
+    }
+}
+
+/// `PATCH /scim/v2/Groups/{id}` — add/remove members or rename (the operations
+/// IdPs use to sync group membership).
+pub async fn patch_group(
+    auth: ScimAuth,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(patch): Json<PatchOp>,
+) -> Result<Response, ServerError> {
+    let Some(group) = state
+        .store
+        .scim_get_group(&auth.org_id, &id)
+        .map_err(ServerError::Internal)?
+    else {
+        return Ok(scim_error(StatusCode::NOT_FOUND, "group not found"));
+    };
+    let mut members: std::collections::BTreeSet<String> = group.members.into_iter().collect();
+    let mut display: Option<String> = None;
+
+    for op in &patch.operations {
+        let opname = op.op.to_ascii_lowercase();
+        let path = op.path.as_deref().unwrap_or("");
+        let lpath = path.to_ascii_lowercase();
+        match opname.as_str() {
+            "add" if lpath == "members" => {
+                for m in member_values(&op.value) {
+                    members.insert(m);
+                }
+            }
+            "replace" if lpath == "members" => {
+                members = member_values(&op.value).into_iter().collect();
+            }
+            "remove" if lpath == "members" => members.clear(),
+            "remove" if lpath.starts_with("members[") => {
+                if let Some(target) = member_filter_value(path) {
+                    members.remove(&target);
+                }
+            }
+            "replace" | "add" if lpath == "displayname" => {
+                display = op.value.as_str().map(str::to_string).or(display);
+            }
+            // Pathless op carrying a partial Group object in `value`. A pathless
+            // `add` is incremental (union); only `replace` swaps the whole set.
+            _ if op.path.is_none() => {
+                if let Some(d) = op.value.get("displayName").and_then(Value::as_str) {
+                    display = Some(d.to_string());
+                }
+                if let Some(arr) = op.value.get("members") {
+                    let incoming = member_values(arr);
+                    if opname == "replace" {
+                        members = incoming.into_iter().collect();
+                    } else {
+                        members.extend(incoming);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let members_vec: Vec<String> = members.into_iter().collect();
+    let updated = state
+        .store
+        .scim_update_group(
+            &auth.org_id,
+            &id,
+            display.as_deref(),
+            None,
+            Some(&members_vec),
+        )
+        .map_err(|e| ServerError::BadRequest(e.to_string()))?;
+    match updated {
+        Some(g) => {
+            audit_scim(
+                &state,
+                &auth.org_id,
+                "scim.group.patch",
+                format!("group={} members={}", g.id, g.members.len()),
+            )?;
+            Ok(scim_json(StatusCode::OK, group_resource(&g)))
+        }
+        None => Ok(scim_error(StatusCode::NOT_FOUND, "group not found")),
+    }
+}
+
+/// Extract member ids from a SCIM `members` value (array of `{value}`).
+fn member_values(v: &Value) -> Vec<String> {
+    match v {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(|i| i.get("value").and_then(Value::as_str).map(str::to_string))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Parse the member id out of a `members[value eq "ID"]` PATCH path.
+fn member_filter_value(path: &str) -> Option<String> {
+    let inner = path.split_once('[')?.1.trim_end_matches(']');
+    let lower = inner.to_ascii_lowercase();
+    let rest = lower.strip_prefix("value eq ")?;
+    // Map back to original-cased value using the same offset.
+    let start = inner.len() - rest.len();
+    Some(inner[start..].trim().trim_matches('"').to_string())
+}
+
+/// `DELETE /scim/v2/Groups/{id}` — delete the group (resync former members).
+pub async fn delete_group(
+    auth: ScimAuth,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, ServerError> {
+    let removed = state
+        .store
+        .scim_delete_group(&auth.org_id, &id)
+        .map_err(ServerError::Internal)?;
+    if removed {
+        audit_scim(
+            &state,
+            &auth.org_id,
+            "scim.group.delete",
+            format!("group={id}"),
+        )?;
+        Ok(StatusCode::NO_CONTENT.into_response())
+    } else {
+        Ok(scim_error(StatusCode::NOT_FOUND, "group not found"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

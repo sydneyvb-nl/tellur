@@ -142,6 +142,20 @@ async fn viewer_can_list_repos_events_and_report() {
     assert_eq!(json["total_events"], 3);
     assert_eq!(json["distinct_sessions"], 1);
     assert_eq!(json["by_type"]["file.write"], 3);
+
+    // The consolidated dashboard payload combines the rollup + a recent feed.
+    let (status, json) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/dashboard?limit=2", s.org_a),
+        Some(&s.viewer_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["schema"], "tellur.server.dashboard.v1");
+    assert_eq!(json["report"]["total_events"], 3);
+    assert_eq!(json["recent_events"].as_array().unwrap().len(), 2);
+    // Recent feed is newest-first and carries repo identity.
+    assert!(json["recent_events"][0]["repo_id"].as_str().is_some());
 }
 
 #[tokio::test]

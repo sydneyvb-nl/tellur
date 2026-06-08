@@ -22,12 +22,15 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
 3. **Network → hub** (Tier 1) — the main new boundary: untrusted clients over
    the network reach `tellur-server`. Authenticated, tenant-scoped surfaces:
    provenance **ingest** (`POST .../repos/{repo}/events`, redaction + storage),
-   **reads/report** (`GET .../repos`, `.../events`, `.../report`), **central
+   **reads/report/dashboard** (`GET .../repos`, `.../events`, `.../report`,
+   `.../dashboard` — viewer+, the dashboard adds a recent-activity feed), **central
    policy distribution** (`PUT/GET .../policies[/{name}]` — admin write of policy
    bodies, validated before storage), **attribution ingest**
    (`POST .../repos/{repo}/attributions`, contributor+), and the **export portal**
-   (`GET .../export/events|audit` and per-repo `.../export/slsa|spdx` — admin,
-   org/repo data disclosure). Operational
+   — org bundles are **durable jobs**: `POST .../export/events|audit` enqueues
+   (admin) and returns a job id, polled at `GET .../jobs/{id}` (admin, tenant-
+   scoped — the worker-produced result carries org data); per-repo
+   `.../export/slsa|spdx` remain synchronous (admin). Operational
    endpoints (`/healthz`, `/readyz`, `/metrics`) are unauthenticated but expose
    only liveness and aggregate counters — no tenant data. **SSO endpoints**
    (`/auth/login`, `/auth/callback`, `/auth/logout`) are unauthenticated entry
@@ -37,9 +40,16 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    is derived from the token (never the URL), so an IdP can only provision into
    its own tenant. Deprovisioning (`DELETE` / `PATCH active=false`) sets
    `member.active = false`, which all auth paths (API token, session, SSO email)
-   reject — so revocation is immediate across every credential type. All
-   IdP-driven SCIM mutations (create/replace/patch/delete) are written to the
-   tamper-evident audit log.
+   reject — so revocation is immediate across every credential type. **SCIM
+   Groups** (`/scim/v2/Groups`) drive org roles: a group `displayName` of
+   `tellur-admin|tellur-contributor|tellur-viewer` sets its members' role
+   (recomputed on membership change); removal from the last mapping group (or
+   its deletion) **revokes** the elevated role back to the `viewer` baseline, so
+   group sync leaves no stale access. All IdP-driven SCIM mutations
+   (user/group create/replace/patch/delete) are written to the tamper-evident
+   audit log. The browser dashboard (`web/`) is intended to be served
+   **same-origin** with the hub so its session cookie is first-party and no CORS
+   relaxation is needed.
 4. **Hub → IdP** (Tier 2, optional) — when SSO is configured the hub calls the
    OIDC issuer's discovery + token endpoints over **TLS** (OIDC Authorization
    Code + PKCE). The ID token is obtained on this direct TLS channel, so its

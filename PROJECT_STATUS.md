@@ -1,11 +1,30 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-06 (Tier 1 B6 SCIM — B6 complete; on feature branch)
+**Last updated:** 2026-06-06 (durable jobs + SCIM groups + dashboard; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-06 — Hub: durable jobs + SCIM groups + dashboard coupling.** On
+> branch `feat/server-jobs-scim-groups-dashboard` (one PR, three features).
+> **Durable job queue** (`jobs` module + `job` table, schema v12): org exports
+> are now enqueued (`POST .../export/events|audit` → 202 + `job_id`) and run by a
+> background worker (`spawn_worker`; `process_one` is deterministic for tests),
+> polled at `GET .../jobs/{id}` (admin, tenant-scoped). Atomic claim via SQLite
+> IMMEDIATE / Postgres `FOR UPDATE SKIP LOCKED`. **SCIM Groups** (`/scim/v2/Groups`
+> CRUD + `scim_group`/`scim_group_member`): a group `displayName` of
+> `tellur-admin|contributor|viewer` drives members' org role, recomputed on
+> membership/rename/delete; mutations audited. **Dashboard coupling**:
+> `GET /v1/orgs/{org}/dashboard` (viewer; session-cookie or token) returns the
+> org rollup + a recent-activity feed (`recent_org_events`); `web/index.html`
+> gains a hub mode (`?hub=&org=`, `credentials:include`, served same-origin to
+> avoid CORS). SQLite + Postgres parity throughout. Verified: new
+> `tests/jobs.rs`, SCIM group + dashboard tests, updated export tests (202+poll);
+> 252 workspace tests; clippy -D warnings + cargo-deny green; PG tests pass
+> against a local Postgres. Remaining hub work: backup/retention; a fuller
+> dashboard UI.
+>
 > **2026-06-06 — Tier 1 B6 (enterprise) — SCIM 2.0 provisioning (B6 complete).**
 > On branch `feat/server-b6-scim`. New `scim` module exposes `/scim/v2/Users`
 > (list/create/get/PUT/PATCH/DELETE) so an IdP can auto-provision and, crucially,

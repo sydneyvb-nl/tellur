@@ -108,6 +108,46 @@ pub struct LoginTx {
     pub created_at: String,
 }
 
+/// A durable background job (e.g. a large org export). Persisted so it survives
+/// restarts; a worker claims `queued` jobs, runs them, and stores the result.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Job {
+    pub id: String,
+    pub org_id: String,
+    pub kind: String,
+    /// `queued` | `running` | `completed` | `failed`.
+    pub status: String,
+    /// JSON result text (present when `completed`).
+    #[serde(skip)]
+    pub result: Option<String>,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// A SCIM-managed group. Membership drives org roles via [`role_from_group_name`].
+#[derive(Debug, Clone)]
+pub struct ScimGroup {
+    pub id: String,
+    pub org_id: String,
+    pub display_name: String,
+    pub external_id: Option<String>,
+    /// Member ids belonging to the group.
+    pub members: Vec<String>,
+}
+
+/// Map a SCIM group's `displayName` to an org role by convention:
+/// `tellur-admin` / `tellur-contributor` / `tellur-viewer` (case-insensitive).
+/// Any other name grants no role (the group is informational only).
+pub fn role_from_group_name(display_name: &str) -> Option<Role> {
+    match display_name.to_ascii_lowercase().as_str() {
+        "tellur-admin" => Some(Role::Admin),
+        "tellur-contributor" => Some(Role::Contributor),
+        "tellur-viewer" => Some(Role::Viewer),
+        _ => None,
+    }
+}
+
 /// A SCIM-managed user (read model mapping a member + its SSO identity).
 #[derive(Debug, Clone)]
 pub struct ScimUser {
@@ -246,6 +286,10 @@ pub trait Store: Send + Sync {
     /// Aggregate an org-level activity rollup across its repos.
     fn org_report(&self, org_id: &str) -> Result<OrgReport>;
 
+    /// The most recent events across all of an org's repos (newest first), for
+    /// the dashboard activity feed.
+    fn recent_org_events(&self, org_id: &str, limit: u32) -> Result<Vec<StoredEvent>>;
+
     // ─── Central policy distribution ─────────────────────────────────────────
 
     /// Create or update a named org policy; returns the new version number.
@@ -371,4 +415,60 @@ pub trait Store: Send + Sync {
         active: Option<bool>,
         external_id: Option<&str>,
     ) -> Result<Option<ScimUser>>;
+
+    // ─── Durable job queue ───────────────────────────────────────────────────
+
+    /// Enqueue a job for an org; returns the new job id.
+    fn enqueue_job(&self, org_id: &str, kind: &str) -> Result<String>;
+
+    /// Atomically claim the oldest `queued` job (marking it `running`), across
+    /// all orgs. Returns `None` when the queue is empty.
+    fn claim_next_job(&self) -> Result<Option<Job>>;
+
+    /// Mark a job `completed` with its JSON result.
+    fn complete_job(&self, job_id: &str, result_json: &str) -> Result<()>;
+
+    /// Mark a job `failed` with an error message.
+    fn fail_job(&self, job_id: &str, error: &str) -> Result<()>;
+
+    /// Fetch a job by id, tenant-scoped to its org.
+    fn get_job(&self, org_id: &str, job_id: &str) -> Result<Option<Job>>;
+
+    /// Reset any `running` jobs back to `queued` (called on worker startup, so a
+    /// job that was in-flight when the process died is retried). Returns the
+    /// number requeued.
+    fn requeue_running_jobs(&self) -> Result<u64>;
+
+    // ─── SCIM Groups (group-based role sync) ─────────────────────────────────
+
+    /// Create a SCIM group with the given members, then recompute each member's
+    /// org role from their group memberships.
+    fn scim_create_group(
+        &self,
+        org_id: &str,
+        display_name: &str,
+        external_id: Option<&str>,
+        members: &[String],
+    ) -> Result<ScimGroup>;
+
+    /// List groups in an org, optionally filtered by exact `displayName`.
+    fn scim_list_groups(&self, org_id: &str, name_filter: Option<&str>) -> Result<Vec<ScimGroup>>;
+
+    /// Fetch one group by id (tenant-scoped).
+    fn scim_get_group(&self, org_id: &str, group_id: &str) -> Result<Option<ScimGroup>>;
+
+    /// Update a group's name/externalId and (if `Some`) replace its membership,
+    /// recomputing affected members' roles. Returns the updated group, or `None`.
+    fn scim_update_group(
+        &self,
+        org_id: &str,
+        group_id: &str,
+        display_name: Option<&str>,
+        external_id: Option<&str>,
+        members: Option<&[String]>,
+    ) -> Result<Option<ScimGroup>>;
+
+    /// Delete a group, recomputing the roles of its former members. Returns
+    /// `true` if it existed.
+    fn scim_delete_group(&self, org_id: &str, group_id: &str) -> Result<bool>;
 }

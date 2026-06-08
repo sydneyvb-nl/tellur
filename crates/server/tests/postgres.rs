@@ -369,6 +369,56 @@ fn full_store_surface() {
             .is_none()
     );
 
+    // ── Durable jobs ──────────────────────────────────────────────────────────
+    let job_id = store.enqueue_job(&org_a.id, "export.events").unwrap();
+    let claimed = store.claim_next_job().unwrap().unwrap();
+    assert_eq!(claimed.id, job_id);
+    assert_eq!(claimed.status, "running");
+    // Requeue reclaims the in-flight job; then it can be claimed again.
+    assert_eq!(store.requeue_running_jobs().unwrap(), 1);
+    assert_eq!(
+        store.get_job(&org_a.id, &job_id).unwrap().unwrap().status,
+        "queued"
+    );
+    store.complete_job(&job_id, "{\"ok\":true}").unwrap();
+    assert_eq!(
+        store.get_job(&org_a.id, &job_id).unwrap().unwrap().status,
+        "completed"
+    );
+    assert!(store.get_job(&org_b.id, &job_id).unwrap().is_none());
+
+    // ── SCIM groups: membership drives + revokes roles ───────────────────────
+    let gm = store
+        .scim_create_user(&org_a.id, "grp@corp.test", "Grp", Role::Viewer, None)
+        .unwrap();
+    let group = store
+        .scim_create_group(
+            &org_a.id,
+            "tellur-admin",
+            None,
+            std::slice::from_ref(&gm.member_id),
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .find_member_by_email("grp@corp.test")
+            .unwrap()
+            .unwrap()
+            .role,
+        Role::Admin
+    );
+    // Deleting the only mapping group revokes the elevated role.
+    assert!(store.scim_delete_group(&org_a.id, &group.id).unwrap());
+    assert_eq!(
+        store
+            .find_member_by_email("grp@corp.test")
+            .unwrap()
+            .unwrap()
+            .role,
+        Role::Viewer
+    );
+    assert_eq!(store.recent_org_events(&org_a.id, 10).unwrap().len(), 3);
+
     // ── Export portal ───────────────────────────────────────────────────────
     assert_eq!(store.export_events(&org_a.id).unwrap().len(), 3);
 

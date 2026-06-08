@@ -11,13 +11,14 @@ use tellur_core::schema::types::FileAttribution;
 
 use super::chain;
 use super::{
-    AuditEntry, AuditRecord, IngestEvent, LoginTx, Org, OrgReport, PolicyDoc, PolicySummary, Repo,
-    RepoRoleGrant, RepoSummary, ScimUser, Store, StoredEvent,
+    AuditEntry, AuditRecord, IngestEvent, Job, LoginTx, Org, OrgReport, PolicyDoc, PolicySummary,
+    Repo, RepoRoleGrant, RepoSummary, ScimGroup, ScimUser, Store, StoredEvent,
+    role_from_group_name,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
-const SCHEMA_VERSION: &str = "11";
+const SCHEMA_VERSION: &str = "12";
 
 /// A SQLite-backed store. The connection is behind a `Mutex` so the store is
 /// `Send + Sync` and usable as `Arc<dyn Store>`.
@@ -247,7 +248,35 @@ impl Store for SqliteStore {
                  created_at TEXT NOT NULL,
                  expires_at TEXT NOT NULL
              );
-             CREATE INDEX IF NOT EXISTS idx_session_member ON session(member_id);",
+             CREATE INDEX IF NOT EXISTS idx_session_member ON session(member_id);
+             -- Durable background jobs (e.g. large org exports).
+             CREATE TABLE IF NOT EXISTS job (
+                 id         TEXT PRIMARY KEY,
+                 org_id     TEXT NOT NULL REFERENCES org(id),
+                 kind       TEXT NOT NULL,
+                 status     TEXT NOT NULL,
+                 result     TEXT,
+                 error      TEXT,
+                 created_at TEXT NOT NULL,
+                 updated_at TEXT NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_job_status ON job(status, created_at);
+             -- SCIM groups + membership (group displayName drives org roles).
+             CREATE TABLE IF NOT EXISTS scim_group (
+                 id           TEXT PRIMARY KEY,
+                 org_id       TEXT NOT NULL REFERENCES org(id),
+                 display_name TEXT NOT NULL,
+                 external_id  TEXT,
+                 created_at   TEXT NOT NULL,
+                 updated_at   TEXT NOT NULL,
+                 UNIQUE (org_id, display_name)
+             );
+             CREATE TABLE IF NOT EXISTS scim_group_member (
+                 group_id  TEXT NOT NULL REFERENCES scim_group(id),
+                 member_id TEXT NOT NULL REFERENCES member(id),
+                 PRIMARY KEY (group_id, member_id)
+             );
+             CREATE INDEX IF NOT EXISTS idx_group_member ON scim_group_member(member_id);",
         )
         .context("failed to create schema")?;
 
@@ -819,6 +848,43 @@ impl Store for SqliteStore {
         })
     }
 
+    fn recent_org_events(&self, org_id: &str, limit: u32) -> Result<Vec<StoredEvent>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT seq, id, repo_id, session_id, ts, event_type, actor, payload
+             FROM event WHERE org_id = ?1 ORDER BY seq DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![org_id, limit], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, String>(6)?,
+                r.get::<_, String>(7)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (seq, id, repo_id, session_id, timestamp, event_type, actor, payload_str) = row?;
+            let payload = serde_json::from_str(&payload_str)
+                .with_context(|| format!("corrupt event payload for event {id}"))?;
+            out.push(StoredEvent {
+                seq,
+                id,
+                repo_id,
+                session_id,
+                timestamp,
+                event_type,
+                actor,
+                payload,
+            });
+        }
+        Ok(out)
+    }
+
     fn put_policy(&self, org_id: &str, name: &str, content: &str) -> Result<i64> {
         let mut guard = self.conn()?;
         let tx = guard
@@ -1228,6 +1294,274 @@ impl Store for SqliteStore {
         Ok(n > 0)
     }
 
+    fn enqueue_job(&self, org_id: &str, kind: &str) -> Result<String> {
+        let id = ids::generate_id("job");
+        let now = chrono::Utc::now().to_rfc3339();
+        self.conn()?
+            .execute(
+                "INSERT INTO job (id, org_id, kind, status, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'queued', ?4, ?4)",
+                params![id, org_id, kind, now],
+            )
+            .context("failed to enqueue job")?;
+        Ok(id)
+    }
+
+    fn claim_next_job(&self) -> Result<Option<Job>> {
+        let mut guard = self.conn()?;
+        // IMMEDIATE so the select-then-update is atomic against other workers.
+        let tx = guard.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let row = tx
+            .query_row(
+                "SELECT id, org_id, kind, created_at FROM job
+                 WHERE status = 'queued' ORDER BY created_at ASC, id ASC LIMIT 1",
+                [],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((id, org_id, kind, created_at)) = row else {
+            return Ok(None);
+        };
+        let now = chrono::Utc::now().to_rfc3339();
+        tx.execute(
+            "UPDATE job SET status = 'running', updated_at = ?2 WHERE id = ?1",
+            params![id, now],
+        )?;
+        tx.commit()?;
+        Ok(Some(Job {
+            id,
+            org_id,
+            kind,
+            status: "running".to_string(),
+            result: None,
+            error: None,
+            created_at,
+            updated_at: now,
+        }))
+    }
+
+    fn complete_job(&self, job_id: &str, result_json: &str) -> Result<()> {
+        self.conn()?.execute(
+            "UPDATE job SET status = 'completed', result = ?2, updated_at = ?3 WHERE id = ?1",
+            params![job_id, result_json, chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    fn fail_job(&self, job_id: &str, error: &str) -> Result<()> {
+        self.conn()?.execute(
+            "UPDATE job SET status = 'failed', error = ?2, updated_at = ?3 WHERE id = ?1",
+            params![job_id, error, chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    fn get_job(&self, org_id: &str, job_id: &str) -> Result<Option<Job>> {
+        let conn = self.conn()?;
+        let row = conn
+            .query_row(
+                "SELECT id, org_id, kind, status, result, error, created_at, updated_at
+                 FROM job WHERE org_id = ?1 AND id = ?2",
+                params![org_id, job_id],
+                |r| {
+                    Ok(Job {
+                        id: r.get(0)?,
+                        org_id: r.get(1)?,
+                        kind: r.get(2)?,
+                        status: r.get(3)?,
+                        result: r.get(4)?,
+                        error: r.get(5)?,
+                        created_at: r.get(6)?,
+                        updated_at: r.get(7)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    fn scim_create_group(
+        &self,
+        org_id: &str,
+        display_name: &str,
+        external_id: Option<&str>,
+        members: &[String],
+    ) -> Result<ScimGroup> {
+        let id = ids::generate_id("grp");
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut guard = self.conn()?;
+        let tx = guard.transaction()?;
+        tx.execute(
+            "INSERT INTO scim_group (id, org_id, display_name, external_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+            params![id, org_id, display_name, external_id, now],
+        )
+        .context("failed to create group (duplicate displayName?)")?;
+        let members = set_group_members(&tx, org_id, &id, members)?;
+        tx.commit()?;
+        Ok(ScimGroup {
+            id,
+            org_id: org_id.to_string(),
+            display_name: display_name.to_string(),
+            external_id: external_id.map(str::to_string),
+            members,
+        })
+    }
+
+    fn scim_list_groups(&self, org_id: &str, name_filter: Option<&str>) -> Result<Vec<ScimGroup>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, display_name, external_id FROM scim_group
+             WHERE org_id = ?1 AND (?2 IS NULL OR display_name = ?2) ORDER BY display_name",
+        )?;
+        let rows: Vec<(String, String, Option<String>)> = stmt
+            .query_map(params![org_id, name_filter], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })?
+            .filter_map(std::result::Result::ok)
+            .collect();
+        let mut out = Vec::new();
+        for (id, display_name, external_id) in rows {
+            let members = group_member_ids(&conn, &id)?;
+            out.push(ScimGroup {
+                id,
+                org_id: org_id.to_string(),
+                display_name,
+                external_id,
+                members,
+            });
+        }
+        Ok(out)
+    }
+
+    fn scim_get_group(&self, org_id: &str, group_id: &str) -> Result<Option<ScimGroup>> {
+        let conn = self.conn()?;
+        let row = conn
+            .query_row(
+                "SELECT display_name, external_id FROM scim_group WHERE org_id = ?1 AND id = ?2",
+                params![org_id, group_id],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+            )
+            .optional()?;
+        match row {
+            Some((display_name, external_id)) => {
+                let members = group_member_ids(&conn, group_id)?;
+                Ok(Some(ScimGroup {
+                    id: group_id.to_string(),
+                    org_id: org_id.to_string(),
+                    display_name,
+                    external_id,
+                    members,
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn scim_update_group(
+        &self,
+        org_id: &str,
+        group_id: &str,
+        display_name: Option<&str>,
+        external_id: Option<&str>,
+        members: Option<&[String]>,
+    ) -> Result<Option<ScimGroup>> {
+        {
+            let mut guard = self.conn()?;
+            let tx = guard.transaction()?;
+            let exists = tx
+                .query_row(
+                    "SELECT 1 FROM scim_group WHERE org_id = ?1 AND id = ?2",
+                    params![org_id, group_id],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            if !exists {
+                return Ok(None);
+            }
+            if let Some(name) = display_name {
+                tx.execute(
+                    "UPDATE scim_group SET display_name = ?2 WHERE id = ?1",
+                    params![group_id, name],
+                )?;
+            }
+            if let Some(ext) = external_id {
+                tx.execute(
+                    "UPDATE scim_group SET external_id = ?2 WHERE id = ?1",
+                    params![group_id, ext],
+                )?;
+            }
+            if let Some(new_members) = members {
+                // Recompute the union of old + new members after the swap.
+                let old = group_member_ids(&tx, group_id)?;
+                tx.execute(
+                    "DELETE FROM scim_group_member WHERE group_id = ?1",
+                    params![group_id],
+                )?;
+                set_group_members(&tx, org_id, group_id, new_members)?;
+                let mut affected: std::collections::BTreeSet<String> = old.into_iter().collect();
+                affected.extend(new_members.iter().cloned());
+                for m in affected {
+                    recompute_member_role(&tx, &m)?;
+                }
+            } else if display_name.is_some() {
+                // Renaming may change the group's role mapping.
+                for m in group_member_ids(&tx, group_id)? {
+                    recompute_member_role(&tx, &m)?;
+                }
+            }
+            tx.execute(
+                "UPDATE scim_group SET updated_at = ?2 WHERE id = ?1",
+                params![group_id, chrono::Utc::now().to_rfc3339()],
+            )?;
+            tx.commit()?;
+        }
+        self.scim_get_group(org_id, group_id)
+    }
+
+    fn scim_delete_group(&self, org_id: &str, group_id: &str) -> Result<bool> {
+        let mut guard = self.conn()?;
+        let tx = guard.transaction()?;
+        let exists = tx
+            .query_row(
+                "SELECT 1 FROM scim_group WHERE org_id = ?1 AND id = ?2",
+                params![org_id, group_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !exists {
+            return Ok(false);
+        }
+        let members = group_member_ids(&tx, group_id)?;
+        tx.execute(
+            "DELETE FROM scim_group_member WHERE group_id = ?1",
+            params![group_id],
+        )?;
+        tx.execute("DELETE FROM scim_group WHERE id = ?1", params![group_id])?;
+        for m in members {
+            recompute_member_role(&tx, &m)?;
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+
+    fn requeue_running_jobs(&self) -> Result<u64> {
+        let n = self.conn()?.execute(
+            "UPDATE job SET status = 'queued', updated_at = ?1 WHERE status = 'running'",
+            params![chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(n as u64)
+    }
+
     fn create_scim_token(&self, org_id: &str) -> Result<GeneratedToken> {
         let token = auth::generate_token()?;
         self.conn()?
@@ -1430,6 +1764,78 @@ impl Store for SqliteStore {
         }
         self.scim_get_user(org_id, member_id)
     }
+}
+
+/// Read the member ids belonging to a group.
+fn group_member_ids(conn: &Connection, group_id: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT member_id FROM scim_group_member WHERE group_id = ?1 ORDER BY member_id",
+    )?;
+    let ids = stmt
+        .query_map(params![group_id], |r| r.get::<_, String>(0))?
+        .filter_map(std::result::Result::ok)
+        .collect();
+    Ok(ids)
+}
+
+/// Replace a group's membership with `members` (each must belong to `org_id`),
+/// then recompute each member's role. Returns the members that were set.
+fn set_group_members(
+    conn: &Connection,
+    org_id: &str,
+    group_id: &str,
+    members: &[String],
+) -> Result<Vec<String>> {
+    let mut set = Vec::new();
+    for m in members {
+        let in_org = conn
+            .query_row(
+                "SELECT 1 FROM member WHERE id = ?1 AND org_id = ?2",
+                params![m, org_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !in_org {
+            bail!("member {m} not found in org {org_id}");
+        }
+        conn.execute(
+            "INSERT OR IGNORE INTO scim_group_member (group_id, member_id) VALUES (?1, ?2)",
+            params![group_id, m],
+        )?;
+        set.push(m.clone());
+    }
+    for m in &set {
+        recompute_member_role(conn, m)?;
+    }
+    Ok(set)
+}
+
+/// Recompute a member's org role from the role-mapping groups they belong to.
+/// With group sync, membership **owns** the role: it is set to the highest
+/// mapped group role, or to the `viewer` baseline when the member is in no
+/// role-mapping group — so removing the last `tellur-admin` group revokes the
+/// elevated role (no leftover access).
+fn recompute_member_role(conn: &Connection, member_id: &str) -> Result<()> {
+    let mut stmt = conn.prepare(
+        "SELECT g.display_name FROM scim_group_member gm
+         JOIN scim_group g ON g.id = gm.group_id WHERE gm.member_id = ?1",
+    )?;
+    let names: Vec<String> = stmt
+        .query_map(params![member_id], |r| r.get::<_, String>(0))?
+        .filter_map(std::result::Result::ok)
+        .collect();
+    let mut role = Role::Viewer;
+    for n in names {
+        if let Some(r) = role_from_group_name(&n) {
+            role = role.max(r);
+        }
+    }
+    conn.execute(
+        "UPDATE member SET role = ?2 WHERE id = ?1",
+        params![member_id, role.as_str()],
+    )?;
+    Ok(())
 }
 
 /// Helper: read at most one `(member_id, org_id, role)` row into a [`Principal`].

@@ -13,9 +13,12 @@ use r2d2_postgres::postgres::types::ToSql;
 use tellur_core::schema::ids;
 use tellur_core::schema::types::FileAttribution;
 
+use r2d2_postgres::postgres::GenericClient;
+
 use super::{
-    AuditEntry, AuditRecord, IngestEvent, LoginTx, Org, OrgReport, PolicyDoc, PolicySummary, Repo,
-    RepoRoleGrant, RepoSummary, ScimUser, Store, StoredEvent,
+    AuditEntry, AuditRecord, IngestEvent, Job, LoginTx, Org, OrgReport, PolicyDoc, PolicySummary,
+    Repo, RepoRoleGrant, RepoSummary, ScimGroup, ScimUser, Store, StoredEvent,
+    role_from_group_name,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
@@ -165,7 +168,26 @@ impl Store for PostgresStore {
                      id TEXT PRIMARY KEY, member_id TEXT NOT NULL REFERENCES member(id),
                      created_at TEXT NOT NULL, expires_at TEXT NOT NULL
                  );
-                 CREATE INDEX IF NOT EXISTS idx_session_member ON session(member_id);",
+                 CREATE INDEX IF NOT EXISTS idx_session_member ON session(member_id);
+                 CREATE TABLE IF NOT EXISTS job (
+                     id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES org(id),
+                     kind TEXT NOT NULL, status TEXT NOT NULL,
+                     result TEXT, error TEXT,
+                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_job_status ON job(status, created_at);
+                 CREATE TABLE IF NOT EXISTS scim_group (
+                     id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES org(id),
+                     display_name TEXT NOT NULL, external_id TEXT,
+                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                     UNIQUE (org_id, display_name)
+                 );
+                 CREATE TABLE IF NOT EXISTS scim_group_member (
+                     group_id TEXT NOT NULL REFERENCES scim_group(id),
+                     member_id TEXT NOT NULL REFERENCES member(id),
+                     PRIMARY KEY (group_id, member_id)
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_group_member ON scim_group_member(member_id);",
             )
             .context("failed to create schema")?;
         // Additive migrations for columns introduced after a table's first
@@ -183,7 +205,7 @@ impl Store for PostgresStore {
             .context("failed to apply column migrations")?;
         client
             .execute(
-                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '11')
+                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '12')
                  ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                 &[],
             )
@@ -667,6 +689,32 @@ impl Store for PostgresStore {
         })
     }
 
+    fn recent_org_events(&self, org_id: &str, limit: u32) -> Result<Vec<StoredEvent>> {
+        let rows = self.client()?.query(
+            "SELECT seq, id, repo_id, session_id, ts, event_type, actor, payload
+             FROM event WHERE org_id = $1 ORDER BY seq DESC LIMIT $2",
+            &[&org_id, &(limit as i64)],
+        )?;
+        let mut out = Vec::new();
+        for r in &rows {
+            let id: String = r.get(1);
+            let payload_str: String = r.get(7);
+            let payload = serde_json::from_str(&payload_str)
+                .with_context(|| format!("corrupt event payload for event {id}"))?;
+            out.push(StoredEvent {
+                seq: r.get(0),
+                id,
+                repo_id: r.get(2),
+                session_id: r.get(3),
+                timestamp: r.get(4),
+                event_type: r.get(5),
+                actor: r.get(6),
+                payload,
+            });
+        }
+        Ok(out)
+    }
+
     fn put_policy(&self, org_id: &str, name: &str, content: &str) -> Result<i64> {
         let mut client = self.client()?;
         let mut tx = client.transaction()?;
@@ -1030,6 +1078,245 @@ impl Store for PostgresStore {
         Ok(n > 0)
     }
 
+    fn enqueue_job(&self, org_id: &str, kind: &str) -> Result<String> {
+        let id = ids::generate_id("job");
+        let now = chrono::Utc::now().to_rfc3339();
+        self.client()?
+            .execute(
+                "INSERT INTO job (id, org_id, kind, status, created_at, updated_at)
+                 VALUES ($1, $2, $3, 'queued', $4, $4)",
+                &[&id, &org_id, &kind, &now],
+            )
+            .context("failed to enqueue job")?;
+        Ok(id)
+    }
+
+    fn claim_next_job(&self) -> Result<Option<Job>> {
+        // FOR UPDATE SKIP LOCKED lets multiple workers claim distinct jobs.
+        let now = chrono::Utc::now().to_rfc3339();
+        let row = self.client()?.query_opt(
+            "UPDATE job SET status = 'running', updated_at = $1
+             WHERE id = (
+                 SELECT id FROM job WHERE status = 'queued'
+                 ORDER BY created_at ASC, id ASC
+                 FOR UPDATE SKIP LOCKED LIMIT 1
+             )
+             RETURNING id, org_id, kind, status, result, error, created_at, updated_at",
+            &[&now],
+        )?;
+        Ok(row.map(|r| Job {
+            id: r.get(0),
+            org_id: r.get(1),
+            kind: r.get(2),
+            status: r.get(3),
+            result: r.get(4),
+            error: r.get(5),
+            created_at: r.get(6),
+            updated_at: r.get(7),
+        }))
+    }
+
+    fn complete_job(&self, job_id: &str, result_json: &str) -> Result<()> {
+        self.client()?.execute(
+            "UPDATE job SET status = 'completed', result = $2, updated_at = $3 WHERE id = $1",
+            &[&job_id, &result_json, &chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    fn fail_job(&self, job_id: &str, error: &str) -> Result<()> {
+        self.client()?.execute(
+            "UPDATE job SET status = 'failed', error = $2, updated_at = $3 WHERE id = $1",
+            &[&job_id, &error, &chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    fn get_job(&self, org_id: &str, job_id: &str) -> Result<Option<Job>> {
+        let row = self.client()?.query_opt(
+            "SELECT id, org_id, kind, status, result, error, created_at, updated_at
+             FROM job WHERE org_id = $1 AND id = $2",
+            &[&org_id, &job_id],
+        )?;
+        Ok(row.map(|r| Job {
+            id: r.get(0),
+            org_id: r.get(1),
+            kind: r.get(2),
+            status: r.get(3),
+            result: r.get(4),
+            error: r.get(5),
+            created_at: r.get(6),
+            updated_at: r.get(7),
+        }))
+    }
+
+    fn scim_create_group(
+        &self,
+        org_id: &str,
+        display_name: &str,
+        external_id: Option<&str>,
+        members: &[String],
+    ) -> Result<ScimGroup> {
+        let id = ids::generate_id("grp");
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut client = self.client()?;
+        let mut tx = client.transaction()?;
+        tx.execute(
+            "INSERT INTO scim_group (id, org_id, display_name, external_id, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $5)",
+            &[&id, &org_id, &display_name, &external_id, &now],
+        )
+        .context("failed to create group (duplicate displayName?)")?;
+        let members = pg_set_group_members(&mut tx, org_id, &id, members)?;
+        tx.commit()?;
+        Ok(ScimGroup {
+            id,
+            org_id: org_id.to_string(),
+            display_name: display_name.to_string(),
+            external_id: external_id.map(str::to_string),
+            members,
+        })
+    }
+
+    fn scim_list_groups(&self, org_id: &str, name_filter: Option<&str>) -> Result<Vec<ScimGroup>> {
+        let mut client = self.client()?;
+        let rows = client.query(
+            "SELECT id, display_name, external_id FROM scim_group
+             WHERE org_id = $1 AND ($2::text IS NULL OR display_name = $2) ORDER BY display_name",
+            &[&org_id, &name_filter],
+        )?;
+        let metas: Vec<(String, String, Option<String>)> = rows
+            .iter()
+            .map(|r| (r.get(0), r.get(1), r.get(2)))
+            .collect();
+        let mut out = Vec::new();
+        for (id, display_name, external_id) in metas {
+            let members = pg_group_member_ids(&mut *client, &id)?;
+            out.push(ScimGroup {
+                id,
+                org_id: org_id.to_string(),
+                display_name,
+                external_id,
+                members,
+            });
+        }
+        Ok(out)
+    }
+
+    fn scim_get_group(&self, org_id: &str, group_id: &str) -> Result<Option<ScimGroup>> {
+        let mut client = self.client()?;
+        let row = client.query_opt(
+            "SELECT display_name, external_id FROM scim_group WHERE org_id = $1 AND id = $2",
+            &[&org_id, &group_id],
+        )?;
+        match row {
+            Some(r) => {
+                let display_name: String = r.get(0);
+                let external_id: Option<String> = r.get(1);
+                let members = pg_group_member_ids(&mut *client, group_id)?;
+                Ok(Some(ScimGroup {
+                    id: group_id.to_string(),
+                    org_id: org_id.to_string(),
+                    display_name,
+                    external_id,
+                    members,
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn scim_update_group(
+        &self,
+        org_id: &str,
+        group_id: &str,
+        display_name: Option<&str>,
+        external_id: Option<&str>,
+        members: Option<&[String]>,
+    ) -> Result<Option<ScimGroup>> {
+        {
+            let mut client = self.client()?;
+            let mut tx = client.transaction()?;
+            let exists = tx
+                .query_opt(
+                    "SELECT 1 FROM scim_group WHERE org_id = $1 AND id = $2",
+                    &[&org_id, &group_id],
+                )?
+                .is_some();
+            if !exists {
+                return Ok(None);
+            }
+            if let Some(name) = display_name {
+                tx.execute(
+                    "UPDATE scim_group SET display_name = $2 WHERE id = $1",
+                    &[&group_id, &name],
+                )?;
+            }
+            if let Some(ext) = external_id {
+                tx.execute(
+                    "UPDATE scim_group SET external_id = $2 WHERE id = $1",
+                    &[&group_id, &ext],
+                )?;
+            }
+            if let Some(new_members) = members {
+                let old = pg_group_member_ids(&mut tx, group_id)?;
+                tx.execute(
+                    "DELETE FROM scim_group_member WHERE group_id = $1",
+                    &[&group_id],
+                )?;
+                pg_set_group_members(&mut tx, org_id, group_id, new_members)?;
+                let mut affected: std::collections::BTreeSet<String> = old.into_iter().collect();
+                affected.extend(new_members.iter().cloned());
+                for m in affected {
+                    pg_recompute_member_role(&mut tx, &m)?;
+                }
+            } else if display_name.is_some() {
+                for m in pg_group_member_ids(&mut tx, group_id)? {
+                    pg_recompute_member_role(&mut tx, &m)?;
+                }
+            }
+            tx.execute(
+                "UPDATE scim_group SET updated_at = $2 WHERE id = $1",
+                &[&group_id, &chrono::Utc::now().to_rfc3339()],
+            )?;
+            tx.commit()?;
+        }
+        self.scim_get_group(org_id, group_id)
+    }
+
+    fn scim_delete_group(&self, org_id: &str, group_id: &str) -> Result<bool> {
+        let mut client = self.client()?;
+        let mut tx = client.transaction()?;
+        let exists = tx
+            .query_opt(
+                "SELECT 1 FROM scim_group WHERE org_id = $1 AND id = $2",
+                &[&org_id, &group_id],
+            )?
+            .is_some();
+        if !exists {
+            return Ok(false);
+        }
+        let members = pg_group_member_ids(&mut tx, group_id)?;
+        tx.execute(
+            "DELETE FROM scim_group_member WHERE group_id = $1",
+            &[&group_id],
+        )?;
+        tx.execute("DELETE FROM scim_group WHERE id = $1", &[&group_id])?;
+        for m in members {
+            pg_recompute_member_role(&mut tx, &m)?;
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+
+    fn requeue_running_jobs(&self) -> Result<u64> {
+        let n = self.client()?.execute(
+            "UPDATE job SET status = 'queued', updated_at = $1 WHERE status = 'running'",
+            &[&chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(n)
+    }
+
     fn create_scim_token(&self, org_id: &str) -> Result<GeneratedToken> {
         let token = auth::generate_token()?;
         self.client()?
@@ -1199,6 +1486,69 @@ impl Store for PostgresStore {
         }
         self.scim_get_user(org_id, member_id)
     }
+}
+
+/// Read the member ids belonging to a group.
+fn pg_group_member_ids(c: &mut impl GenericClient, group_id: &str) -> Result<Vec<String>> {
+    let rows = c.query(
+        "SELECT member_id FROM scim_group_member WHERE group_id = $1 ORDER BY member_id",
+        &[&group_id],
+    )?;
+    Ok(rows.iter().map(|r| r.get(0)).collect())
+}
+
+/// Replace a group's membership with `members` (each must belong to `org_id`),
+/// then recompute each member's role. Returns the members that were set.
+fn pg_set_group_members(
+    c: &mut impl GenericClient,
+    org_id: &str,
+    group_id: &str,
+    members: &[String],
+) -> Result<Vec<String>> {
+    let mut set = Vec::new();
+    for m in members {
+        let in_org = c
+            .query_opt(
+                "SELECT 1 FROM member WHERE id = $1 AND org_id = $2",
+                &[&m, &org_id],
+            )?
+            .is_some();
+        if !in_org {
+            bail!("member {m} not found in org {org_id}");
+        }
+        c.execute(
+            "INSERT INTO scim_group_member (group_id, member_id) VALUES ($1, $2)
+             ON CONFLICT DO NOTHING",
+            &[&group_id, &m],
+        )?;
+        set.push(m.clone());
+    }
+    for m in &set {
+        pg_recompute_member_role(c, m)?;
+    }
+    Ok(set)
+}
+
+/// Recompute a member's org role from the role-mapping groups they belong to.
+/// Membership owns the role: highest mapped group role, or the `viewer` baseline
+/// when no role-mapping group remains (so removal revokes elevated access).
+fn pg_recompute_member_role(c: &mut impl GenericClient, member_id: &str) -> Result<()> {
+    let rows = c.query(
+        "SELECT g.display_name FROM scim_group_member gm
+         JOIN scim_group g ON g.id = gm.group_id WHERE gm.member_id = $1",
+        &[&member_id],
+    )?;
+    let mut role = Role::Viewer;
+    for r in &rows {
+        if let Some(found) = role_from_group_name(&r.get::<_, String>(0)) {
+            role = role.max(found);
+        }
+    }
+    c.execute(
+        "UPDATE member SET role = $2 WHERE id = $1",
+        &[&member_id, &role.as_str()],
+    )?;
+    Ok(())
 }
 
 /// Helper: read at most one `(member_id, org_id, role)` row into a [`Principal`].

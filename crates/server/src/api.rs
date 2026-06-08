@@ -7,6 +7,7 @@
 use axum::Json;
 use axum::extract::{FromRequestParts, Path, Query, State};
 use axum::http::HeaderValue;
+use axum::http::StatusCode;
 use axum::http::header::{AUTHORIZATION, COOKIE, SET_COOKIE};
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Redirect, Response};
@@ -575,6 +576,53 @@ pub async fn org_report(
         .map_err(|e| ServerError::Internal(e.into()))
 }
 
+/// Default/maximum size of the dashboard recent-activity feed.
+const DASHBOARD_FEED: u32 = 25;
+const DASHBOARD_FEED_MAX: u32 = 100;
+
+/// `GET /v1/orgs/{org}/dashboard` — a single consolidated payload for the web
+/// dashboard: the org rollup plus a recent-activity feed. Viewer+ (session
+/// cookie or API token); the heavy aggregate runs off the async worker.
+pub async fn dashboard(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    principal: Principal,
+    Query(params): Query<DashboardParams>,
+) -> Result<Json<Value>, ServerError> {
+    ensure_same_org(&state, &principal, &org_id, "dashboard")?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let limit = params
+        .limit
+        .unwrap_or(DASHBOARD_FEED)
+        .clamp(1, DASHBOARD_FEED_MAX);
+    let (report, recent) = run_blocking({
+        let store = state.store.clone();
+        let org = org_id.clone();
+        move || {
+            let report = store.org_report(&org)?;
+            let recent = store.recent_org_events(&org, limit)?;
+            Ok((report, recent))
+        }
+    })
+    .await?;
+    Ok(Json(json!({
+        "schema": "tellur.server.dashboard.v1",
+        "org_id": org_id,
+        "generated_at": chrono::Utc::now().to_rfc3339(),
+        "report": report,
+        "recent_events": recent,
+    })))
+}
+
+/// Query for the dashboard feed size.
+#[derive(Debug, Deserialize)]
+pub struct DashboardParams {
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
 // ─── Central policy distribution ─────────────────────────────────────────────
 
 /// `PUT /v1/orgs/{org}/policies/{name}` — upload a policy YAML doc (admin only).
@@ -646,81 +694,98 @@ pub async fn get_policy(
         .map_err(|e| ServerError::Internal(e.into()))
 }
 
-// ─── Export portal ───────────────────────────────────────────────────────────
+// ─── Export portal (durable jobs) ─────────────────────────────────────────────
 
-/// `GET /v1/orgs/{org}/export/events` — full provenance event bundle (admin).
+/// Enqueue an export job (admin) and return `202 Accepted` with a poll URL. The
+/// heavy work runs in the background worker so the request returns immediately
+/// and large exports can't stall the runtime.
+async fn enqueue_export(
+    state: &AppState,
+    principal: &Principal,
+    org_id: &str,
+    kind: &str,
+    action: &str,
+) -> Result<Response, ServerError> {
+    ensure_org_role(state, principal, org_id, Role::Admin, action)?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let job_id = state
+        .store
+        .enqueue_job(org_id, kind)
+        .map_err(ServerError::Internal)?;
+    state.metrics.inc_export();
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id.to_string()),
+            actor_member_id: Some(principal.member_id.clone()),
+            action: action.to_string(),
+            detail: format!("job={job_id} kind={kind}"),
+        })
+        .map_err(ServerError::Internal)?;
+    let body = json!({
+        "job_id": job_id,
+        "status": "queued",
+        "poll": format!("/v1/orgs/{org_id}/jobs/{job_id}"),
+    });
+    Ok((StatusCode::ACCEPTED, Json(body)).into_response())
+}
+
+/// `POST /v1/orgs/{org}/export/events` — enqueue a full event-bundle export.
 pub async fn export_events(
     State(state): State<AppState>,
     Path(org_id): Path<String>,
     principal: Principal,
-) -> Result<Json<Value>, ServerError> {
-    ensure_org_role(&state, &principal, &org_id, Role::Admin, "export.events")?;
-    if !state.rate_limiter.check(&principal.member_id) {
-        return Err(ServerError::TooManyRequests);
-    }
-    let events = run_blocking({
-        let store = state.store.clone();
-        let org = org_id.clone();
-        move || store.export_events(&org)
-    })
-    .await?;
-    state.metrics.inc_export();
-    state
-        .store
-        .append_audit(&AuditEntry {
-            org_id: Some(org_id.clone()),
-            actor_member_id: Some(principal.member_id.clone()),
-            action: "export.events".to_string(),
-            detail: format!("count={}", events.len()),
-        })
-        .map_err(ServerError::Internal)?;
-    Ok(Json(json!({
-        "schema": "tellur.server.export.events.v1",
-        "org_id": org_id,
-        "generated_at": chrono::Utc::now().to_rfc3339(),
-        "count": events.len(),
-        "events": events,
-    })))
+) -> Result<Response, ServerError> {
+    enqueue_export(
+        &state,
+        &principal,
+        &org_id,
+        crate::jobs::KIND_EXPORT_EVENTS,
+        "export.events",
+    )
+    .await
 }
 
-/// `GET /v1/orgs/{org}/export/audit` — org audit trail + chain integrity (admin).
+/// `POST /v1/orgs/{org}/export/audit` — enqueue an audit-trail export.
 pub async fn export_audit(
     State(state): State<AppState>,
     Path(org_id): Path<String>,
     principal: Principal,
+) -> Result<Response, ServerError> {
+    enqueue_export(
+        &state,
+        &principal,
+        &org_id,
+        crate::jobs::KIND_EXPORT_AUDIT,
+        "export.audit",
+    )
+    .await
+}
+
+/// `GET /v1/orgs/{org}/jobs/{id}` — poll a job's status; includes the JSON
+/// result once `completed` (admin only, since export results carry org data).
+pub async fn get_job(
+    State(state): State<AppState>,
+    Path((org_id, job_id)): Path<(String, String)>,
+    principal: Principal,
 ) -> Result<Json<Value>, ServerError> {
-    ensure_org_role(&state, &principal, &org_id, Role::Admin, "export.audit")?;
-    if !state.rate_limiter.check(&principal.member_id) {
-        return Err(ServerError::TooManyRequests);
-    }
-    let (entries, chain_intact) = run_blocking({
-        let store = state.store.clone();
-        let org = org_id.clone();
-        move || {
-            let entries = store.export_audit(&org)?;
-            let chain_intact = store.verify_audit_chain()?;
-            Ok((entries, chain_intact))
-        }
-    })
-    .await?;
-    state.metrics.inc_export();
-    state
+    ensure_org_role(&state, &principal, &org_id, Role::Admin, "job.get")?;
+    let job = state
         .store
-        .append_audit(&AuditEntry {
-            org_id: Some(org_id.clone()),
-            actor_member_id: Some(principal.member_id.clone()),
-            action: "export.audit".to_string(),
-            detail: format!("count={} chain_intact={chain_intact}", entries.len()),
-        })
-        .map_err(ServerError::Internal)?;
-    Ok(Json(json!({
-        "schema": "tellur.server.export.audit.v1",
-        "org_id": org_id,
-        "generated_at": chrono::Utc::now().to_rfc3339(),
-        "chain_intact": chain_intact,
-        "count": entries.len(),
-        "entries": entries,
-    })))
+        .get_job(&org_id, &job_id)
+        .map_err(ServerError::Internal)?
+        .ok_or(ServerError::NotFound)?;
+    let mut body = serde_json::to_value(&job).map_err(|e| ServerError::Internal(e.into()))?;
+    if job.status == "completed"
+        && let Some(result) = job.result
+    {
+        let parsed: Value = serde_json::from_str(&result)
+            .map_err(|e| ServerError::Internal(anyhow::anyhow!("corrupt job result: {e}")))?;
+        body["result"] = parsed;
+    }
+    Ok(Json(body))
 }
 
 // ─── Attribution ingest + SLSA/SPDX export ───────────────────────────────────

@@ -469,7 +469,8 @@ Authenticated, org-scoped API (Bearer token): provenance ingest
 re-verified per-repo hash chain), reads (`GET .../repos`, `.../events`,
 `.../report`), central policy distribution (`PUT/GET .../policies[/{name}]`),
 attribution ingest (`POST .../repos/{repo}/attributions`), and an admin export
-portal (`GET .../export/events|audit` plus per-repo `GET .../repos/{repo}/export/slsa|spdx`
+portal (`POST .../export/events|audit` enqueues a durable job, polled at
+`GET .../jobs/{id}`; plus per-repo `GET .../repos/{repo}/export/slsa|spdx`
 for SLSA v1.0 / SPDX SBOM compliance attestations). Cross-org access is
 denied and audited; the audit log is itself tamper-evident. Operational
 endpoints `GET /healthz`, `/readyz`, and `/metrics` (Prometheus) need no auth and
@@ -502,14 +503,23 @@ pre-provision who may sign in with `tellur-server admin add-member --org <id>
 --name <name> --email <email> --role <role>`; the member is matched by verified
 email on first login and bound to their stable OIDC subject thereafter.
 
-**SCIM 2.0 provisioning** lets an IdP manage users automatically. Mint an
-org-scoped token with `tellur-server admin create-scim-token --org <id>` and
-point your IdP at `/scim/v2/Users` with it as the bearer token. Creating a user
-provisions a member (userName→email, optional `roles`→org role, default
-`viewer`); deprovisioning (`DELETE` or `PATCH active=false`) deactivates the
-member so every credential type — API token, dashboard session, and SSO — is
-revoked immediately. (User provisioning is implemented; Group-based role sync is
-a roadmap item.)
+**SCIM 2.0 provisioning** lets an IdP manage users and groups automatically.
+Mint an org-scoped token with `tellur-server admin create-scim-token --org <id>`
+and point your IdP at `/scim/v2/Users` and `/scim/v2/Groups` with it as the
+bearer token. Creating a user provisions a member (userName→email, optional
+`roles`→org role, default `viewer`); deprovisioning (`DELETE` or
+`PATCH active=false`) deactivates the member so every credential type — API
+token, dashboard session, and SSO — is revoked immediately. **Group-based role
+sync**: a group whose `displayName` is `tellur-admin`, `tellur-contributor`, or
+`tellur-viewer` sets its members' org role (recomputed when membership changes).
+
+**Durable exports & dashboard.** Large org exports run as background jobs:
+`POST /v1/orgs/{org}/export/events` (or `/audit`) returns `202` with a `job_id`;
+poll `GET /v1/orgs/{org}/jobs/{id}` until `completed` to fetch the result. The
+hub also serves a consolidated `GET /v1/orgs/{org}/dashboard` (org rollup +
+recent-activity feed) for the web dashboard; open `web/index.html?hub=<hub-url>&org=<id>`
+after signing in via SSO to view team activity (serve the dashboard same-origin
+with the hub so its session cookie is first-party).
 
 ## Development
 
@@ -543,7 +553,8 @@ metadata, not the raw prompt text.
 
 ## Roadmap
 
-- SCIM Group-based role sync for the team/server hub (User provisioning + OIDC SSO are implemented)
+- A richer team/server web dashboard UI (the hub API, SSO login, durable
+  exports, and SCIM user+group provisioning are implemented)
 - Live lifecycle-hook capture (beyond import) for editors that expose it
 - Richer policy templates for security-sensitive repositories
 - Packaged releases for npm, Homebrew, and GitHub Releases
