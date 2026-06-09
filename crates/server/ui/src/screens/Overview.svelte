@@ -7,23 +7,32 @@
   let data = $state<Dashboard | null>(null);
   let error = $state<string | null>(null);
   let loading = $state(true);
+  // Bumped to force a reload (e.g. the Retry button), since re-assigning the
+  // same `org` would not re-trigger the effect.
+  let reloadKey = $state(0);
 
   $effect(() => {
-    // Reload whenever the org changes.
+    // Reload whenever the org changes or a reload is requested.
     const currentOrg = org;
+    void reloadKey;
+    let cancelled = false;
     loading = true;
     error = null;
     api
       .dashboard(currentOrg)
       .then((d) => {
-        data = d;
+        if (!cancelled) data = d;
       })
       .catch((e) => {
-        error = e instanceof Error ? e.message : "failed to load";
+        if (!cancelled) error = e instanceof Error ? e.message : "failed to load";
       })
       .finally(() => {
-        loading = false;
+        if (!cancelled) loading = false;
       });
+    // If org/reloadKey changes before this resolves, ignore the stale result.
+    return () => {
+      cancelled = true;
+    };
   });
 
   function topTypes(d: Dashboard): [string, number][] {
@@ -44,7 +53,7 @@
 {:else if error}
   <div class="panel error">
     <p>{error}</p>
-    <button onclick={() => (org = org)}>Retry</button>
+    <button onclick={() => (reloadKey += 1)}>Retry</button>
   </div>
 {:else if data}
   {#if data.report.total_events === 0}

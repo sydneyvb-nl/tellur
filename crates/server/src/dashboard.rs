@@ -27,6 +27,13 @@ use crate::app::AppState;
 #[folder = "ui/dist"]
 struct Assets;
 
+/// Strict same-origin CSP for the dashboard (everything is self-hosted). Matches
+/// the threat-model claim that `/app` allows no remote origins. `style-src`
+/// permits inline styles (Svelte/Vite emit a few) — scripts stay 'self' only.
+const CSP: &str = "default-src 'self'; img-src 'self' data:; \
+style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; \
+object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
+
 /// Shown at `/app` when the SPA hasn't been built into `ui/dist`.
 const PLACEHOLDER: &str = "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\">\
 <title>Tellur</title><body style=\"font:14px/1.5 system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem\">\
@@ -63,7 +70,12 @@ async fn serve(path: String) -> Response {
 fn index_response() -> Response {
     asset_response("index.html").unwrap_or_else(|| {
         (
-            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            [
+                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                (header::CONTENT_SECURITY_POLICY, CSP),
+                (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+                (header::CACHE_CONTROL, "no-cache"),
+            ],
             PLACEHOLDER,
         )
             .into_response()
@@ -74,21 +86,29 @@ fn index_response() -> Response {
 fn asset_response(path: &str) -> Option<Response> {
     let asset = Assets::get(path)?;
     let mime = mime_guess::from_path(path).first_or_octet_stream();
+    let is_html = path.ends_with(".html");
     // Hashed build assets (Vite emits content-hashed filenames) can be cached
     // hard; HTML must always revalidate so a new deploy is picked up.
-    let cache = if path == "index.html" {
+    let cache = if is_html {
         "no-cache"
     } else {
         "public, max-age=31536000, immutable"
     };
-    Some(
-        (
-            [
-                (header::CONTENT_TYPE, mime.as_ref()),
-                (header::CACHE_CONTROL, cache),
-            ],
-            Body::from(asset.data.into_owned()),
-        )
-            .into_response(),
+    let mut resp = (
+        [
+            (header::CONTENT_TYPE, mime.as_ref()),
+            (header::CACHE_CONTROL, cache),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        ],
+        Body::from(asset.data.into_owned()),
     )
+        .into_response();
+    // The HTML shell carries the CSP that governs the whole app.
+    if is_html {
+        resp.headers_mut().insert(
+            header::CONTENT_SECURITY_POLICY,
+            header::HeaderValue::from_static(CSP),
+        );
+    }
+    Some(resp)
 }

@@ -35,24 +35,36 @@ fn state() -> AppState {
 }
 
 async fn get(state: &AppState, uri: &str) -> (StatusCode, Option<String>) {
+    let (status, ct, _csp) = get_full(state, uri).await;
+    (status, ct)
+}
+
+async fn get_full(state: &AppState, uri: &str) -> (StatusCode, Option<String>, Option<String>) {
     let resp = build_router(state.clone())
         .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
         .await
         .unwrap();
     let status = resp.status();
-    let ct = resp
-        .headers()
-        .get(CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_string);
-    (status, ct)
+    let header = |name: axum::http::HeaderName| {
+        resp.headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+    };
+    let ct = header(CONTENT_TYPE);
+    let csp = header(axum::http::header::CONTENT_SECURITY_POLICY);
+    (status, ct, csp)
 }
 
 #[tokio::test]
-async fn app_root_serves_html() {
-    let (status, ct) = get(&state(), "/app").await;
+async fn app_root_serves_html_with_csp() {
+    let (status, ct, csp) = get_full(&state(), "/app").await;
     assert_eq!(status, StatusCode::OK);
     assert!(ct.unwrap_or_default().contains("text/html"));
+    // The app shell must carry the strict same-origin CSP.
+    let csp = csp.expect("CSP header present on the app shell");
+    assert!(csp.contains("default-src 'self'"));
+    assert!(csp.contains("frame-ancestors 'none'"));
 }
 
 #[tokio::test]
