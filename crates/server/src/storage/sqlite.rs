@@ -964,6 +964,10 @@ impl Store for SqliteStore {
         limit: u32,
     ) -> Result<Vec<SessionSummary>> {
         let conn = self.conn()?;
+        // NOTE: SQLite's `group_concat(DISTINCT x)` only supports the default
+        // comma separator, so an actor/repo id literally containing a comma
+        // would split wrongly in `split_csv`. Repo ids are generated (no commas)
+        // and actors are agent ids; revisit if free-form actor strings arrive.
         let mut stmt = conn.prepare(
             "SELECT session_id, COUNT(*) AS n, MIN(ts) AS f, MAX(ts) AS l,
                     group_concat(DISTINCT actor) AS actors,

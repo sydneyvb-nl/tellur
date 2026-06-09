@@ -41,6 +41,11 @@ const MAX_EVENTS_PER_REQUEST: usize = 1000;
 const DEFAULT_PAGE: u32 = 50;
 const MAX_PAGE: u32 = 200;
 
+/// Cap on events returned for a single session replay. Higher than a list page
+/// (a replay wants the whole session), but still bounded; the response notes
+/// when it was hit so the UI can say the replay is truncated.
+const SESSION_REPLAY_LIMIT: u32 = 5000;
+
 /// Run a blocking store operation off the async worker threads, flattening the
 /// join + operation errors into a `ServerError`.
 async fn run_blocking<T, F>(f: F) -> Result<T, ServerError>
@@ -844,20 +849,26 @@ pub async fn session_detail(
     if !state.rate_limiter.check(&principal.member_id) {
         return Err(ServerError::TooManyRequests);
     }
-    let events = run_blocking({
+    let mut events = run_blocking({
         let store = state.store.clone();
         let org = org_id.clone();
         let sid = session_id.clone();
-        move || store.session_events(&org, &sid, MAX_PAGE)
+        // Fetch one past the cap so we can flag truncation honestly.
+        move || store.session_events(&org, &sid, SESSION_REPLAY_LIMIT + 1)
     })
     .await?;
     if events.is_empty() {
         return Err(ServerError::NotFound);
     }
+    let truncated = events.len() as u32 > SESSION_REPLAY_LIMIT;
+    if truncated {
+        events.truncate(SESSION_REPLAY_LIMIT as usize);
+    }
     Ok(Json(json!({
         "schema": "tellur.server.session.v1",
         "org_id": org_id,
         "session_id": session_id,
+        "truncated": truncated,
         "events": events,
     })))
 }

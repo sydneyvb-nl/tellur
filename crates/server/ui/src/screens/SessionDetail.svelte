@@ -6,6 +6,7 @@
   let { org, id }: { org: string; id: string } = $props();
 
   let events = $state<StoredEvent[]>([]);
+  let truncated = $state(false);
   let error = $state<string | null>(null);
   let loading = $state(true);
   let reloadKey = $state(0);
@@ -20,7 +21,10 @@
     api
       .session(o, sid)
       .then((res) => {
-        if (!cancelled) events = res.events;
+        if (!cancelled) {
+          events = res.events;
+          truncated = res.truncated ?? false;
+        }
       })
       .catch((e) => {
         if (!cancelled) error = e instanceof Error ? e.message : "failed to load";
@@ -55,7 +59,9 @@
   </div>
 {:else}
   <h1 class="mono">{id}</h1>
-  <p class="muted">{events.length} events</p>
+  <p class="muted">
+    {events.length} events{#if truncated} · showing the first {events.length} (truncated){/if}
+  </p>
   <ol class="timeline">
     {#each events as e (e.id)}
       <li>

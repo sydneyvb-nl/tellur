@@ -298,6 +298,7 @@ async fn sessions_list_and_detail() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["truncated"], false);
     let events = body["events"].as_array().unwrap();
     assert_eq!(events.len(), 2);
     assert!(events[0]["seq"].as_i64().unwrap() < events[1]["seq"].as_i64().unwrap());

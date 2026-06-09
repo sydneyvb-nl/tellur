@@ -144,7 +144,7 @@ export const api = {
       `/v1/orgs/${org(o)}/sessions${repo ? `?repo=${encodeURIComponent(repo)}` : ""}`,
     ),
   session: (o: string, id: string) =>
-    request<{ session_id: string; events: StoredEvent[] }>(
+    request<{ session_id: string; events: StoredEvent[]; truncated?: boolean }>(
       `/v1/orgs/${org(o)}/sessions/${encodeURIComponent(id)}`,
     ),
 };
