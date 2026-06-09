@@ -72,10 +72,41 @@ export interface Dashboard {
   recent_events: StoredEvent[];
 }
 
+export interface ActivityBucket {
+  day: string;
+  key: string;
+  count: number;
+}
+
+export interface Activity {
+  org_id: string;
+  range_days: number;
+  group_by: string;
+  buckets: ActivityBucket[];
+}
+
+export interface RepoDetail {
+  id: string;
+  name: string;
+  event_count: number;
+  contributors: string[];
+  last_activity: string | null;
+  attributed_files: number;
+  lines: { total_attributed: number; ai: number; reviewed_ai: number };
+  ai_share: number | null;
+  review_coverage: number | null;
+}
+
+const org = (o: string) => encodeURIComponent(o);
+
 export const api = {
   me: () => request<Me>("/v1/me"),
-  dashboard: (org: string, limit = 25) =>
-    request<Dashboard>(
-      `/v1/orgs/${encodeURIComponent(org)}/dashboard?limit=${limit}`,
+  dashboard: (o: string, limit = 25) =>
+    request<Dashboard>(`/v1/orgs/${org(o)}/dashboard?limit=${limit}`),
+  activity: (o: string, rangeDays = 30, groupBy: "type" | "actor" = "type") =>
+    request<Activity>(
+      `/v1/orgs/${org(o)}/activity?range=${rangeDays}d&group_by=${groupBy}`,
     ),
+  repo: (o: string, repo: string) =>
+    request<RepoDetail>(`/v1/orgs/${org(o)}/repos/${encodeURIComponent(repo)}`),
 };

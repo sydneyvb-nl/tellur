@@ -16,9 +16,9 @@ use tellur_core::schema::types::FileAttribution;
 use r2d2_postgres::postgres::GenericClient;
 
 use super::{
-    AuditEntry, AuditRecord, IngestEvent, Job, LoginTx, Org, OrgReport, PolicyDoc, PolicySummary,
-    Repo, RepoRoleGrant, RepoSummary, ScimGroup, ScimUser, Store, StoredEvent,
-    role_from_group_name,
+    ActivityBucket, ActivityGroup, AuditEntry, AuditRecord, IngestEvent, Job, LoginTx, Org,
+    OrgReport, PolicyDoc, PolicySummary, Repo, RepoFacts, RepoRoleGrant, RepoSummary, ScimGroup,
+    ScimUser, Store, StoredEvent, role_from_group_name,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
@@ -713,6 +713,56 @@ impl Store for PostgresStore {
             });
         }
         Ok(out)
+    }
+
+    fn activity_by_day(
+        &self,
+        org_id: &str,
+        since_rfc3339: &str,
+        group: ActivityGroup,
+    ) -> Result<Vec<ActivityBucket>> {
+        // The grouping column is an allow-listed constant, never user input.
+        let sql = format!(
+            "SELECT left(ts, 10) AS day, {col} AS key, COUNT(*) AS n
+             FROM event WHERE org_id = $1 AND ts >= $2
+             GROUP BY day, key ORDER BY day ASC, key ASC",
+            col = group.column()
+        );
+        let rows = self.client()?.query(&sql, &[&org_id, &since_rfc3339])?;
+        Ok(rows
+            .iter()
+            .map(|r| ActivityBucket {
+                day: r.get(0),
+                key: r.get(1),
+                count: r.get::<_, i64>(2) as u64,
+            })
+            .collect())
+    }
+
+    fn repo_facts(&self, org_id: &str, repo_id: &str) -> Result<RepoFacts> {
+        let mut client = self.client()?;
+        let event_count: i64 = client
+            .query_one(
+                "SELECT COUNT(*) FROM event WHERE org_id = $1 AND repo_id = $2",
+                &[&org_id, &repo_id],
+            )?
+            .get(0);
+        let last_activity: Option<String> = client
+            .query_one(
+                "SELECT MAX(ts) FROM event WHERE org_id = $1 AND repo_id = $2",
+                &[&org_id, &repo_id],
+            )?
+            .get(0);
+        let rows = client.query(
+            "SELECT DISTINCT actor FROM event
+             WHERE org_id = $1 AND repo_id = $2 ORDER BY actor",
+            &[&org_id, &repo_id],
+        )?;
+        Ok(RepoFacts {
+            event_count: event_count as u64,
+            contributors: rows.iter().map(|r| r.get(0)).collect(),
+            last_activity,
+        })
     }
 
     fn put_policy(&self, org_id: &str, name: &str, content: &str) -> Result<i64> {

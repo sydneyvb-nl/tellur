@@ -108,6 +108,43 @@ pub struct LoginTx {
     pub created_at: String,
 }
 
+/// One day's event count for a single grouping key (activity time-series).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ActivityBucket {
+    /// `YYYY-MM-DD` (UTC) day.
+    pub day: String,
+    /// The grouping value (an event type or actor).
+    pub key: String,
+    pub count: u64,
+}
+
+/// How to group the activity time-series.
+#[derive(Debug, Clone, Copy)]
+pub enum ActivityGroup {
+    Type,
+    Actor,
+}
+
+impl ActivityGroup {
+    /// The (allow-listed, never user-built) event column to group by.
+    fn column(self) -> &'static str {
+        match self {
+            ActivityGroup::Type => "event_type",
+            ActivityGroup::Actor => "actor",
+        }
+    }
+}
+
+/// Per-repo facts for the repo summary (counts/contributors/recency from the
+/// event log; line-level AI/review stats are computed separately from
+/// attribution).
+#[derive(Debug, Clone)]
+pub struct RepoFacts {
+    pub event_count: u64,
+    pub contributors: Vec<String>,
+    pub last_activity: Option<String>,
+}
+
 /// A durable background job (e.g. a large org export). Persisted so it survives
 /// restarts; a worker claims `queued` jobs, runs them, and stores the result.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -289,6 +326,19 @@ pub trait Store: Send + Sync {
     /// The most recent events across all of an org's repos (newest first), for
     /// the dashboard activity feed.
     fn recent_org_events(&self, org_id: &str, limit: u32) -> Result<Vec<StoredEvent>>;
+
+    /// Daily event counts since `since_rfc3339` (UTC), grouped by type or actor,
+    /// for the activity time-series.
+    fn activity_by_day(
+        &self,
+        org_id: &str,
+        since_rfc3339: &str,
+        group: ActivityGroup,
+    ) -> Result<Vec<ActivityBucket>>;
+
+    /// Event-log facts for a single repo (count, distinct contributors, last
+    /// activity). Tenant-scoped to `org_id`.
+    fn repo_facts(&self, org_id: &str, repo_id: &str) -> Result<RepoFacts>;
 
     // ─── Central policy distribution ─────────────────────────────────────────
 

@@ -11,9 +11,9 @@ use tellur_core::schema::types::FileAttribution;
 
 use super::chain;
 use super::{
-    AuditEntry, AuditRecord, IngestEvent, Job, LoginTx, Org, OrgReport, PolicyDoc, PolicySummary,
-    Repo, RepoRoleGrant, RepoSummary, ScimGroup, ScimUser, Store, StoredEvent,
-    role_from_group_name,
+    ActivityBucket, ActivityGroup, AuditEntry, AuditRecord, IngestEvent, Job, LoginTx, Org,
+    OrgReport, PolicyDoc, PolicySummary, Repo, RepoFacts, RepoRoleGrant, RepoSummary, ScimGroup,
+    ScimUser, Store, StoredEvent, role_from_group_name,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
@@ -883,6 +883,62 @@ impl Store for SqliteStore {
             });
         }
         Ok(out)
+    }
+
+    fn activity_by_day(
+        &self,
+        org_id: &str,
+        since_rfc3339: &str,
+        group: ActivityGroup,
+    ) -> Result<Vec<ActivityBucket>> {
+        let conn = self.conn()?;
+        // The grouping column is an allow-listed constant, never user input.
+        let sql = format!(
+            "SELECT substr(ts, 1, 10) AS day, {col} AS key, COUNT(*) AS n
+             FROM event WHERE org_id = ?1 AND ts >= ?2
+             GROUP BY day, key ORDER BY day ASC, key ASC",
+            col = group.column()
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params![org_id, since_rfc3339], |r| {
+            Ok(ActivityBucket {
+                day: r.get(0)?,
+                key: r.get(1)?,
+                count: r.get::<_, i64>(2)? as u64,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    fn repo_facts(&self, org_id: &str, repo_id: &str) -> Result<RepoFacts> {
+        let conn = self.conn()?;
+        let event_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM event WHERE org_id = ?1 AND repo_id = ?2",
+            params![org_id, repo_id],
+            |r| r.get(0),
+        )?;
+        let last_activity: Option<String> = conn.query_row(
+            "SELECT MAX(ts) FROM event WHERE org_id = ?1 AND repo_id = ?2",
+            params![org_id, repo_id],
+            |r| r.get(0),
+        )?;
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT actor FROM event
+             WHERE org_id = ?1 AND repo_id = ?2 ORDER BY actor",
+        )?;
+        let contributors = stmt
+            .query_map(params![org_id, repo_id], |r| r.get::<_, String>(0))?
+            .filter_map(std::result::Result::ok)
+            .collect();
+        Ok(RepoFacts {
+            event_count: event_count as u64,
+            contributors,
+            last_activity,
+        })
     }
 
     fn put_policy(&self, org_id: &str, name: &str, content: &str) -> Result<i64> {

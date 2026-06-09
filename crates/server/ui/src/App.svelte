@@ -2,6 +2,8 @@
   import { onMount } from "svelte";
   import AppShell from "./components/AppShell.svelte";
   import Overview from "./screens/Overview.svelte";
+  import Repos from "./screens/Repos.svelte";
+  import RepoDetail from "./screens/RepoDetail.svelte";
   import { api, type Me } from "./lib/api";
   import { parseRoute, defaultPath, type Route } from "./lib/router";
 
@@ -39,9 +41,13 @@
 {:else if error}
   <div class="boot err">{error}</div>
 {:else if me}
-  <AppShell org={route?.org ?? me.org_id} role={me.role}>
+  <AppShell org={route?.org ?? me.org_id} role={me.role} active={route?.name ?? ""}>
     {#if route && route.name === "overview"}
       <Overview org={route.org} />
+    {:else if route && route.name === "repos"}
+      <Repos org={route.org} />
+    {:else if route && route.name === "repo"}
+      <RepoDetail org={route.org} repo={route.repo} />
     {:else}
       <div class="notfound">
         <h1>Not found</h1>
