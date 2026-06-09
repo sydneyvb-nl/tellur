@@ -57,7 +57,12 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/v1/orgs/{org_id}/repos/{repo}/attributions",
-            post(crate::api::ingest_attributions),
+            post(crate::api::ingest_attributions).get(crate::api::list_attributions),
+        )
+        .route("/v1/orgs/{org_id}/sessions", get(crate::api::list_sessions))
+        .route(
+            "/v1/orgs/{org_id}/sessions/{id}",
+            get(crate::api::session_detail),
         )
         .route(
             "/v1/orgs/{org_id}/repos/{repo}/roles",

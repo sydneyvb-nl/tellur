@@ -247,6 +247,34 @@ fn full_store_surface() {
     assert!(facts.contributors.iter().any(|c| c == "human"));
     assert!(facts.last_activity.is_some());
 
+    // ── Sessions list + detail (dashboard D2) ────────────────────────────────
+    let sessions = store
+        .list_sessions(&org_a.id, None, None, None, 50)
+        .unwrap();
+    assert_eq!(sessions.len(), 2); // s1 (2 events) + s2 (1)
+    let s1 = sessions.iter().find(|s| s.session_id == "s1").unwrap();
+    assert_eq!(s1.event_count, 2);
+    assert!(s1.actors.iter().any(|a| a == "human"));
+    assert!(s1.actors.iter().any(|a| a == "claude"));
+    assert_eq!(s1.repos, vec![repo.id.clone()]);
+    // Actor filter narrows the set (claude only appears in s1).
+    assert_eq!(
+        store
+            .list_sessions(&org_a.id, None, Some("claude"), None, 50)
+            .unwrap()
+            .len(),
+        1
+    );
+    let s1_events = store.session_events(&org_a.id, "s1", 50).unwrap();
+    assert_eq!(s1_events.len(), 2);
+    assert!(s1_events[0].seq < s1_events[1].seq);
+    assert!(
+        store
+            .session_events(&org_a.id, "ghost", 50)
+            .unwrap()
+            .is_empty()
+    );
+
     // ── SSO: identity, login tx, sessions ────────────────────────────────────
     let sso = store
         .provision_member(&org_a.id, "Sso User", Role::Contributor, "sso@corp.test")

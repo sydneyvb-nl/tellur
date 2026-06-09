@@ -26,6 +26,22 @@ describe("parseRoute", () => {
       repo: "app",
     });
   });
+  it("parses a file view with a nested path", () => {
+    expect(parseRoute("/app/orgs/o1/repos/app/files/src/a.rs")).toEqual({
+      name: "file",
+      org: "o1",
+      repo: "app",
+      path: "src/a.rs",
+    });
+  });
+  it("parses sessions list and detail", () => {
+    expect(parseRoute("/app/orgs/o1/sessions")).toEqual({ name: "sessions", org: "o1" });
+    expect(parseRoute("/app/orgs/o1/sessions/sess_1")).toEqual({
+      name: "session",
+      org: "o1",
+      id: "sess_1",
+    });
+  });
   it("flags unknown screens but keeps the org", () => {
     const r = parseRoute("/app/orgs/org_123/wat");
     expect(r).toMatchObject({ name: "unknown", org: "org_123" });

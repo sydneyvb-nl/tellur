@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import { defaultPath, reposPath } from "../lib/router";
+  import { defaultPath, reposPath, sessionsPath } from "../lib/router";
 
   let {
     org,
@@ -13,12 +13,18 @@
   const nav = $derived([
     { key: "overview", label: "Overview", href: defaultPath(org), ready: true },
     { key: "repos", label: "Repositories", href: reposPath(org), ready: true },
-    { key: "sessions", label: "Sessions", href: "#", ready: false },
+    { key: "sessions", label: "Sessions", href: sessionsPath(org), ready: true },
     { key: "policies", label: "Policies", href: "#", ready: false },
   ]);
 
-  // The repo-detail screen lives under the Repositories section.
-  const activeKey = $derived(active === "repo" ? "repos" : active);
+  // Sub-screens map to their section for nav highlighting.
+  const activeKey = $derived(
+    active === "repo" || active === "file"
+      ? "repos"
+      : active === "session"
+        ? "sessions"
+        : active,
+  );
 </script>
 
 <div class="shell">

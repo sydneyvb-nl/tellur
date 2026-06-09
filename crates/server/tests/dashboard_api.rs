@@ -243,3 +243,102 @@ async fn repo_detail_tenant_scoped_and_404() {
     let (status, _) = get(&s.state, &format!("/v1/orgs/{}/activity", s.org_a), None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn attribution_read_returns_ranges_and_filters_by_path() {
+    let s = setup();
+    let (status, body) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/repos/{}/attributions", s.org_a, s.repo_id),
+        Some(&s.viewer_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let files = body["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0]["file_path"], "src/a.rs");
+    assert_eq!(files[0]["ranges"].as_array().unwrap().len(), 2);
+
+    // Exact path filter that matches nothing → empty.
+    let (_, body) = get(
+        &s.state,
+        &format!(
+            "/v1/orgs/{}/repos/{}/attributions?path=nope.rs",
+            s.org_a, s.repo_id
+        ),
+        Some(&s.viewer_a),
+    )
+    .await;
+    assert_eq!(body["files"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn sessions_list_and_detail() {
+    let s = setup();
+    let (status, body) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/sessions", s.org_a),
+        Some(&s.viewer_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let sessions = body["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 2);
+    let s1 = sessions.iter().find(|x| x["session_id"] == "s1").unwrap();
+    assert_eq!(s1["event_count"], 2);
+    let actors = s1["actors"].as_array().unwrap();
+    assert!(actors.iter().any(|a| a == "claude"));
+    assert!(actors.iter().any(|a| a == "human"));
+
+    // Detail returns the session's events, oldest first.
+    let (status, body) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/sessions/s1", s.org_a),
+        Some(&s.viewer_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["truncated"], false);
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 2);
+    assert!(events[0]["seq"].as_i64().unwrap() < events[1]["seq"].as_i64().unwrap());
+
+    // Unknown session → 404.
+    let (status, _) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/sessions/ghost", s.org_a),
+        Some(&s.viewer_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn sessions_repo_filter_and_tenant_scope() {
+    let s = setup();
+    // Filter by the repo id → still finds both sessions (both in that repo).
+    let (status, body) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/sessions?repo={}", s.org_a, s.repo_id),
+        Some(&s.viewer_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["sessions"].as_array().unwrap().len(), 2);
+    // Unknown repo filter → 404.
+    let (status, _) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/sessions?repo=ghost", s.org_a),
+        Some(&s.viewer_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // Cross-org caller forbidden.
+    let (status, _) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/sessions", s.org_a),
+        Some(&s.admin_b),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}

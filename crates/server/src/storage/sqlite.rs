@@ -13,7 +13,7 @@ use super::chain;
 use super::{
     ActivityBucket, ActivityGroup, AuditEntry, AuditRecord, IngestEvent, Job, LoginTx, Org,
     OrgReport, PolicyDoc, PolicySummary, Repo, RepoFacts, RepoRoleGrant, RepoSummary, ScimGroup,
-    ScimUser, Store, StoredEvent, role_from_group_name,
+    ScimUser, SessionSummary, Store, StoredEvent, role_from_group_name,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
@@ -52,6 +52,20 @@ impl SqliteStore {
             .lock()
             .map_err(|_| anyhow::anyhow!("database connection lock poisoned"))
     }
+}
+
+/// Split a `group_concat` CSV (or `None`) into a de-duped, sorted, non-empty
+/// list — used for per-session distinct actors/repos.
+fn split_csv(s: Option<String>) -> Vec<String> {
+    let mut v: Vec<String> = s
+        .unwrap_or_default()
+        .split(',')
+        .filter(|x| !x.is_empty())
+        .map(str::to_string)
+        .collect();
+    v.sort();
+    v.dedup();
+    v
 }
 
 /// Add a column to a table if it is not already present (idempotent migration).
@@ -939,6 +953,89 @@ impl Store for SqliteStore {
             contributors,
             last_activity,
         })
+    }
+
+    fn list_sessions(
+        &self,
+        org_id: &str,
+        repo_id: Option<&str>,
+        actor: Option<&str>,
+        since_rfc3339: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<SessionSummary>> {
+        let conn = self.conn()?;
+        // NOTE: SQLite's `group_concat(DISTINCT x)` only supports the default
+        // comma separator, so an actor/repo id literally containing a comma
+        // would split wrongly in `split_csv`. Repo ids are generated (no commas)
+        // and actors are agent ids; revisit if free-form actor strings arrive.
+        let mut stmt = conn.prepare(
+            "SELECT session_id, COUNT(*) AS n, MIN(ts) AS f, MAX(ts) AS l,
+                    group_concat(DISTINCT actor) AS actors,
+                    group_concat(DISTINCT repo_id) AS repos
+             FROM event
+             WHERE org_id = ?1
+               AND (?2 IS NULL OR repo_id = ?2)
+               AND (?3 IS NULL OR actor = ?3)
+               AND (?4 IS NULL OR ts >= ?4)
+             GROUP BY session_id ORDER BY l DESC LIMIT ?5",
+        )?;
+        let rows = stmt.query_map(params![org_id, repo_id, actor, since_rfc3339, limit], |r| {
+            Ok(SessionSummary {
+                session_id: r.get(0)?,
+                event_count: r.get::<_, i64>(1)? as u64,
+                first_ts: r.get(2)?,
+                last_ts: r.get(3)?,
+                actors: split_csv(r.get::<_, Option<String>>(4)?),
+                repos: split_csv(r.get::<_, Option<String>>(5)?),
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    fn session_events(
+        &self,
+        org_id: &str,
+        session_id: &str,
+        limit: u32,
+    ) -> Result<Vec<StoredEvent>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT seq, id, repo_id, session_id, ts, event_type, actor, payload
+             FROM event WHERE org_id = ?1 AND session_id = ?2 ORDER BY seq ASC LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![org_id, session_id, limit], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, String>(6)?,
+                r.get::<_, String>(7)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (seq, id, repo_id, session_id, timestamp, event_type, actor, payload_str) = row?;
+            let payload = serde_json::from_str(&payload_str)
+                .with_context(|| format!("corrupt event payload for event {id}"))?;
+            out.push(StoredEvent {
+                seq,
+                id,
+                repo_id,
+                session_id,
+                timestamp,
+                event_type,
+                actor,
+                payload,
+            });
+        }
+        Ok(out)
     }
 
     fn put_policy(&self, org_id: &str, name: &str, content: &str) -> Result<i64> {

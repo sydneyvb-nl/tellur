@@ -6,6 +6,9 @@ export type Route =
   | { name: "overview"; org: string }
   | { name: "repos"; org: string }
   | { name: "repo"; org: string; repo: string }
+  | { name: "file"; org: string; repo: string; path: string }
+  | { name: "sessions"; org: string }
+  | { name: "session"; org: string; id: string }
   | { name: "unknown"; org: string | null; path: string };
 
 const BASE = "/app";
@@ -25,10 +28,20 @@ export function parseRoute(pathname: string): Route | null {
   switch (screen) {
     case "overview":
       return { name: "overview", org };
-    case "repos":
+    case "repos": {
+      if (!parts[3]) return { name: "repos", org };
+      const repo = decodeURIComponent(parts[3]);
+      // /orgs/:org/repos/:repo/files/<path...>
+      if (parts[4] === "files" && parts.length > 5) {
+        const path = parts.slice(5).map(decodeURIComponent).join("/");
+        return { name: "file", org, repo, path };
+      }
+      return { name: "repo", org, repo };
+    }
+    case "sessions":
       return parts[3]
-        ? { name: "repo", org, repo: decodeURIComponent(parts[3]) }
-        : { name: "repos", org };
+        ? { name: "session", org, id: decodeURIComponent(parts[3]) }
+        : { name: "sessions", org };
     default:
       return { name: "unknown", org, path: pathname };
   }
@@ -43,9 +56,31 @@ export function routePath(route: Route): string {
       return `${BASE}/orgs/${route.org}/repos`;
     case "repo":
       return `${BASE}/orgs/${route.org}/repos/${encodeURIComponent(route.repo)}`;
+    case "file":
+      return filePath(route.org, route.repo, route.path);
+    case "sessions":
+      return `${BASE}/orgs/${route.org}/sessions`;
+    case "session":
+      return `${BASE}/orgs/${route.org}/sessions/${encodeURIComponent(route.id)}`;
     case "unknown":
       return route.path;
   }
+}
+
+/** Path to the sessions list for an org. */
+export function sessionsPath(org: string): string {
+  return `${BASE}/orgs/${org}/sessions`;
+}
+
+/** Path to a session's replay. */
+export function sessionPath(org: string, id: string): string {
+  return `${BASE}/orgs/${org}/sessions/${encodeURIComponent(id)}`;
+}
+
+/** Path to a file's provenance view (each path segment encoded). */
+export function filePath(org: string, repo: string, path: string): string {
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  return `${BASE}/orgs/${org}/repos/${encodeURIComponent(repo)}/files/${encoded}`;
 }
 
 /** Default landing path for an org. */
