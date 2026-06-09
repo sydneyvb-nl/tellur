@@ -209,33 +209,43 @@ Tellur ▸ <Org name>            [ time range ▾ ]   [ ⌘K ]   [ avatar ▾ ]
 settings · docs · sign out
 ```
 
-Nav items gate by role: Overview/Repos/Sessions/Policies/Exports are viewer+
-(read); Audit and People & Access are admin-only. Items the caller can't access
-are hidden, not shown-disabled (avoid teasing).
+Nav items gate by role: Overview/Repos/Sessions/Policies are viewer+ (read);
+**Exports, Audit, and People & Access are admin-only** (the export surface —
+org event/audit jobs, job polling, and per-repo SLSA/SPDX — is admin-only in the
+hub today, so the IA matches the API rather than 403-ing a viewer who follows
+it). Items the caller can't access are hidden, not shown-disabled (avoid
+teasing).
 
 ### 3.2 Routes (URL = state; everything deep-linkable)
 
+All SPA routes are **served under `/app`** (the hub only falls back to
+`index.html` for `GET /app/*`; root paths stay reserved for `/auth`, `/v1`,
+`/healthz`, `/readyz`, `/metrics`) and are **org-scoped from day one** (decision
+§12.5) so multi-org never requires a repaint:
+
 ```
-/                                         → redirect to /overview
-/overview?range=30d
-/repos?q=&sort=&range=30d
-/repos/:repo                              repo detail (tabs: activity | files | contributors | exports)
-/repos/:repo/files/:path*                 file attribution (line-level)
-/sessions?repo=&actor=&type=&range=
-/sessions/:sessionId                      session replay timeline
-/policies
-/policies/:name                           policy body + compliance table
-/exports                                  job list
-/exports/:jobId                           job status + result viewer
-/audit?actor=&action=&range=&cursor=
-/people                                   members + roles
-/people/groups                            SCIM groups → role mapping
-/settings                                 org/SSO/SCIM status (read), theme, prefs
+/app                                              → redirect to /app/orgs/:defaultOrg/overview
+/app/orgs/:org/overview?range=30d
+/app/orgs/:org/repos?q=&sort=&range=30d
+/app/orgs/:org/repos/:repo                        repo detail (tabs: activity | files | contributors | exports)
+/app/orgs/:org/repos/:repo/files/:path*           file attribution (line-level)
+/app/orgs/:org/sessions?repo=&actor=&type=&range=
+/app/orgs/:org/sessions/:sessionId                session replay timeline
+/app/orgs/:org/policies
+/app/orgs/:org/policies/:name                      policy body + compliance snapshot
+/app/orgs/:org/exports        (admin)              job list
+/app/orgs/:org/exports/:jobId (admin)              job status + result viewer
+/app/orgs/:org/audit          (admin)  ?actor=&action=&range=&cursor=
+/app/orgs/:org/people         (admin)              members + roles
+/app/orgs/:org/people/groups  (admin)              SCIM groups → role mapping
+/app/orgs/:org/settings                            org/SSO/SCIM status (read), theme, prefs
 ```
 
-Global controls present on every screen: **time range** (affects time-scoped
-views), **command palette (⌘K)** for jump-to-repo/session/action, **org context**
-(single org per session today; multi-org switcher is a forward hook).
+Single-org installs redirect `/app` → the default org and may hide the org
+switcher, but the org-scoped path shape is permanent. Global controls present on
+every screen: **time range** (affects time-scoped views), **command palette
+(⌘K)** for jump-to-repo/session/action, and the **org context** (switcher for
+multi-org; hidden for single-org).
 
 ### 3.3 Entry points (deep-linking is a feature)
 - From CLI/PR report: a `tellur:` URL or `--dashboard-url` prints a link to the
@@ -294,11 +304,28 @@ policy status, contributors). Repo detail tabs:
 - **Contributors:** per-actor rollup *for this repo* (provenance, not ranking).
 - **Exports:** per-repo SLSA/SPDX generation + history.
 
-File view (U3 — the money shot): the file with a **provenance gutter** —
-each line tinted by origin (AI/human/mixed) with confidence; click a range to
-open a side panel showing agent, model, prompt hash, evidence strength, tests
+File view (U3 — the money shot): the file with a **provenance gutter** — each
+line tinted by origin (AI/human/mixed) with confidence; click a range to open a
+side panel showing agent, model, prompt hash, evidence strength, tests
 run/passed, policy tags, and a link to the originating session + a **Verify
 chain** action.
+
+**Source-text contract (important).** The hub's persisted attribution stores
+`file_path`, `git_blob_sha`, and ranges — **not** the source text. The gutter
+therefore renders in one of two modes, in priority order:
+1. **Metadata-first (default, always available):** render the range map without
+   source — a compact list/heatmap of attributed line ranges with their
+   provenance, and "open in Git" deep links built from the repo's remote +
+   `git_blob_sha` (no source ever leaves the user's Git host). This honors the
+   "prompts/source don't leave the machine" principle and needs no new content
+   API.
+2. **Full source overlay (opt-in):** if an org configures a content source, fetch
+   text by `git_blob_sha` to render real lines under the gutter. This requires a
+   new contract — either a Git-provider link/fetch integration or a content
+   endpoint — and is gated behind explicit org configuration. Tracked as API gap
+   **A12**; not required for D2.
+The wireframe above shows mode 2; D2 ships mode 1 and treats mode 2 as a
+follow-up so the gutter is useful without storing or proxying source code.
 
 ```
 ┌ payments-svc / src/charge.rs ─────────────── ⓘ provenance ▸ verify ─┐
@@ -326,17 +353,28 @@ component, not a separate page.
 ### 4.4 Policies (U5)
 
 Left: org policies (name, version, updated, source). Right: selected policy body
-(read-only, syntax-highlighted YAML) + a **compliance table**: each repo ×
-pass/fail/not-evaluated, with the failing rules expandable to the offending
-events/lines. "Distribute" affordance documents `tellur policy pull`. P3's core
-"is enforcement real" view.
+(read-only, syntax-highlighted YAML) + a **compliance snapshot table**: each repo
+× pass/fail/not-evaluated, with the failing rules expandable to the offending
+events/lines. Compliance is **durable-job-backed and cached as timestamped
+snapshots** per `(org, repo, policy version)` (decision §12.4): the UI reads the
+latest snapshot (showing its "evaluated at" age) and an admin can trigger a
+re-evaluation (which enqueues a job and re-polls). "Distribute" affordance
+documents `tellur policy pull`. P3's core "is enforcement real" view.
 
 ### 4.5 Exports (U7)
 
-Durable-job native: a "New export" action (events / audit / per-repo SLSA / SPDX),
-a job table (kind, requested by, status, age), and a job detail that **polls**
-(`GET /jobs/{id}`) with a calm progress state, then renders/downloads the result.
-This is the UI contract for the durable-job backend already shipped.
+Admin-only. Two export shapes, surfaced honestly because the hub treats them
+differently today:
+- **Org event / audit bundles → durable jobs.** "New export" enqueues, the job
+  table shows kind/requested-by/status/age, and the detail **polls**
+  (`GET /jobs/{id}`) with a calm progress state, then renders/downloads the
+  result. This is the UI contract for the shipped durable-job backend.
+- **Per-repo SLSA / SPDX → synchronous.** These are immediate
+  `GET .../repos/{repo}/export/slsa|spdx` responses (no `job_id`); the UI streams
+  the download directly and shows an inline result, **not** a job poller.
+If we later want consistency (history, large repos), API gap **A13** would add
+job-backed SLSA/SPDX variants; until then the UI must not assume a `job_id` for
+them.
 
 ### 4.6 Audit log (U6 — P3's anchor)
 
@@ -399,17 +437,27 @@ all session-cookie/Bearer auth + tenant-scoped + audited where it mutates:
 | A5 | `GET /v1/orgs/{org}/repos/{repo}/events?type=&actor=&session=&before=&after=` | Activity/Sessions filters | Add facets to the existing seq-paginated list. |
 | A6 | `GET /v1/orgs/{org}/sessions[?repo=&actor=&range=]` + `/sessions/{id}` | Sessions list/replay | Cross-repo session index (group events by `session_id`). |
 | A7 | `GET /v1/orgs/{org}/audit?actor=&action=&range=&cursor=` (admin) | Audit log | Paginated **read** (today audit is export-only via job). |
-| A8 | `GET /v1/orgs/{org}/policies/compliance` (+ per-repo) | Policies | Evaluate org policy vs repos; pass/fail + offending refs. Heaviest item — likely a durable job + cached result. |
+| A8 | `POST /v1/orgs/{org}/policies/compliance` (enqueue) + `GET .../policies/compliance` (latest snapshot, +per-repo) (admin) | Policies | Durable-job-backed; persists **timestamped compliance snapshots** per `(org, repo, policy version)`. UI reads the latest snapshot; admin can trigger re-eval (§12.4). |
 | A9 | `GET /v1/orgs/{org}/overview` | Overview | Optional: one composed payload (review-gap, risk-ranked repos, headline deltas) to keep the landing screen one round-trip. Could extend the existing `/dashboard`. |
 | A10 | `GET /v1/orgs/{org}/sso-status` (admin) | People/Settings | Read-only health (issuer reachable, last SCIM activity, token age). No secrets. |
+| A11 | `GET /v1/orgs/{org}/groups` (admin, **session-auth**) | People & Access | Session-auth read of SCIM groups + members + derived role mapping. The existing `/scim/v2/Groups` needs a SCIM bearer token, which the SPA must not hold — so the People screen needs this browser-auth mirror. |
+| A12 | File source contract (opt-in): Git-provider link/fetch **or** `GET .../repos/{repo}/blob/{git_blob_sha}` | File view (full-source mode) | Persisted attribution has no source text. Only needed for the opt-in full-source gutter (§4.2 mode 2); D2 ships metadata-first without it. |
+| A13 | Job-backed SLSA/SPDX variants (optional) | Exports | Only if we want export history/large-repo handling; per-repo SLSA/SPDX are synchronous today and the UI treats them so (§4.5). |
 
 Cross-cutting API requirements: consistent cursor pagination + `total` where
 cheap; `ETag`/`Last-Modified` for cacheable reads; uniform error model (already
 RFC 9457); per-endpoint role gating mirrored in the UI; **the dashboard adds no
-new trust boundary** — it is a same-origin client of these endpoints. Review-gap
-and "reviewed" semantics must be defined precisely from `AttributionRange`
-(`state`, `reviewer`, `reviewed_at`, `tests_passed`) before A1/A3 — that
-definition is itself a product decision (see §12).
+new trust boundary** — it is a same-origin client of these endpoints.
+
+**Review-gap definition (decision §12.1, drives A1/A3/A9).** An AI-attributed
+range counts as **reviewed** only when *all* hold: it has an explicit human
+review state; a human `reviewer` distinct from the producing agent/actor; a
+`reviewed_at` timestamp **after the latest AI modification** of that range; and —
+where policy requires tests — passing test evidence (`tests_passed`). **Review
+coverage** = `reviewed_ai_lines / total_ai_attributed_lines`; **review gap** is
+its inverse. This is computed server-side from `AttributionRange`
+(`state`/`reviewer`/`reviewed_at`/`tests_passed`) and is the single source for
+the headline metric — the UI never recomputes it.
 
 ---
 
@@ -499,9 +547,12 @@ exact issue flagged in the dashboard-coupling review). The SPA calls the existin
 Embed the built assets into `tellur-server` via `rust-embed` (or `include_dir`)
 behind a Cargo feature (`dashboard`, default on), so self-host stays "one binary,
 zero extra infra" — consistent with the project's packaging principle. A dev mode
-proxies to the Vite dev server for fast iteration. **Licensing decision needed**
-(§12): assets embedded in the FSL `tellur-server` ship under FSL; the source can
-remain in `web/` — clarify the header/LICENSE so it's unambiguous.
+proxies to the Vite dev server for fast iteration. **Licensing (decided,
+§12.3): the dashboard is part of `tellur-server` and ships under the same
+license as the server — FSL-1.1-ALv2.** The UI source lives under the server
+crate (e.g. `crates/server/ui/`), carries FSL headers/`LICENSE`, and the README
+states this explicitly; it is *not* the Apache-2.0 `web/` session-replay page,
+which stays as the daemon's local viewer.
 
 ### 8.3 Stack (recommendation + trade-offs)
 Recommend **Vite + TypeScript + Svelte 5** (or SolidJS), a **bespoke component
@@ -605,32 +656,54 @@ endpoints land before the screens that need them.
   A5 (event facets); Overview trends, Repositories list, Repo detail (Activity
   tab). (API PR, then UI PR.)
 - **D2 — Evidence.** A4 (attribution read) + A6 (sessions index); File view with
-  provenance gutter + AttributionPanel + Verify-chain; Sessions list + replay
-  (elevate existing timeline). The "Git shows what, Tellur shows how" moment.
-- **D3 — Governance.** A7 (audit read) + Audit screen; Exports screen on the
-  durable-job API (already shipped). (P3 value.)
-- **D4 — Policy & access.** A8 (policy compliance, likely job-backed) + Policies
-  screen; A2 + A10 + People & Access + SSO status. (P3/P4 value.)
+  the **metadata-first provenance gutter** (mode 1, "open in Git" links — no
+  source proxying; A12/full-source is a later opt-in) + AttributionPanel +
+  Verify-chain; Sessions list + replay (elevate existing timeline). The "Git
+  shows what, Tellur shows how" moment.
+- **D3 — Governance.** A7 (audit read) + Audit screen; Exports screen (admin)
+  honoring both export shapes — job-polled event/audit and synchronous
+  per-repo SLSA/SPDX (§4.5). (P3 value.)
+- **D4 — Policy & access.** A8 (policy compliance snapshots, job-backed) +
+  Policies screen; A2 (members) + A11 (session-auth groups) + A10 (SSO status) +
+  People & Access. (P3/P4 value.)
 - **D5 — Polish.** Command palette breadth, density/theme/i18n finalization, a11y
   audit, performance pass, E2E coverage, docs.
 
 Each D-phase updates README/AGENTS/PROJECT_STATUS/THREAT_MODEL as it lands
 (repo norm). UI work is gated behind its API PR being merged.
 
-## 12. Open questions / decisions for Sydney
-1. **"Reviewed" / "review gap" definition.** Exact rule from `AttributionRange`
-   (`state`, `reviewer`, `reviewed_at`, `tests_passed`) — this drives the headline
-   metric and A1/A3. Product decision, needed before D1.
-2. **Stack sign-off.** Svelte/Solid + bespoke vs React. (Recommendation: Svelte.)
-3. **Licensing of the embedded UI** (FSL with the hub vs Apache in `web/`).
-4. **Policy compliance compute** model: on-demand job vs cached/scheduled.
-5. **Multi-org** in one browser session: out of scope now, but confirm the URL
-   shape (`/orgs/:org/...`) so we don't repaint later.
-6. **Telemetry**: ship the opt-in metric table, or defer measurement to logs?
-7. **Phone scope**: confirm "read-only governance on phone" is enough (no admin
-   writes on small screens).
+## 12. Decisions (resolved 2026-06-08)
+
+1. **Reviewed / review-gap definition — DECIDED.** An AI-attributed range counts
+   as reviewed only with: an explicit human review state; a human `reviewer`
+   distinct from the producing agent/actor; a `reviewed_at` after the latest AI
+   modification of the range; and, where policy requires tests, passing test
+   evidence. Review coverage = `reviewed_ai_lines / total_ai_attributed_lines`;
+   review gap is the inverse. Computed server-side (see §6). Drives A1/A3/A9.
+2. **Frontend stack — DECIDED.** Svelte 5 / Solid + bespoke components (no UI
+   kit), per the §8.3 recommendation.
+3. **Dashboard licensing — DECIDED.** Ships as part of `tellur-server` under the
+   server's license (**FSL-1.1-ALv2**); explicit license headers + README
+   wording (see §8.2).
+4. **Policy compliance compute — DECIDED.** Durable-job-backed, cached as
+   timestamped snapshots per `(org, repo, policy version)`; the UI reads the
+   latest snapshot, admins can trigger re-evaluation (see §4.4, A8).
+5. **Multi-org routing — DECIDED.** Org-scoped routes from day one
+   (`/app/orgs/:org/...`); single-org installs redirect to the default org and may
+   hide the switcher, but deep links stay future-proof (see §3.2).
+6. **Telemetry — DECIDED.** Opt-in, self-hosted aggregate metric table; no
+   third-party analytics (see §10).
+7. **Phone scope — DECIDED.** Read-only: governance/investigation views must be
+   readable from Slack/PR links on a phone; admin **writes** require
+   tablet/desktop (see §8.7).
+
+### Remaining (smaller) open items
+- Whether to compose `/overview` (A9) or keep extending `/dashboard` — perf call,
+  decide at D0/D1.
+- Whether/when to add the opt-in full-source gutter (A12) and job-backed
+  SLSA/SPDX (A13) — both are post-D2/D3 niceties, not blockers.
 
 ## 13. Appendix — traceability summary
 Personas P1–P4 → JTBD (§1.2) → use cases U1–U9 (§1.3) → screens (§4) → API gaps
-A1–A10 (§6) → delivery D0–D5 (§11). Every screen exists for a named job; every
+A1–A13 (§6) → delivery D0–D5 (§11). Every screen exists for a named job; every
 job has a persona; every aggregate links to verifiable evidence.
