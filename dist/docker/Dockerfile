@@ -7,9 +7,11 @@
 
 # Stage 1: build the dashboard SPA (embedded into the binary at /app).
 FROM node:20-bookworm-slim AS web
-RUN corepack enable
 WORKDIR /ui
 COPY crates/server/ui/package.json crates/server/ui/pnpm-lock.yaml ./
+# Pin pnpm via the package.json `packageManager` field (avoids corepack pulling a
+# newer pnpm that requires a newer Node).
+RUN corepack enable && corepack prepare --activate
 RUN pnpm install --frozen-lockfile
 COPY crates/server/ui/ ./
 RUN pnpm build
