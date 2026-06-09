@@ -728,6 +728,140 @@ pub async fn repo_detail(
     })))
 }
 
+// ─── Attribution read + sessions (dashboard D2) ───────────────────────────────
+
+/// Query for the attribution read (optional exact-path filter).
+#[derive(Debug, Deserialize)]
+pub struct AttributionsQuery {
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+/// `GET /v1/orgs/{org}/repos/{repo}/attributions?path=` — read stored line-level
+/// attribution for a repo (viewer+), powering the file provenance gutter. This
+/// is metadata only (ranges + provenance); no source text is stored or served.
+pub async fn list_attributions(
+    State(state): State<AppState>,
+    Path((org_id, repo)): Path<(String, String)>,
+    principal: Principal,
+    Query(q): Query<AttributionsQuery>,
+) -> Result<Json<Value>, ServerError> {
+    ensure_same_org(&state, &principal, &org_id, "attributions.read")?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let repo = state
+        .store
+        .find_repo(&org_id, &repo)
+        .map_err(ServerError::Internal)?
+        .ok_or(ServerError::NotFound)?;
+    let mut files = run_blocking({
+        let store = state.store.clone();
+        let org = org_id.clone();
+        let repo_id = repo.id.clone();
+        move || store.list_attributions(&org, &repo_id)
+    })
+    .await?;
+    if let Some(path) = q.path.as_deref() {
+        files.retain(|f| f.file_path == path);
+    }
+    serde_json::to_value(json!({ "repo_id": repo.id, "files": files }))
+        .map(Json)
+        .map_err(|e| ServerError::Internal(e.into()))
+}
+
+/// Query for the sessions list.
+#[derive(Debug, Deserialize)]
+pub struct SessionsParams {
+    #[serde(default)]
+    pub repo: Option<String>,
+    #[serde(default)]
+    pub actor: Option<String>,
+    #[serde(default)]
+    pub range: Option<String>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+/// `GET /v1/orgs/{org}/sessions` — sessions (events grouped by `session_id`),
+/// newest first, filterable by repo/actor/range (viewer+).
+pub async fn list_sessions(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    principal: Principal,
+    Query(params): Query<SessionsParams>,
+) -> Result<Json<Value>, ServerError> {
+    ensure_same_org(&state, &principal, &org_id, "sessions.list")?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    // Resolve an optional repo filter to its id (unknown repo → 404).
+    let repo_id = match params.repo.as_deref() {
+        Some(r) => Some(
+            state
+                .store
+                .find_repo(&org_id, r)
+                .map_err(ServerError::Internal)?
+                .ok_or(ServerError::NotFound)?
+                .id,
+        ),
+        None => None,
+    };
+    let since = params.range.as_deref().map(|r| {
+        (chrono::Utc::now() - chrono::Duration::days(parse_range_days(Some(r)))).to_rfc3339()
+    });
+    let limit = params.limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE);
+    let sessions = run_blocking({
+        let store = state.store.clone();
+        let org = org_id.clone();
+        let actor = params.actor.clone();
+        move || {
+            store.list_sessions(
+                &org,
+                repo_id.as_deref(),
+                actor.as_deref(),
+                since.as_deref(),
+                limit,
+            )
+        }
+    })
+    .await?;
+    Ok(Json(json!({
+        "schema": "tellur.server.sessions.v1",
+        "org_id": org_id,
+        "sessions": sessions,
+    })))
+}
+
+/// `GET /v1/orgs/{org}/sessions/{id}` — a session's events, oldest first (for
+/// replay). Viewer+, tenant-scoped.
+pub async fn session_detail(
+    State(state): State<AppState>,
+    Path((org_id, session_id)): Path<(String, String)>,
+    principal: Principal,
+) -> Result<Json<Value>, ServerError> {
+    ensure_same_org(&state, &principal, &org_id, "session.detail")?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let events = run_blocking({
+        let store = state.store.clone();
+        let org = org_id.clone();
+        let sid = session_id.clone();
+        move || store.session_events(&org, &sid, MAX_PAGE)
+    })
+    .await?;
+    if events.is_empty() {
+        return Err(ServerError::NotFound);
+    }
+    Ok(Json(json!({
+        "schema": "tellur.server.session.v1",
+        "org_id": org_id,
+        "session_id": session_id,
+        "events": events,
+    })))
+}
+
 // ─── Central policy distribution ─────────────────────────────────────────────
 
 /// `PUT /v1/orgs/{org}/policies/{name}` — upload a policy YAML doc (admin only).

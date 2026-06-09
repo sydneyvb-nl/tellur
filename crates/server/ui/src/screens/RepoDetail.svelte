@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { api, type RepoDetail } from "../lib/api";
+  import { api, type RepoDetail, type AttrFile } from "../lib/api";
   import { count, pct, relativeTime } from "../lib/format";
-  import { reposPath } from "../lib/router";
+  import { reposPath, filePath } from "../lib/router";
 
   let { org, repo }: { org: string; repo: string } = $props();
 
   let data = $state<RepoDetail | null>(null);
+  let files = $state<AttrFile[]>([]);
   let error = $state<string | null>(null);
   let loading = $state(true);
   let reloadKey = $state(0);
@@ -17,10 +18,15 @@
     let cancelled = false;
     loading = true;
     error = null;
-    api
-      .repo(currentOrg, currentRepo)
-      .then((d) => {
-        if (!cancelled) data = d;
+    Promise.all([
+      api.repo(currentOrg, currentRepo),
+      api.attributions(currentOrg, currentRepo),
+    ])
+      .then(([d, a]) => {
+        if (!cancelled) {
+          data = d;
+          files = a.files;
+        }
       })
       .catch((e) => {
         if (!cancelled) error = e instanceof Error ? e.message : "failed to load";
@@ -66,6 +72,22 @@
       <div class="num mono">{count(data.lines.ai)}</div>
       <div class="lbl">AI lines</div>
     </div>
+  </section>
+
+  <section class="panel">
+    <h2>Attributed files</h2>
+    {#if files.length === 0}
+      <p class="muted">No attribution recorded yet.</p>
+    {:else}
+      <ul class="files">
+        {#each files as f (f.file_path)}
+          <li>
+            <a class="mono" href={filePath(org, repo, f.file_path)}>{f.file_path}</a>
+            <span class="muted">{f.ranges.length} ranges</span>
+          </li>
+        {/each}
+      </ul>
+    {/if}
   </section>
 
   <section class="panel">
@@ -133,6 +155,27 @@
   }
   .skeleton {
     height: 120px;
+  }
+  .files {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .files li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .files li:last-child {
+    border-bottom: none;
+  }
+  .files a {
+    color: var(--accent);
+    word-break: break-all;
   }
   .chips {
     list-style: none;

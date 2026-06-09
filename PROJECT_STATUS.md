@@ -1,11 +1,29 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-08 (team dashboard D1 — activity + repos; on feature branch)
+**Last updated:** 2026-06-08 (team dashboard D2 — evidence; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-08 — Team dashboard D2 (evidence: attribution + sessions).** On
+> branch `feat/dashboard-d2`. API-first then UI. New read endpoints (viewer+,
+> tenant-scoped): `GET /v1/orgs/{org}/repos/{repo}/attributions[?path=]` (A4 —
+> read stored line-level attribution; metadata only, no source text), and
+> sessions (A6) — `GET /v1/orgs/{org}/sessions[?repo=&actor=&range=&limit=]`
+> (events grouped by `session_id`: count, first/last ts, distinct actors/repos)
+> + `GET /v1/orgs/{org}/sessions/{id}` (events oldest-first for replay). Store
+> gains `list_sessions` + `session_events` (group_concat / string_agg for the
+> per-session distinct facets; SQLite + Postgres parity). SPA adds a **File
+> provenance view** (metadata-first gutter: per-range origin colour, agent/model,
+> confidence, reviewed-by — explicitly no source text), an attributed-files list
+> on Repo detail, a **Sessions** list, and a **Session replay** timeline; routes
+> `/app/orgs/:org/repos/:repo/files/:path*`, `.../sessions[/:id]`; Sessions nav
+> active. Verified: 269 workspace tests (incl. `dashboard_api` A4/A6 coverage +
+> PG parity), SPA 18 vitest + check + build (~22KB gzip); clippy -D warnings +
+> cargo-deny green; PG tests pass against a local Postgres. Next: D3 (audit read
+> A7 + Exports screen).
+>
 > **2026-06-08 — Team dashboard D1 (activity + repositories).** On branch
 > `feat/dashboard-d1-api`. API-first then UI, one PR. New read endpoints
 > (viewer+, tenant-scoped): `GET /v1/orgs/{org}/activity?range=&group_by=type|actor`

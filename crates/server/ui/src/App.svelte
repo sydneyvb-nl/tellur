@@ -4,6 +4,9 @@
   import Overview from "./screens/Overview.svelte";
   import Repos from "./screens/Repos.svelte";
   import RepoDetail from "./screens/RepoDetail.svelte";
+  import FileView from "./screens/FileView.svelte";
+  import Sessions from "./screens/Sessions.svelte";
+  import SessionDetail from "./screens/SessionDetail.svelte";
   import { api, type Me } from "./lib/api";
   import { parseRoute, defaultPath, type Route } from "./lib/router";
 
@@ -48,6 +51,12 @@
       <Repos org={route.org} />
     {:else if route && route.name === "repo"}
       <RepoDetail org={route.org} repo={route.repo} />
+    {:else if route && route.name === "file"}
+      <FileView org={route.org} repo={route.repo} path={route.path} />
+    {:else if route && route.name === "sessions"}
+      <Sessions org={route.org} />
+    {:else if route && route.name === "session"}
+      <SessionDetail org={route.org} id={route.id} />
     {:else}
       <div class="notfound">
         <h1>Not found</h1>

@@ -135,6 +135,19 @@ impl ActivityGroup {
     }
 }
 
+/// A grouped session summary across an org's events (for the Sessions list).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SessionSummary {
+    pub session_id: String,
+    pub event_count: u64,
+    pub first_ts: String,
+    pub last_ts: String,
+    /// Distinct actors seen in the session.
+    pub actors: Vec<String>,
+    /// Distinct repo ids the session touched.
+    pub repos: Vec<String>,
+}
+
 /// Per-repo facts for the repo summary (counts/contributors/recency from the
 /// event log; line-level AI/review stats are computed separately from
 /// attribution).
@@ -339,6 +352,25 @@ pub trait Store: Send + Sync {
     /// Event-log facts for a single repo (count, distinct contributors, last
     /// activity). Tenant-scoped to `org_id`.
     fn repo_facts(&self, org_id: &str, repo_id: &str) -> Result<RepoFacts>;
+
+    /// List sessions (events grouped by `session_id`), newest last-activity
+    /// first, optionally filtered by repo / actor / `since`. Tenant-scoped.
+    fn list_sessions(
+        &self,
+        org_id: &str,
+        repo_id: Option<&str>,
+        actor: Option<&str>,
+        since_rfc3339: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<SessionSummary>>;
+
+    /// All events for a single session, oldest first (for replay). Tenant-scoped.
+    fn session_events(
+        &self,
+        org_id: &str,
+        session_id: &str,
+        limit: u32,
+    ) -> Result<Vec<StoredEvent>>;
 
     // ─── Central policy distribution ─────────────────────────────────────────
 

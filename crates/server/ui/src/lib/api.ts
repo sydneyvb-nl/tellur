@@ -97,6 +97,32 @@ export interface RepoDetail {
   review_coverage: number | null;
 }
 
+export interface AttrRange {
+  start_line: number;
+  end_line: number;
+  origin: string;
+  agent_id: string;
+  model_id: string | null;
+  confidence: number;
+  reviewer: string | null;
+  reviewed_at: string | null;
+}
+
+export interface AttrFile {
+  file_path: string;
+  git_blob_sha: string;
+  ranges: AttrRange[];
+}
+
+export interface SessionSummary {
+  session_id: string;
+  event_count: number;
+  first_ts: string;
+  last_ts: string;
+  actors: string[];
+  repos: string[];
+}
+
 const org = (o: string) => encodeURIComponent(o);
 
 export const api = {
@@ -109,4 +135,16 @@ export const api = {
     ),
   repo: (o: string, repo: string) =>
     request<RepoDetail>(`/v1/orgs/${org(o)}/repos/${encodeURIComponent(repo)}`),
+  attributions: (o: string, repo: string) =>
+    request<{ repo_id: string; files: AttrFile[] }>(
+      `/v1/orgs/${org(o)}/repos/${encodeURIComponent(repo)}/attributions`,
+    ),
+  sessions: (o: string, repo?: string) =>
+    request<{ sessions: SessionSummary[] }>(
+      `/v1/orgs/${org(o)}/sessions${repo ? `?repo=${encodeURIComponent(repo)}` : ""}`,
+    ),
+  session: (o: string, id: string) =>
+    request<{ session_id: string; events: StoredEvent[] }>(
+      `/v1/orgs/${org(o)}/sessions/${encodeURIComponent(id)}`,
+    ),
 };

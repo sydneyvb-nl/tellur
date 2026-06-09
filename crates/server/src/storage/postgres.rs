@@ -18,7 +18,7 @@ use r2d2_postgres::postgres::GenericClient;
 use super::{
     ActivityBucket, ActivityGroup, AuditEntry, AuditRecord, IngestEvent, Job, LoginTx, Org,
     OrgReport, PolicyDoc, PolicySummary, Repo, RepoFacts, RepoRoleGrant, RepoSummary, ScimGroup,
-    ScimUser, Store, StoredEvent, role_from_group_name,
+    ScimUser, SessionSummary, Store, StoredEvent, role_from_group_name,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
@@ -763,6 +763,70 @@ impl Store for PostgresStore {
             contributors: rows.iter().map(|r| r.get(0)).collect(),
             last_activity,
         })
+    }
+
+    fn list_sessions(
+        &self,
+        org_id: &str,
+        repo_id: Option<&str>,
+        actor: Option<&str>,
+        since_rfc3339: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<SessionSummary>> {
+        let rows = self.client()?.query(
+            "SELECT session_id, COUNT(*) AS n, MIN(ts) AS f, MAX(ts) AS l,
+                    string_agg(DISTINCT actor, ',') AS actors,
+                    string_agg(DISTINCT repo_id, ',') AS repos
+             FROM event
+             WHERE org_id = $1
+               AND ($2::text IS NULL OR repo_id = $2)
+               AND ($3::text IS NULL OR actor = $3)
+               AND ($4::text IS NULL OR ts >= $4)
+             GROUP BY session_id ORDER BY l DESC LIMIT $5",
+            &[&org_id, &repo_id, &actor, &since_rfc3339, &(limit as i64)],
+        )?;
+        Ok(rows
+            .iter()
+            .map(|r| SessionSummary {
+                session_id: r.get(0),
+                event_count: r.get::<_, i64>(1) as u64,
+                first_ts: r.get(2),
+                last_ts: r.get(3),
+                actors: split_csv(r.get::<_, Option<String>>(4)),
+                repos: split_csv(r.get::<_, Option<String>>(5)),
+            })
+            .collect())
+    }
+
+    fn session_events(
+        &self,
+        org_id: &str,
+        session_id: &str,
+        limit: u32,
+    ) -> Result<Vec<StoredEvent>> {
+        let rows = self.client()?.query(
+            "SELECT seq, id, repo_id, session_id, ts, event_type, actor, payload
+             FROM event WHERE org_id = $1 AND session_id = $2 ORDER BY seq ASC LIMIT $3",
+            &[&org_id, &session_id, &(limit as i64)],
+        )?;
+        let mut out = Vec::new();
+        for r in &rows {
+            let id: String = r.get(1);
+            let payload_str: String = r.get(7);
+            let payload = serde_json::from_str(&payload_str)
+                .with_context(|| format!("corrupt event payload for event {id}"))?;
+            out.push(StoredEvent {
+                seq: r.get(0),
+                id,
+                repo_id: r.get(2),
+                session_id: r.get(3),
+                timestamp: r.get(4),
+                event_type: r.get(5),
+                actor: r.get(6),
+                payload,
+            });
+        }
+        Ok(out)
     }
 
     fn put_policy(&self, org_id: &str, name: &str, content: &str) -> Result<i64> {
@@ -1536,6 +1600,19 @@ impl Store for PostgresStore {
         }
         self.scim_get_user(org_id, member_id)
     }
+}
+
+/// Split a `string_agg` CSV (or `None`) into a de-duped, sorted, non-empty list.
+fn split_csv(s: Option<String>) -> Vec<String> {
+    let mut v: Vec<String> = s
+        .unwrap_or_default()
+        .split(',')
+        .filter(|x| !x.is_empty())
+        .map(str::to_string)
+        .collect();
+    v.sort();
+    v.dedup();
+    v
 }
 
 /// Read the member ids belonging to a group.
