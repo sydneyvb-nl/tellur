@@ -1,0 +1,73 @@
+/* Tellur dashboard design tokens (see docs/proposals/TEAM_DASHBOARD_UI.md §7).
+   Monochrome surfaces + one Tellur-green accent + semantic status/provenance. */
+:root {
+  color-scheme: dark;
+  --bg: #0b0e11;
+  --surface: #14181d;
+  --surface-2: #1b2027;
+  --border: #262c34;
+  --text: #e7ecf1;
+  --text-muted: #9aa4af;
+  --accent: #69d3a5;
+  --accent-weak: rgba(105, 211, 165, 0.14);
+  --ok: #3fb07f;
+  --warn: #e0a33a;
+  --risk: #e5614c;
+  --info: #5aa9e6;
+  --ai: #8b7bf0;
+  --human: #3fb07f;
+  --mixed: #e0a33a;
+
+  --radius-control: 6px;
+  --radius-card: 10px;
+  --space: 4px;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica,
+    Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #fbfcfd;
+  --surface: #ffffff;
+  --surface-2: #f3f5f7;
+  --border: #e3e7eb;
+  --text: #11151a;
+  --text-muted: #5b6671;
+  --accent: #1fae84;
+  --accent-weak: rgba(31, 174, 132, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+code,
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

@@ -43,6 +43,34 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+  dashboard:
+    name: dashboard (web build + embed)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: crates/server/ui/pnpm-lock.yaml
+      # Build + typecheck + unit-test the SPA.
+      - run: pnpm install --frozen-lockfile
+        working-directory: crates/server/ui
+      - run: pnpm check
+        working-directory: crates/server/ui
+      - run: pnpm test
+        working-directory: crates/server/ui
+      - run: pnpm build
+        working-directory: crates/server/ui
+      # Exercise the embed path: the hub compiles with the real assets in
+      # ui/dist (rust-embed reads them at compile time).
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p tellur-server --features dashboard
+
   supply-chain:
     name: cargo-deny
     runs-on: ubuntu-latest

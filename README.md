@@ -516,10 +516,12 @@ sync**: a group whose `displayName` is `tellur-admin`, `tellur-contributor`, or
 **Durable exports & dashboard.** Large org exports run as background jobs:
 `POST /v1/orgs/{org}/export/events` (or `/audit`) returns `202` with a `job_id`;
 poll `GET /v1/orgs/{org}/jobs/{id}` until `completed` to fetch the result. The
-hub also serves a consolidated `GET /v1/orgs/{org}/dashboard` (org rollup +
-recent-activity feed) for the web dashboard; open `web/index.html?hub=<hub-url>&org=<id>`
-after signing in via SSO to view team activity (serve the dashboard same-origin
-with the hub so its session cookie is first-party).
+hub ships a built-in **team dashboard** at **`/app`** (Svelte SPA embedded in the
+binary, served same-origin so it uses your first-party SSO session): sign in at
+`/auth/login`, then open `/app`. It is being built out in phases per
+[`docs/proposals/TEAM_DASHBOARD_UI.md`](docs/proposals/TEAM_DASHBOARD_UI.md) —
+the current Overview is backed by `GET /v1/orgs/{org}/dashboard` (org rollup +
+recent-activity feed).
 
 ## Development
 
