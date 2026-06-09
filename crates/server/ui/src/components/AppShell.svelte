@@ -1,21 +1,24 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import { defaultPath } from "../lib/router";
+  import { defaultPath, reposPath } from "../lib/router";
 
   let {
     org,
     role,
+    active = "",
     children,
-  }: { org: string; role: string; children: Snippet } = $props();
+  }: { org: string; role: string; active?: string; children: Snippet } = $props();
 
-  // D0 ships Overview; the rest are placeholders so the rail reads as the real
-  // IA from the plan (disabled items are hidden once their screens land).
+  // Items without a ready screen are shown disabled until their phase lands.
   const nav = $derived([
     { key: "overview", label: "Overview", href: defaultPath(org), ready: true },
-    { key: "repos", label: "Repositories", href: "#", ready: false },
+    { key: "repos", label: "Repositories", href: reposPath(org), ready: true },
     { key: "sessions", label: "Sessions", href: "#", ready: false },
     { key: "policies", label: "Policies", href: "#", ready: false },
   ]);
+
+  // The repo-detail screen lives under the Repositories section.
+  const activeKey = $derived(active === "repo" ? "repos" : active);
 </script>
 
 <div class="shell">
@@ -29,7 +32,7 @@
         <li>
           <a
             href={item.href}
-            class:active={item.key === "overview"}
+            class:active={item.key === activeKey}
             aria-disabled={!item.ready}
             class:soon={!item.ready}
           >

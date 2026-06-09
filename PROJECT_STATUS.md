@@ -1,11 +1,30 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-08 (team dashboard D0 — foundation; on feature branch)
+**Last updated:** 2026-06-08 (team dashboard D1 — activity + repos; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-08 — Team dashboard D1 (activity + repositories).** On branch
+> `feat/dashboard-d1-api`. API-first then UI, one PR. New read endpoints
+> (viewer+, tenant-scoped): `GET /v1/orgs/{org}/activity?range=&group_by=type|actor`
+> (A1 — daily event time-series; `since` filter + day bucket, SQLite `substr` /
+> Postgres `left`), and `GET /v1/orgs/{org}/repos/{repo}` (A3 — single-repo
+> summary: event count, contributors, last activity, and **line-level AI share +
+> review coverage**). The review-gap math is a pure, unit-tested `review` module
+> implementing decision §12.1 (AI range reviewed iff explicit human reviewer ≠
+> producing agent, a `reviewed_at`, and passing tests where tests were run;
+> documented approximation: no per-range modification ts). Store gains
+> `activity_by_day` + `repo_facts` (SQLite + Postgres). SPA (Svelte) adds an
+> Overview activity **trend** (bespoke SVG bars), a **Repositories** list, and a
+> **Repo detail** screen (AI-share / review-coverage KPIs, contributors), with
+> org-scoped routes `/app/orgs/:org/repos[/:repo]`. Verified: 266 workspace
+> tests (incl. `review` unit tests + `dashboard_api` integration + PG parity),
+> SPA 16 vitest + check + build (~20KB gzip); clippy -D warnings + cargo-deny
+> green; PG tests pass against a local Postgres. Next: D2 (attribution read A4 +
+> sessions A6 → file provenance gutter + session replay).
+>
 > **2026-06-08 — Team dashboard D0 (foundation).** On branch
 > `feat/dashboard-d0-foundation`, executing `docs/proposals/TEAM_DASHBOARD_UI.md`
 > phase D0. The hub now serves a real **team dashboard SPA at `/app`**: Svelte 5

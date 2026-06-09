@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { api, type Dashboard } from "../lib/api";
+  import { api, type Dashboard, type ActivityBucket } from "../lib/api";
   import { count, relativeTime } from "../lib/format";
+  import Trend from "../components/Trend.svelte";
 
   let { org }: { org: string } = $props();
 
   let data = $state<Dashboard | null>(null);
+  let activity = $state<ActivityBucket[]>([]);
   let error = $state<string | null>(null);
   let loading = $state(true);
   // Bumped to force a reload (e.g. the Retry button), since re-assigning the
@@ -18,10 +20,12 @@
     let cancelled = false;
     loading = true;
     error = null;
-    api
-      .dashboard(currentOrg)
-      .then((d) => {
-        if (!cancelled) data = d;
+    Promise.all([api.dashboard(currentOrg), api.activity(currentOrg, 30, "type")])
+      .then(([d, a]) => {
+        if (!cancelled) {
+          data = d;
+          activity = a.buckets;
+        }
       })
       .catch((e) => {
         if (!cancelled) error = e instanceof Error ? e.message : "failed to load";
@@ -79,6 +83,8 @@
         <div class="lbl">Repositories</div>
       </div>
     </section>
+
+    <Trend buckets={activity} label="Activity (30 days)" />
 
     <div class="cols">
       <section class="panel">

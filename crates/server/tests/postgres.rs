@@ -221,6 +221,32 @@ fn full_store_surface() {
             .unwrap()
     );
 
+    // ── Activity time-series + repo facts (dashboard D1) ─────────────────────
+    use tellur_server::storage::ActivityGroup;
+    let since = "2000-01-01T00:00:00Z";
+    let by_type = store
+        .activity_by_day(&org_a.id, since, ActivityGroup::Type)
+        .unwrap();
+    let typed: u64 = by_type.iter().map(|b| b.count).sum();
+    assert_eq!(typed, 3);
+    assert!(by_type.iter().all(|b| b.day.len() == 10)); // YYYY-MM-DD
+    let by_actor = store
+        .activity_by_day(&org_a.id, since, ActivityGroup::Actor)
+        .unwrap();
+    assert!(by_actor.iter().any(|b| b.key == "human" && b.count == 2));
+    // Future cutoff yields nothing.
+    assert!(
+        store
+            .activity_by_day(&org_a.id, "2999-01-01T00:00:00Z", ActivityGroup::Type)
+            .unwrap()
+            .is_empty()
+    );
+
+    let facts = store.repo_facts(&org_a.id, &repo.id).unwrap();
+    assert_eq!(facts.event_count, 3);
+    assert!(facts.contributors.iter().any(|c| c == "human"));
+    assert!(facts.last_activity.is_some());
+
     // ── SSO: identity, login tx, sessions ────────────────────────────────────
     let sso = store
         .provision_member(&org_a.id, "Sso User", Role::Contributor, "sso@corp.test")

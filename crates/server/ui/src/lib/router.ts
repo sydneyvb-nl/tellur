@@ -4,6 +4,8 @@
 
 export type Route =
   | { name: "overview"; org: string }
+  | { name: "repos"; org: string }
+  | { name: "repo"; org: string; repo: string }
   | { name: "unknown"; org: string | null; path: string };
 
 const BASE = "/app";
@@ -23,6 +25,10 @@ export function parseRoute(pathname: string): Route | null {
   switch (screen) {
     case "overview":
       return { name: "overview", org };
+    case "repos":
+      return parts[3]
+        ? { name: "repo", org, repo: decodeURIComponent(parts[3]) }
+        : { name: "repos", org };
     default:
       return { name: "unknown", org, path: pathname };
   }
@@ -33,6 +39,10 @@ export function routePath(route: Route): string {
   switch (route.name) {
     case "overview":
       return `${BASE}/orgs/${route.org}/overview`;
+    case "repos":
+      return `${BASE}/orgs/${route.org}/repos`;
+    case "repo":
+      return `${BASE}/orgs/${route.org}/repos/${encodeURIComponent(route.repo)}`;
     case "unknown":
       return route.path;
   }
@@ -41,6 +51,16 @@ export function routePath(route: Route): string {
 /** Default landing path for an org. */
 export function defaultPath(org: string): string {
   return `${BASE}/orgs/${org}/overview`;
+}
+
+/** Path to the repositories list for an org. */
+export function reposPath(org: string): string {
+  return `${BASE}/orgs/${org}/repos`;
+}
+
+/** Path to a single repo's detail. */
+export function repoPath(org: string, repo: string): string {
+  return `${BASE}/orgs/${org}/repos/${encodeURIComponent(repo)}`;
 }
 
 /** SPA navigation (history push) + notify listeners. */

@@ -20,7 +20,8 @@ use crate::app::AppState;
 use crate::auth::{Principal, Role};
 use crate::error::ServerError;
 use crate::oidc::{self, Pkce};
-use crate::storage::{AuditEntry, IngestEvent};
+use crate::review;
+use crate::storage::{ActivityGroup, AuditEntry, IngestEvent};
 
 /// Name of the session cookie set after a successful SSO login.
 const SESSION_COOKIE: &str = "tellur_session";
@@ -621,6 +622,110 @@ pub async fn dashboard(
 pub struct DashboardParams {
     #[serde(default)]
     pub limit: Option<u32>,
+}
+
+// ─── Activity time-series + repo summary (dashboard D1) ───────────────────────
+
+/// Parse a range like `7d`/`30d`/`90d` or a bare day count into a day count,
+/// clamped to 1..=365 (default 30).
+fn parse_range_days(raw: Option<&str>) -> i64 {
+    let parsed = raw
+        .map(|s| s.trim().trim_end_matches('d'))
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(30);
+    parsed.clamp(1, 365)
+}
+
+/// Query for the activity time-series.
+#[derive(Debug, Deserialize)]
+pub struct ActivityParams {
+    #[serde(default)]
+    pub range: Option<String>,
+    #[serde(default, rename = "group_by")]
+    pub group_by: Option<String>,
+}
+
+/// `GET /v1/orgs/{org}/activity?range=30d&group_by=type|actor` — daily event
+/// counts for the dashboard trend chart (viewer+).
+pub async fn activity(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    principal: Principal,
+    Query(params): Query<ActivityParams>,
+) -> Result<Json<Value>, ServerError> {
+    ensure_same_org(&state, &principal, &org_id, "activity")?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let days = parse_range_days(params.range.as_deref());
+    let group = match params.group_by.as_deref() {
+        Some("actor") => ActivityGroup::Actor,
+        _ => ActivityGroup::Type,
+    };
+    let group_label = match group {
+        ActivityGroup::Actor => "actor",
+        ActivityGroup::Type => "type",
+    };
+    let since = (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
+    let buckets = run_blocking({
+        let store = state.store.clone();
+        let org = org_id.clone();
+        move || store.activity_by_day(&org, &since, group)
+    })
+    .await?;
+    Ok(Json(json!({
+        "schema": "tellur.server.activity.v1",
+        "org_id": org_id,
+        "range_days": days,
+        "group_by": group_label,
+        "buckets": buckets,
+    })))
+}
+
+/// `GET /v1/orgs/{org}/repos/{repo}` — single-repo summary: event-log facts plus
+/// line-level AI share and review coverage from attribution (viewer+).
+pub async fn repo_detail(
+    State(state): State<AppState>,
+    Path((org_id, repo)): Path<(String, String)>,
+    principal: Principal,
+) -> Result<Json<Value>, ServerError> {
+    ensure_same_org(&state, &principal, &org_id, "repo.detail")?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let repo = state
+        .store
+        .find_repo(&org_id, &repo)
+        .map_err(ServerError::Internal)?
+        .ok_or(ServerError::NotFound)?;
+    let (facts, attrs) = run_blocking({
+        let store = state.store.clone();
+        let org = org_id.clone();
+        let repo_id = repo.id.clone();
+        move || {
+            let facts = store.repo_facts(&org, &repo_id)?;
+            let attrs = store.list_attributions(&org, &repo_id)?;
+            Ok((facts, attrs))
+        }
+    })
+    .await?;
+    let stats = review::review_stats(&attrs);
+    Ok(Json(json!({
+        "schema": "tellur.server.repo.v1",
+        "id": repo.id,
+        "name": repo.name,
+        "event_count": facts.event_count,
+        "contributors": facts.contributors,
+        "last_activity": facts.last_activity,
+        "attributed_files": attrs.len(),
+        "lines": {
+            "total_attributed": stats.total_attributed_lines,
+            "ai": stats.ai_lines,
+            "reviewed_ai": stats.reviewed_ai_lines,
+        },
+        "ai_share": stats.ai_share(),
+        "review_coverage": stats.review_coverage(),
+    })))
 }
 
 // ─── Central policy distribution ─────────────────────────────────────────────

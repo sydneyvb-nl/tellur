@@ -18,6 +18,7 @@ pub mod jobs;
 pub mod metrics;
 pub mod oidc;
 pub mod ratelimit;
+pub mod review;
 pub mod scim;
 pub mod storage;
 
