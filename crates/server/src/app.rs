@@ -33,7 +33,7 @@ pub const MAX_BODY_BYTES: usize = 1024 * 1024;
 /// Build the HTTP router. Operational endpoints (`/healthz`, `/readyz`) need no
 /// auth; `/v1/*` endpoints authenticate and scope to the caller's org.
 pub fn build_router(state: AppState) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/metrics", get(metrics))
@@ -106,7 +106,14 @@ pub fn build_router(state: AppState) -> Router {
                 .put(crate::scim::replace_group)
                 .patch(crate::scim::patch_group)
                 .delete(crate::scim::delete_group),
-        )
+        );
+
+    // Team dashboard SPA at /app (same-origin; embedded assets). Behind the
+    // `dashboard` feature so a minimal API-only build can omit it.
+    #[cfg(feature = "dashboard")]
+    let router = router.merge(crate::dashboard::router());
+
+    router
         // Cap request bodies (defense against unrestricted resource consumption).
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)

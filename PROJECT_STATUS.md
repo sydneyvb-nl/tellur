@@ -1,11 +1,30 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-06 (durable jobs + SCIM groups + dashboard; on feature branch)
+**Last updated:** 2026-06-08 (team dashboard D0 — foundation; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-08 — Team dashboard D0 (foundation).** On branch
+> `feat/dashboard-d0-foundation`, executing `docs/proposals/TEAM_DASHBOARD_UI.md`
+> phase D0. The hub now serves a real **team dashboard SPA at `/app`**: Svelte 5
+> + TypeScript source in `crates/server/ui/`, built with Vite, embedded into the
+> binary via `rust-embed` behind the default-on `dashboard` Cargo feature, served
+> same-origin with SPA client-routing fallback (`/app/*` → `index.html`; unknown
+> `/v1` still 404s; hashed assets cached immutably, HTML `no-cache`). `build.rs`
+> creates an empty `ui/dist` so a plain `cargo build` still compiles (serving a
+> placeholder); the new `dashboard` CI job and the Docker build compile the real
+> SPA and embed it. The SPA ships AppShell (rail + topbar), org-scoped routing
+> (`/app/orgs/:org/...`), `/v1/me` bootstrap + 401→`/auth/login?return=` redirect,
+> the design tokens from the plan (Tellur-green accent, dark default + light), and
+> an **Overview** screen on the existing `GET /v1/orgs/{org}/dashboard` payload
+> (KPIs, repos, recent activity, event types). FSL like the rest of the server.
+> Verified: Rust `tests/dashboard_routes.rs` (4) + SPA vitest (12, router/format)
+> + `pnpm check`/`build` clean; workspace clippy + cargo-deny green; SPA bundle
+> ~18KB gzip. Next: D1 (activity time-series A1 + repo summary A3 + repos
+> screens). Decisions §12 of the plan are resolved.
+>
 > **2026-06-06 — Hub: durable jobs + SCIM groups + dashboard coupling.** On
 > branch `feat/server-jobs-scim-groups-dashboard` (one PR, three features).
 > **Durable job queue** (`jobs` module + `job` table, schema v12): org exports

@@ -38,6 +38,14 @@ r2d2_postgres = "0.18"
 ureq = { version = "2", features = ["tls", "json"] }
 base64 = "0.22"
 sha2 = "0.10"
+# Team dashboard SPA: embed built assets into the binary (feature `dashboard`).
+rust-embed = { version = "8", optional = true }
+mime_guess = { version = "2", optional = true }
+
+[features]
+default = ["dashboard"]
+# Serve the team dashboard SPA from `/app` (assets embedded from `ui/dist`).
+dashboard = ["dep:rust-embed", "dep:mime_guess"]
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

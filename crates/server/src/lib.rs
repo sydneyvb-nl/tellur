@@ -11,6 +11,8 @@ pub mod api;
 pub mod app;
 pub mod auth;
 pub mod config;
+#[cfg(feature = "dashboard")]
+pub mod dashboard;
 pub mod error;
 pub mod jobs;
 pub mod metrics;

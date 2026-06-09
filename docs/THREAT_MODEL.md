@@ -32,7 +32,12 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    scoped — the worker-produced result carries org data); per-repo
    `.../export/slsa|spdx` remain synchronous (admin). Operational
    endpoints (`/healthz`, `/readyz`, `/metrics`) are unauthenticated but expose
-   only liveness and aggregate counters — no tenant data. **SSO endpoints**
+   only liveness and aggregate counters — no tenant data. The **team dashboard
+   SPA** is served as static assets at `/app/*` (unauthenticated, but they carry
+   no tenant data — the browser fetches all data from the authenticated `/v1`
+   API with the first-party SSO session cookie, same-origin, so no CORS and no
+   token in the URL). A strict same-origin CSP (`default-src 'self'`, no remote
+   origins, self-hosted fonts) applies to `/app`. **SSO endpoints**
    (`/auth/login`, `/auth/callback`, `/auth/logout`) are unauthenticated entry
    points for the browser OIDC flow (404 when SSO is not configured). **SCIM
    provisioning** (`/scim/v2/Users`) authenticates with a dedicated, org-scoped
