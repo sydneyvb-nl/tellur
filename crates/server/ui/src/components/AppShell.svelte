@@ -1,6 +1,12 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import { defaultPath, reposPath, sessionsPath } from "../lib/router";
+  import {
+    auditPath,
+    defaultPath,
+    exportsPath,
+    reposPath,
+    sessionsPath,
+  } from "../lib/router";
 
   let {
     org,
@@ -10,12 +16,17 @@
   }: { org: string; role: string; active?: string; children: Snippet } = $props();
 
   // Items without a ready screen are shown disabled until their phase lands.
-  const nav = $derived([
-    { key: "overview", label: "Overview", href: defaultPath(org), ready: true },
-    { key: "repos", label: "Repositories", href: reposPath(org), ready: true },
-    { key: "sessions", label: "Sessions", href: sessionsPath(org), ready: true },
-    { key: "policies", label: "Policies", href: "#", ready: false },
-  ]);
+  // `admin` items are hidden entirely for non-admins (the API enforces this too).
+  const nav = $derived(
+    [
+      { key: "overview", label: "Overview", href: defaultPath(org), ready: true, admin: false },
+      { key: "repos", label: "Repositories", href: reposPath(org), ready: true, admin: false },
+      { key: "sessions", label: "Sessions", href: sessionsPath(org), ready: true, admin: false },
+      { key: "exports", label: "Exports", href: exportsPath(org), ready: true, admin: true },
+      { key: "audit", label: "Audit log", href: auditPath(org), ready: true, admin: true },
+      { key: "policies", label: "Policies", href: "#", ready: false, admin: true },
+    ].filter((item) => !item.admin || role === "admin"),
+  );
 
   // Sub-screens map to their section for nav highlighting.
   const activeKey = $derived(

@@ -873,6 +873,118 @@ pub async fn session_detail(
     })))
 }
 
+// ─── Audit read + jobs list (dashboard D3) ───────────────────────────────────
+
+/// Query for the audit read.
+#[derive(Debug, Deserialize)]
+pub struct AuditQuery {
+    #[serde(default)]
+    pub actor: Option<String>,
+    #[serde(default)]
+    pub action: Option<String>,
+    #[serde(default)]
+    pub range: Option<String>,
+    /// Cursor: return rows with `seq` strictly below this (keyset pagination).
+    #[serde(default)]
+    pub before: Option<i64>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+/// `GET /v1/orgs/{org}/audit` — paginated, filterable read of the org's
+/// tamper-evident audit log, newest first (admin only — audit detail can name
+/// members and actions). Keyset paginate with `before=<seq>`.
+///
+/// On the first page (no `before` cursor) the response also carries
+/// `chain_intact`: whether the global hash chain still verifies. That check is
+/// O(n) over the whole audit log, so it is computed only when a cursor is absent.
+pub async fn list_audit(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    principal: Principal,
+    Query(q): Query<AuditQuery>,
+) -> Result<Json<Value>, ServerError> {
+    ensure_org_role(&state, &principal, &org_id, Role::Admin, "audit.read")?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let since = q.range.as_deref().map(|r| {
+        (chrono::Utc::now() - chrono::Duration::days(parse_range_days(Some(r)))).to_rfc3339()
+    });
+    let limit = q.limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE);
+    let verify = q.before.is_none();
+    let (records, chain_intact) = run_blocking({
+        let store = state.store.clone();
+        let org = org_id.clone();
+        let actor = q.actor.clone();
+        let action = q.action.clone();
+        move || {
+            let records = store.list_audit(
+                &org,
+                actor.as_deref(),
+                action.as_deref(),
+                since.as_deref(),
+                q.before,
+                limit,
+            )?;
+            let chain_intact = if verify {
+                Some(store.verify_audit_chain()?)
+            } else {
+                None
+            };
+            Ok((records, chain_intact))
+        }
+    })
+    .await?;
+    // Next cursor is the oldest seq in this page (rows are newest-first).
+    let next = if records.len() as u32 == limit {
+        records.last().map(|r| r.seq)
+    } else {
+        None
+    };
+    Ok(Json(json!({
+        "schema": "tellur.server.audit.v1",
+        "org_id": org_id,
+        "chain_intact": chain_intact,
+        "next_before": next,
+        "records": records,
+    })))
+}
+
+/// Generic `?limit=` page query.
+#[derive(Debug, Deserialize)]
+pub struct PageQuery {
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+/// `GET /v1/orgs/{org}/jobs` — list the org's durable jobs, newest first, for the
+/// Exports history table (admin only — results carry org data). Results are not
+/// inlined here; poll `GET /v1/orgs/{org}/jobs/{id}` for a completed job's output.
+pub async fn list_jobs(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    principal: Principal,
+    Query(params): Query<PageQuery>,
+) -> Result<Json<Value>, ServerError> {
+    ensure_org_role(&state, &principal, &org_id, Role::Admin, "jobs.list")?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let limit = params.limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE);
+    let jobs = run_blocking({
+        let store = state.store.clone();
+        let org = org_id.clone();
+        move || store.list_jobs(&org, limit)
+    })
+    .await?;
+    Ok(Json(json!({
+        "schema": "tellur.server.jobs.v1",
+        "org_id": org_id,
+        "jobs": jobs,
+    })))
+}
+
 // ─── Central policy distribution ─────────────────────────────────────────────
 
 /// `PUT /v1/orgs/{org}/policies/{name}` — upload a policy YAML doc (admin only).

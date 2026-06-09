@@ -342,3 +342,132 @@ async fn sessions_repo_filter_and_tenant_scope() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+// ─── D3: audit read (A7) + jobs list ─────────────────────────────────────────
+
+/// Mint an admin token in an org via the Store trait (setup only gives a viewer).
+fn admin_token(state: &AppState, org: &str) -> String {
+    let m = state.store.create_member(org, "adm", Role::Admin).unwrap();
+    state.store.create_token(&m).unwrap().plaintext
+}
+
+#[tokio::test]
+async fn audit_read_filters_paginates_and_verifies_chain() {
+    let s = setup();
+    let admin_a = admin_token(&s.state, &s.org_a);
+    // Seed a handful of audit entries for org A (plus one for another org that
+    // must never leak in).
+    for i in 0..5 {
+        s.state
+            .store
+            .append_audit(&tellur_server::storage::AuditEntry {
+                org_id: Some(s.org_a.clone()),
+                actor_member_id: Some(if i % 2 == 0 { "alice" } else { "bob" }.into()),
+                action: "policy.update".into(),
+                detail: format!("n{i}"),
+            })
+            .unwrap();
+    }
+    let org_b = s.state.store.create_org("Bdiff").unwrap().id;
+    s.state
+        .store
+        .append_audit(&tellur_server::storage::AuditEntry {
+            org_id: Some(org_b.clone()),
+            actor_member_id: Some("eve".into()),
+            action: "policy.update".into(),
+            detail: "other-org".into(),
+        })
+        .unwrap();
+
+    // First page (no cursor): newest-first, chain verified, tenant-scoped.
+    let (status, body) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/audit?limit=2", s.org_a),
+        Some(&admin_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["chain_intact"], true);
+    let recs = body["records"].as_array().unwrap();
+    assert_eq!(recs.len(), 2);
+    assert_eq!(recs[0]["detail"], "n4");
+    assert_eq!(recs[1]["detail"], "n3");
+    // No org-B row leaked.
+    assert!(recs.iter().all(|r| r["detail"] != "other-org"));
+
+    // Keyset paginate with the returned cursor; chain check omitted on later pages.
+    let cursor = body["next_before"].as_i64().unwrap();
+    let (status, page2) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/audit?limit=2&before={cursor}", s.org_a),
+        Some(&admin_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page2["chain_intact"].is_null());
+    assert_eq!(page2["records"][0]["detail"], "n2");
+
+    // Actor filter.
+    let (_, filtered) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/audit?actor=alice", s.org_a),
+        Some(&admin_a),
+    )
+    .await;
+    let fr = filtered["records"].as_array().unwrap();
+    assert!(!fr.is_empty());
+    assert!(fr.iter().all(|r| r["actor_member_id"] == "alice"));
+}
+
+#[tokio::test]
+async fn audit_read_requires_admin() {
+    let s = setup();
+    let (status, _) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/audit", s.org_a),
+        Some(&s.viewer_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn jobs_list_admin_only_and_tenant_scoped() {
+    let s = setup();
+    let admin_a = admin_token(&s.state, &s.org_a);
+    s.state
+        .store
+        .enqueue_job(&s.org_a, tellur_server::jobs::KIND_EXPORT_AUDIT)
+        .unwrap();
+    s.state
+        .store
+        .enqueue_job(&s.org_a, tellur_server::jobs::KIND_EXPORT_EVENTS)
+        .unwrap();
+
+    let (status, body) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/jobs", s.org_a),
+        Some(&admin_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["jobs"].as_array().unwrap().len(), 2);
+
+    // Viewer forbidden.
+    let (status, _) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/jobs", s.org_a),
+        Some(&s.viewer_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Cross-org caller forbidden.
+    let (status, _) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/jobs", s.org_a),
+        Some(&s.admin_b),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
