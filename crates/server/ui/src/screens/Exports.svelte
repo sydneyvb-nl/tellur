@@ -100,11 +100,16 @@
 
 <h1>Exports</h1>
 <p class="muted">
-  Generate a portable snapshot of your org's activity log or tamper-evident
-  audit trail. Exports run as background jobs; large orgs may take a moment.
+  Generate a portable snapshot of your org's activity log, tamper-evident audit
+  trail, or a full compliance <strong>evidence pack</strong> (every repo's SLSA
+  provenance + latest policy compliance + audit-chain status). Exports run as
+  background jobs; large orgs may take a moment.
 </p>
 
 <div class="actions">
+  <button class="primary" onclick={() => start("evidence")} disabled={starting}>
+    Evidence pack
+  </button>
   <button onclick={() => start("events")} disabled={starting}>Export events</button>
   <button onclick={() => start("audit")} disabled={starting}>Export audit log</button>
   {#if notice}<span class="notice">{notice}</span>{/if}
@@ -235,6 +240,12 @@
     border-radius: var(--radius-control);
     padding: 6px 12px;
     cursor: pointer;
+  }
+  button.primary {
+    background: var(--accent);
+    color: #0b0f13;
+    border-color: var(--accent);
+    font-weight: 600;
   }
   button.link {
     background: none;

@@ -1088,7 +1088,7 @@ pub async fn enqueue_compliance(
     }
     let job_id = state
         .store
-        .enqueue_job(&org_id, crate::jobs::KIND_COMPLIANCE)
+        .enqueue_job(&org_id, crate::jobs::KIND_COMPLIANCE, None)
         .map_err(ServerError::Internal)?;
     state
         .store
@@ -1323,7 +1323,7 @@ async fn enqueue_export(
     }
     let job_id = state
         .store
-        .enqueue_job(org_id, kind)
+        .enqueue_job(org_id, kind, None)
         .map_err(ServerError::Internal)?;
     state.metrics.inc_export();
     state
@@ -1355,6 +1355,24 @@ pub async fn export_events(
         &org_id,
         crate::jobs::KIND_EXPORT_EVENTS,
         "export.events",
+    )
+    .await
+}
+
+/// `POST /v1/orgs/{org}/export/evidence` — enqueue an org-wide evidence pack:
+/// every repo's SLSA provenance + the latest compliance snapshot + the audit
+/// chain's verification state, in one downloadable job result (admin only).
+pub async fn export_evidence(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    principal: Principal,
+) -> Result<Response, ServerError> {
+    enqueue_export(
+        &state,
+        &principal,
+        &org_id,
+        crate::jobs::KIND_EXPORT_EVIDENCE,
+        "export.evidence",
     )
     .await
 }
@@ -1563,6 +1581,78 @@ pub async fn export_spdx(
     serde_json::to_value(&spdx)
         .map(Json)
         .map_err(|e| ServerError::Internal(e.into()))
+}
+
+/// `POST /v1/orgs/{org}/repos/{repo}/export/slsa` — enqueue the SLSA export as a
+/// durable job (A13); for large repos the synchronous `GET` can be slow. Same
+/// admin/per-repo-admin authorization as the synchronous form.
+pub async fn export_slsa_job(
+    State(state): State<AppState>,
+    Path((org_id, repo)): Path<(String, String)>,
+    principal: Principal,
+    Query(ctx): Query<ExportContext>,
+) -> Result<Response, ServerError> {
+    enqueue_repo_export(
+        &state,
+        &principal,
+        &org_id,
+        &repo,
+        &ctx,
+        crate::jobs::KIND_EXPORT_SLSA,
+        "export.slsa.job",
+    )
+    .await
+}
+
+/// `POST /v1/orgs/{org}/repos/{repo}/export/spdx` — enqueue the SPDX export as a
+/// durable job (A13). See [`export_slsa_job`].
+pub async fn export_spdx_job(
+    State(state): State<AppState>,
+    Path((org_id, repo)): Path<(String, String)>,
+    principal: Principal,
+    Query(ctx): Query<ExportContext>,
+) -> Result<Response, ServerError> {
+    enqueue_repo_export(
+        &state,
+        &principal,
+        &org_id,
+        &repo,
+        &ctx,
+        crate::jobs::KIND_EXPORT_SPDX,
+        "export.spdx.job",
+    )
+    .await
+}
+
+/// Authorize (admin / per-repo admin) and enqueue a per-repo export job carrying
+/// the repo id + optional build context as params. Reuses the synchronous
+/// export's authz (including its 404-vs-403 leak protection).
+async fn enqueue_repo_export(
+    state: &AppState,
+    principal: &Principal,
+    org_id: &str,
+    repo_name: &str,
+    ctx: &ExportContext,
+    kind: &str,
+    action: &str,
+) -> Result<Response, ServerError> {
+    let (repo, _attrs) = export_attributions(state, principal, org_id, repo_name, action).await?;
+    let params = json!({
+        "repo_id": repo.id,
+        "repo_url": ctx.repo_url,
+        "commit": ctx.commit,
+    })
+    .to_string();
+    let job_id = state
+        .store
+        .enqueue_job(org_id, kind, Some(&params))
+        .map_err(ServerError::Internal)?;
+    let body = json!({
+        "job_id": job_id,
+        "status": "queued",
+        "poll": format!("/v1/orgs/{org_id}/jobs/{job_id}"),
+    });
+    Ok((StatusCode::ACCEPTED, Json(body)).into_response())
 }
 
 /// Shared admin-authz + tenant + rate-limit + fetch for the compliance exports.

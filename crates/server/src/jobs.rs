@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use crate::storage::{ComplianceSnapshot, Job, Store};
@@ -19,6 +19,24 @@ use tellur_core::schema::types::{Origin, RiskLevel};
 pub const KIND_EXPORT_EVENTS: &str = "export.events";
 pub const KIND_EXPORT_AUDIT: &str = "export.audit";
 pub const KIND_COMPLIANCE: &str = "policy.compliance";
+/// Per-repo SLSA / SPDX exports run as durable jobs for large repos (A13).
+pub const KIND_EXPORT_SLSA: &str = "export.slsa";
+pub const KIND_EXPORT_SPDX: &str = "export.spdx";
+/// Org-wide evidence pack: every repo's SLSA + latest compliance + audit head.
+pub const KIND_EXPORT_EVIDENCE: &str = "export.evidence";
+
+/// Builder id stamped into generated SLSA provenance.
+const BUILDER_ID: &str = "https://tellur.dev/hub";
+
+/// Arguments for a per-repo export job (JSON in `job.params`).
+#[derive(serde::Deserialize)]
+pub struct RepoExportParams {
+    pub repo_id: String,
+    #[serde(default)]
+    pub repo_url: Option<String>,
+    #[serde(default)]
+    pub commit: Option<String>,
+}
 
 /// Policy name evaluated for compliance snapshots (A8). The org's `default`
 /// policy is the convention; if absent, the compliance run is a no-op.
@@ -68,8 +86,76 @@ fn run_job(store: &Arc<dyn Store>, job: &Job) -> Result<Value> {
             }))
         }
         KIND_COMPLIANCE => run_compliance(store, &job.org_id),
+        KIND_EXPORT_SLSA | KIND_EXPORT_SPDX => run_repo_export(store, job),
+        KIND_EXPORT_EVIDENCE => run_evidence(store, &job.org_id),
         other => bail!("unknown job kind: {other}"),
     }
+}
+
+/// Generate a single repo's SLSA provenance or SPDX SBOM (A13). The repo and
+/// optional build context come from the job's `params`.
+fn run_repo_export(store: &Arc<dyn Store>, job: &Job) -> Result<Value> {
+    let raw = job
+        .params
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("missing export params"))?;
+    let p: RepoExportParams = serde_json::from_str(raw).context("invalid export params")?;
+    let repo = store
+        .find_repo(&job.org_id, &p.repo_id)?
+        .ok_or_else(|| anyhow::anyhow!("repo not found: {}", p.repo_id))?;
+    let attrs = store.list_attributions(&job.org_id, &repo.id)?;
+    let repo_url = p
+        .repo_url
+        .unwrap_or_else(|| format!("tellur:repo/{}", repo.id));
+    let commit = p.commit.unwrap_or_else(|| "unknown".to_string());
+
+    let doc = if job.kind == KIND_EXPORT_SLSA {
+        serde_json::to_value(tellur_core::export::generate_slsa_provenance(
+            &repo_url, &commit, &attrs, BUILDER_ID,
+        ))?
+    } else {
+        serde_json::to_value(tellur_core::export::generate_spdx_sbom(
+            &repo.name, &repo_url, &commit, &attrs,
+        ))?
+    };
+    Ok(json!({
+        "schema": format!("tellur.server.{}.v1", job.kind),
+        "org_id": job.org_id,
+        "repo_id": repo.id,
+        "generated_at": chrono::Utc::now().to_rfc3339(),
+        "document": doc,
+    }))
+}
+
+/// Build an org-wide evidence pack: every repo's SLSA provenance, the latest
+/// per-repo compliance snapshot, and the audit chain's verification state. One
+/// downloadable bundle for an auditor.
+fn run_evidence(store: &Arc<dyn Store>, org_id: &str) -> Result<Value> {
+    let repos = store.list_repos(org_id)?;
+    let mut provenance = Vec::with_capacity(repos.len());
+    for repo in &repos {
+        let attrs = store.list_attributions(org_id, &repo.id)?;
+        let repo_url = format!("tellur:repo/{}", repo.id);
+        let slsa =
+            tellur_core::export::generate_slsa_provenance(&repo_url, "unknown", &attrs, BUILDER_ID);
+        provenance.push(json!({
+            "repo_id": repo.id,
+            "repo_name": repo.name,
+            "slsa": serde_json::to_value(slsa)?,
+        }));
+    }
+    let compliance = store.latest_compliance(org_id)?;
+    let audit_chain_intact = store.verify_audit_chain()?;
+    let audit_entries = store.audit_len()?;
+    Ok(json!({
+        "schema": "tellur.server.evidence.v1",
+        "org_id": org_id,
+        "generated_at": chrono::Utc::now().to_rfc3339(),
+        "repos_evaluated": repos.len(),
+        "provenance": provenance,
+        "compliance": compliance,
+        "audit": { "chain_intact": audit_chain_intact, "entries": audit_entries },
+    }))
 }
 
 /// Evaluate the org's `default` policy against every repo's stored attribution

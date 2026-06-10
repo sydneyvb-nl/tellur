@@ -404,6 +404,76 @@ async fn overview_is_tenant_scoped() {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
+// ─── Evidence exports (A13: per-repo SLSA/SPDX jobs + org evidence pack) ──────
+
+#[tokio::test]
+async fn evidence_pack_bundles_provenance_and_audit() {
+    let s = setup();
+    let admin_a = admin_token(&s.state, &s.org_a);
+    let (status, enq) = post(
+        &s.state,
+        &format!("/v1/orgs/{}/export/evidence", s.org_a),
+        Some(&admin_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let job_id = enq["job_id"].as_str().unwrap().to_string();
+    assert!(tellur_server::jobs::process_one(&s.state.store).unwrap());
+
+    let (status, body) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/jobs/{job_id}", s.org_a),
+        Some(&admin_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "completed");
+    let r = &body["result"];
+    assert_eq!(r["schema"], "tellur.server.evidence.v1");
+    assert_eq!(r["repos_evaluated"], 1);
+    assert_eq!(r["provenance"][0]["repo_name"], "app");
+    assert!(r["provenance"][0]["slsa"].is_object());
+    assert_eq!(r["audit"]["chain_intact"], true);
+}
+
+#[tokio::test]
+async fn per_repo_slsa_export_runs_as_a_job() {
+    let s = setup();
+    let admin_a = admin_token(&s.state, &s.org_a);
+    let (status, enq) = post(
+        &s.state,
+        &format!("/v1/orgs/{}/repos/app/export/slsa", s.org_a),
+        Some(&admin_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let job_id = enq["job_id"].as_str().unwrap().to_string();
+    assert!(tellur_server::jobs::process_one(&s.state.store).unwrap());
+
+    let (status, body) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/jobs/{job_id}", s.org_a),
+        Some(&admin_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "completed");
+    assert_eq!(body["result"]["schema"], "tellur.server.export.slsa.v1");
+    assert!(body["result"]["document"].is_object());
+}
+
+#[tokio::test]
+async fn evidence_export_requires_admin() {
+    let s = setup();
+    let (status, _) = post(
+        &s.state,
+        &format!("/v1/orgs/{}/export/evidence", s.org_a),
+        Some(&s.viewer_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
 // ─── D3: audit read (A7) + jobs list ─────────────────────────────────────────
 
 /// Mint an admin token in an org via the Store trait (setup only gives a viewer).
@@ -498,11 +568,11 @@ async fn jobs_list_admin_only_and_tenant_scoped() {
     let admin_a = admin_token(&s.state, &s.org_a);
     s.state
         .store
-        .enqueue_job(&s.org_a, tellur_server::jobs::KIND_EXPORT_AUDIT)
+        .enqueue_job(&s.org_a, tellur_server::jobs::KIND_EXPORT_AUDIT, None)
         .unwrap();
     s.state
         .store
-        .enqueue_job(&s.org_a, tellur_server::jobs::KIND_EXPORT_EVENTS)
+        .enqueue_job(&s.org_a, tellur_server::jobs::KIND_EXPORT_EVENTS, None)
         .unwrap();
 
     let (status, body) = get(

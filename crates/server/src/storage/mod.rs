@@ -171,6 +171,9 @@ pub struct Job {
     #[serde(skip)]
     pub result: Option<String>,
     pub error: Option<String>,
+    /// Opaque JSON arguments for the job (e.g. the repo + context for a per-repo
+    /// export). `None` for argument-less jobs like org event/audit exports.
+    pub params: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -567,7 +570,7 @@ pub trait Store: Send + Sync {
     // ─── Durable job queue ───────────────────────────────────────────────────
 
     /// Enqueue a job for an org; returns the new job id.
-    fn enqueue_job(&self, org_id: &str, kind: &str) -> Result<String>;
+    fn enqueue_job(&self, org_id: &str, kind: &str, params: Option<&str>) -> Result<String>;
 
     /// Atomically claim the oldest `queued` job (marking it `running`), across
     /// all orgs. Returns `None` when the queue is empty.

@@ -516,9 +516,12 @@ sync**: a group whose `displayName` is `tellur-admin`, `tellur-contributor`, or
 **Durable exports & dashboard.** Large org exports run as background jobs:
 `POST /v1/orgs/{org}/export/events` (or `/audit`) returns `202` with a `job_id`;
 poll `GET /v1/orgs/{org}/jobs/{id}` until `completed` to fetch the result, or list
-an org's job history with `GET /v1/orgs/{org}/jobs` (admin). Admins can also read
-the tamper-evident audit log directly with
-`GET /v1/orgs/{org}/audit[?actor=&action=&range=&before=&limit=]` (paginated,
+an org's job history with `GET /v1/orgs/{org}/jobs` (admin). Per-repo SLSA/SPDX
+can also run as jobs for large repos (`POST .../repos/{repo}/export/slsa|spdx`),
+and `POST /v1/orgs/{org}/export/evidence` produces a full **evidence pack** (every
+repo's SLSA provenance + latest policy compliance + audit-chain status) in one
+downloadable bundle. Admins can also read the tamper-evident audit log directly
+with `GET /v1/orgs/{org}/audit[?actor=&action=&range=&before=&limit=]` (paginated,
 newest-first; the first page reports `chain_intact` for the hash chain).
 
 **Policy compliance & People/Access** (admin): `POST /v1/orgs/{org}/policies/compliance`

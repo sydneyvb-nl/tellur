@@ -75,11 +75,11 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/v1/orgs/{org_id}/repos/{repo}/export/slsa",
-            get(crate::api::export_slsa),
+            get(crate::api::export_slsa).post(crate::api::export_slsa_job),
         )
         .route(
             "/v1/orgs/{org_id}/repos/{repo}/export/spdx",
-            get(crate::api::export_spdx),
+            get(crate::api::export_spdx).post(crate::api::export_spdx_job),
         )
         .route("/v1/orgs/{org_id}/policies", get(crate::api::list_policies))
         .route(
@@ -93,6 +93,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/v1/orgs/{org_id}/export/audit",
             post(crate::api::export_audit),
+        )
+        .route(
+            "/v1/orgs/{org_id}/export/evidence",
+            post(crate::api::export_evidence),
         )
         .route("/v1/orgs/{org_id}/audit", get(crate::api::list_audit))
         .route("/v1/orgs/{org_id}/jobs", get(crate::api::list_jobs))
