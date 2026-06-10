@@ -172,7 +172,7 @@ impl Store for PostgresStore {
                  CREATE TABLE IF NOT EXISTS job (
                      id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES org(id),
                      kind TEXT NOT NULL, status TEXT NOT NULL,
-                     result TEXT, error TEXT,
+                     result TEXT, error TEXT, params TEXT,
                      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                  );
                  CREATE INDEX IF NOT EXISTS idx_job_status ON job(status, created_at);
@@ -205,7 +205,8 @@ impl Store for PostgresStore {
         // upgraded DB would otherwise be missing e.g. member.active).
         client
             .batch_execute(
-                "ALTER TABLE member ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
+                "ALTER TABLE job ADD COLUMN IF NOT EXISTS params TEXT;
+                 ALTER TABLE member ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
                  ALTER TABLE member_identity ADD COLUMN IF NOT EXISTS oidc_issuer TEXT;
                  ALTER TABLE member_identity ADD COLUMN IF NOT EXISTS external_id TEXT;
                  ALTER TABLE oidc_login ADD COLUMN IF NOT EXISTS browser_binding TEXT NOT NULL DEFAULT '';
@@ -215,7 +216,7 @@ impl Store for PostgresStore {
             .context("failed to apply column migrations")?;
         client
             .execute(
-                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '13')
+                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '14')
                  ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                 &[],
             )
@@ -1256,14 +1257,14 @@ impl Store for PostgresStore {
         Ok(n > 0)
     }
 
-    fn enqueue_job(&self, org_id: &str, kind: &str) -> Result<String> {
+    fn enqueue_job(&self, org_id: &str, kind: &str, job_params: Option<&str>) -> Result<String> {
         let id = ids::generate_id("job");
         let now = chrono::Utc::now().to_rfc3339();
         self.client()?
             .execute(
-                "INSERT INTO job (id, org_id, kind, status, created_at, updated_at)
-                 VALUES ($1, $2, $3, 'queued', $4, $4)",
-                &[&id, &org_id, &kind, &now],
+                "INSERT INTO job (id, org_id, kind, status, params, created_at, updated_at)
+                 VALUES ($1, $2, $3, 'queued', $4, $5, $5)",
+                &[&id, &org_id, &kind, &job_params, &now],
             )
             .context("failed to enqueue job")?;
         Ok(id)
@@ -1279,7 +1280,7 @@ impl Store for PostgresStore {
                  ORDER BY created_at ASC, id ASC
                  FOR UPDATE SKIP LOCKED LIMIT 1
              )
-             RETURNING id, org_id, kind, status, result, error, created_at, updated_at",
+             RETURNING id, org_id, kind, status, result, error, params, created_at, updated_at",
             &[&now],
         )?;
         Ok(row.map(|r| Job {
@@ -1289,8 +1290,9 @@ impl Store for PostgresStore {
             status: r.get(3),
             result: r.get(4),
             error: r.get(5),
-            created_at: r.get(6),
-            updated_at: r.get(7),
+            params: r.get(6),
+            created_at: r.get(7),
+            updated_at: r.get(8),
         }))
     }
 
@@ -1312,7 +1314,7 @@ impl Store for PostgresStore {
 
     fn get_job(&self, org_id: &str, job_id: &str) -> Result<Option<Job>> {
         let row = self.client()?.query_opt(
-            "SELECT id, org_id, kind, status, result, error, created_at, updated_at
+            "SELECT id, org_id, kind, status, result, error, params, created_at, updated_at
              FROM job WHERE org_id = $1 AND id = $2",
             &[&org_id, &job_id],
         )?;
@@ -1323,15 +1325,16 @@ impl Store for PostgresStore {
             status: r.get(3),
             result: r.get(4),
             error: r.get(5),
-            created_at: r.get(6),
-            updated_at: r.get(7),
+            params: r.get(6),
+            created_at: r.get(7),
+            updated_at: r.get(8),
         }))
     }
 
     fn list_jobs(&self, org_id: &str, limit: u32) -> Result<Vec<Job>> {
         let lim = limit as i64;
         let rows = self.client()?.query(
-            "SELECT id, org_id, kind, status, result, error, created_at, updated_at
+            "SELECT id, org_id, kind, status, result, error, params, created_at, updated_at
              FROM job WHERE org_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2",
             &[&org_id, &lim],
         )?;
@@ -1344,8 +1347,9 @@ impl Store for PostgresStore {
                 status: r.get(3),
                 result: r.get(4),
                 error: r.get(5),
-                created_at: r.get(6),
-                updated_at: r.get(7),
+                params: r.get(6),
+                created_at: r.get(7),
+                updated_at: r.get(8),
             })
             .collect())
     }

@@ -1088,7 +1088,7 @@ pub async fn enqueue_compliance(
     }
     let job_id = state
         .store
-        .enqueue_job(&org_id, crate::jobs::KIND_COMPLIANCE)
+        .enqueue_job(&org_id, crate::jobs::KIND_COMPLIANCE, None)
         .map_err(ServerError::Internal)?;
     state
         .store
@@ -1323,7 +1323,7 @@ async fn enqueue_export(
     }
     let job_id = state
         .store
-        .enqueue_job(org_id, kind)
+        .enqueue_job(org_id, kind, None)
         .map_err(ServerError::Internal)?;
     state.metrics.inc_export();
     state
@@ -1355,6 +1355,24 @@ pub async fn export_events(
         &org_id,
         crate::jobs::KIND_EXPORT_EVENTS,
         "export.events",
+    )
+    .await
+}
+
+/// `POST /v1/orgs/{org}/export/evidence` — enqueue an org-wide evidence pack:
+/// every repo's SLSA provenance + the latest compliance snapshot + the audit
+/// chain's verification state, in one downloadable job result (admin only).
+pub async fn export_evidence(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    principal: Principal,
+) -> Result<Response, ServerError> {
+    enqueue_export(
+        &state,
+        &principal,
+        &org_id,
+        crate::jobs::KIND_EXPORT_EVIDENCE,
+        "export.evidence",
     )
     .await
 }
@@ -1563,6 +1581,99 @@ pub async fn export_spdx(
     serde_json::to_value(&spdx)
         .map(Json)
         .map_err(|e| ServerError::Internal(e.into()))
+}
+
+/// `POST /v1/orgs/{org}/repos/{repo}/export/slsa` — enqueue the SLSA export as a
+/// durable job (A13); for large repos the synchronous `GET` can be slow. Org
+/// admin only — unlike the synchronous `GET` (which allows a per-repo admin),
+/// the result is read back through `GET .../jobs/{id}`, which is org-admin-scoped,
+/// so the enqueuer must be an org admin to retrieve it.
+pub async fn export_slsa_job(
+    State(state): State<AppState>,
+    Path((org_id, repo)): Path<(String, String)>,
+    principal: Principal,
+    Query(ctx): Query<ExportContext>,
+) -> Result<Response, ServerError> {
+    enqueue_repo_export(
+        &state,
+        &principal,
+        &org_id,
+        &repo,
+        &ctx,
+        crate::jobs::KIND_EXPORT_SLSA,
+        "export.slsa.job",
+    )
+    .await
+}
+
+/// `POST /v1/orgs/{org}/repos/{repo}/export/spdx` — enqueue the SPDX export as a
+/// durable job (A13). See [`export_slsa_job`].
+pub async fn export_spdx_job(
+    State(state): State<AppState>,
+    Path((org_id, repo)): Path<(String, String)>,
+    principal: Principal,
+    Query(ctx): Query<ExportContext>,
+) -> Result<Response, ServerError> {
+    enqueue_repo_export(
+        &state,
+        &principal,
+        &org_id,
+        &repo,
+        &ctx,
+        crate::jobs::KIND_EXPORT_SPDX,
+        "export.spdx.job",
+    )
+    .await
+}
+
+/// Authorize (**org admin**) and enqueue a per-repo export job carrying the repo
+/// id + optional build context as params. Org admin — not a per-repo grant —
+/// because the result is polled via the org-admin-scoped `GET .../jobs/{id}`; a
+/// per-repo admin could enqueue but never read it. A missing repo is disclosed
+/// as 404 only after the admin check, so existence is not leaked to non-admins.
+async fn enqueue_repo_export(
+    state: &AppState,
+    principal: &Principal,
+    org_id: &str,
+    repo_name: &str,
+    ctx: &ExportContext,
+    kind: &str,
+    action: &str,
+) -> Result<Response, ServerError> {
+    ensure_org_role(state, principal, org_id, Role::Admin, action)?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let repo = state
+        .store
+        .find_repo(org_id, repo_name)
+        .map_err(ServerError::Internal)?
+        .ok_or(ServerError::NotFound)?;
+    let params = json!({
+        "repo_id": repo.id,
+        "repo_url": ctx.repo_url,
+        "commit": ctx.commit,
+    })
+    .to_string();
+    let job_id = state
+        .store
+        .enqueue_job(org_id, kind, Some(&params))
+        .map_err(ServerError::Internal)?;
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id.to_string()),
+            actor_member_id: Some(principal.member_id.clone()),
+            action: action.to_string(),
+            detail: format!("repo={} job={job_id}", repo.id),
+        })
+        .map_err(ServerError::Internal)?;
+    let body = json!({
+        "job_id": job_id,
+        "status": "queued",
+        "poll": format!("/v1/orgs/{org_id}/jobs/{job_id}"),
+    });
+    Ok((StatusCode::ACCEPTED, Json(body)).into_response())
 }
 
 /// Shared admin-authz + tenant + rate-limit + fetch for the compliance exports.

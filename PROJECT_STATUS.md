@@ -1,10 +1,27 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-10 (dashboard: composed /overview (A9) + density toggle; on feature branch)
+**Last updated:** 2026-06-10 (evidence exports: A13 job-backed SLSA/SPDX + org evidence pack; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
+
+> **2026-06-10 — Evidence exports (A13 + org evidence pack).** On branch
+> `feat/evidence-exports`. The durable-job queue gains a `params` column (schema
+> v14, SQLite + PG) so jobs can carry arguments. **A13**: per-repo SLSA/SPDX now
+> run as durable jobs — `POST /v1/orgs/{org}/repos/{repo}/export/slsa|spdx`
+> (admin / per-repo-admin) enqueue `KIND_EXPORT_SLSA|SPDX` with `{repo_id,
+> repo_url?, commit?}` params; the synchronous `GET` forms stay. **Evidence
+> pack**: `POST /v1/orgs/{org}/export/evidence` (admin) enqueues
+> `KIND_EXPORT_EVIDENCE`, a worker job that bundles every repo's SLSA provenance
+> + the latest compliance snapshots + the audit chain's verification state into
+> one downloadable result. The Exports console gets a primary "Evidence pack"
+> action (reuses the existing job-poll + download). Verified: full workspace
+> tests (new `evidence_pack_*`, `per_repo_slsa_export_*` incl. admin-only; jobs
+> param round-trip; PG parity), SPA 36 vitest + svelte-check (0/0) + build;
+> clippy -D warnings + cargo-deny green; `cargo build --features dashboard`
+> embeds. Remaining: full i18n, Playwright E2E, A12 (opt-in full-source gutter),
+> backup/retention.
 
 > **2026-06-10 — Dashboard: composed `/overview` (A9) + density toggle.** On
 > branch `feat/dashboard-overview-density`. Two bundled items. **A9**: new

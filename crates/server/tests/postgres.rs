@@ -424,7 +424,7 @@ fn full_store_surface() {
     );
 
     // ── Durable jobs ──────────────────────────────────────────────────────────
-    let job_id = store.enqueue_job(&org_a.id, "export.events").unwrap();
+    let job_id = store.enqueue_job(&org_a.id, "export.events", None).unwrap();
     let claimed = store.claim_next_job().unwrap().unwrap();
     assert_eq!(claimed.id, job_id);
     assert_eq!(claimed.status, "running");

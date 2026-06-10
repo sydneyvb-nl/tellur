@@ -169,7 +169,7 @@ export interface Job {
   updated_at: string;
 }
 
-export type ExportKind = "events" | "audit";
+export type ExportKind = "events" | "audit" | "evidence";
 
 export interface OverviewRepo {
   id: string;

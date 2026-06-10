@@ -18,7 +18,7 @@ use super::{
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
-const SCHEMA_VERSION: &str = "13";
+const SCHEMA_VERSION: &str = "14";
 
 /// A SQLite-backed store. The connection is behind a `Mutex` so the store is
 /// `Send + Sync` and usable as `Arc<dyn Store>`.
@@ -71,7 +71,10 @@ fn split_csv(s: Option<String>) -> Vec<String> {
 /// Add a column to a table if it is not already present (idempotent migration).
 /// Table/column/definition are always internal constants, never user input.
 fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
-    debug_assert!(matches!(table, "member" | "member_identity" | "oidc_login"));
+    debug_assert!(matches!(
+        table,
+        "member" | "member_identity" | "oidc_login" | "job"
+    ));
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let present = stmt
         .query_map([], |r| r.get::<_, String>(1))?
@@ -271,6 +274,7 @@ impl Store for SqliteStore {
                  status     TEXT NOT NULL,
                  result     TEXT,
                  error      TEXT,
+                 params     TEXT,
                  created_at TEXT NOT NULL,
                  updated_at TEXT NOT NULL
              );
@@ -318,6 +322,7 @@ impl Store for SqliteStore {
         // an upgraded database would be missing them (e.g. `member.active`, which
         // every auth lookup now queries).
         ensure_column(&conn, "member", "active", "INTEGER NOT NULL DEFAULT 1")?;
+        ensure_column(&conn, "job", "params", "TEXT")?;
         ensure_column(&conn, "member_identity", "oidc_issuer", "TEXT")?;
         ensure_column(&conn, "member_identity", "external_id", "TEXT")?;
         ensure_column(
@@ -1518,14 +1523,14 @@ impl Store for SqliteStore {
         Ok(n > 0)
     }
 
-    fn enqueue_job(&self, org_id: &str, kind: &str) -> Result<String> {
+    fn enqueue_job(&self, org_id: &str, kind: &str, job_params: Option<&str>) -> Result<String> {
         let id = ids::generate_id("job");
         let now = chrono::Utc::now().to_rfc3339();
         self.conn()?
             .execute(
-                "INSERT INTO job (id, org_id, kind, status, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, 'queued', ?4, ?4)",
-                params![id, org_id, kind, now],
+                "INSERT INTO job (id, org_id, kind, status, params, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'queued', ?4, ?5, ?5)",
+                params![id, org_id, kind, job_params, now],
             )
             .context("failed to enqueue job")?;
         Ok(id)
@@ -1537,7 +1542,7 @@ impl Store for SqliteStore {
         let tx = guard.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let row = tx
             .query_row(
-                "SELECT id, org_id, kind, created_at FROM job
+                "SELECT id, org_id, kind, params, created_at FROM job
                  WHERE status = 'queued' ORDER BY created_at ASC, id ASC LIMIT 1",
                 [],
                 |r| {
@@ -1545,12 +1550,13 @@ impl Store for SqliteStore {
                         r.get::<_, String>(0)?,
                         r.get::<_, String>(1)?,
                         r.get::<_, String>(2)?,
-                        r.get::<_, String>(3)?,
+                        r.get::<_, Option<String>>(3)?,
+                        r.get::<_, String>(4)?,
                     ))
                 },
             )
             .optional()?;
-        let Some((id, org_id, kind, created_at)) = row else {
+        let Some((id, org_id, kind, job_params, created_at)) = row else {
             return Ok(None);
         };
         let now = chrono::Utc::now().to_rfc3339();
@@ -1566,6 +1572,7 @@ impl Store for SqliteStore {
             status: "running".to_string(),
             result: None,
             error: None,
+            params: job_params,
             created_at,
             updated_at: now,
         }))
@@ -1591,7 +1598,7 @@ impl Store for SqliteStore {
         let conn = self.conn()?;
         let row = conn
             .query_row(
-                "SELECT id, org_id, kind, status, result, error, created_at, updated_at
+                "SELECT id, org_id, kind, status, result, error, params, created_at, updated_at
                  FROM job WHERE org_id = ?1 AND id = ?2",
                 params![org_id, job_id],
                 |r| {
@@ -1602,8 +1609,9 @@ impl Store for SqliteStore {
                         status: r.get(3)?,
                         result: r.get(4)?,
                         error: r.get(5)?,
-                        created_at: r.get(6)?,
-                        updated_at: r.get(7)?,
+                        params: r.get(6)?,
+                        created_at: r.get(7)?,
+                        updated_at: r.get(8)?,
                     })
                 },
             )
@@ -1614,7 +1622,7 @@ impl Store for SqliteStore {
     fn list_jobs(&self, org_id: &str, limit: u32) -> Result<Vec<Job>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, org_id, kind, status, result, error, created_at, updated_at
+            "SELECT id, org_id, kind, status, result, error, params, created_at, updated_at
              FROM job WHERE org_id = ?1 ORDER BY created_at DESC, id DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![org_id, limit as i64], |r| {
@@ -1625,8 +1633,9 @@ impl Store for SqliteStore {
                 status: r.get(3)?,
                 result: r.get(4)?,
                 error: r.get(5)?,
-                created_at: r.get(6)?,
-                updated_at: r.get(7)?,
+                params: r.get(6)?,
+                created_at: r.get(7)?,
+                updated_at: r.get(8)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
