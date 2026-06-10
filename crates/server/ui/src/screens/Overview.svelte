@@ -97,7 +97,7 @@
           <ul class="rows">
             {#each data.repos.slice(0, 6) as r (r.id)}
               <li>
-                <a class="repo" href={repoPath(org, r.name)}>{r.name}</a>
+                <a class="repo" href={repoPath(org, r.id)}>{r.name}</a>
                 <span class="spacer"></span>
                 {#if r.review_gap_lines > 0}
                   <span class="gap mono" title="Unreviewed AI lines">
