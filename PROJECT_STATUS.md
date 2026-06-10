@@ -1,11 +1,27 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-10 (team dashboard D4 UI — Policies + People; on feature branch)
+**Last updated:** 2026-06-10 (team dashboard D5 — palette + theme + a11y; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-10 — Team dashboard D5 (polish: command palette + theme + a11y).**
+> On branch `feat/dashboard-d5`. Cross-cutting polish on the SPA. **Command
+> palette** (⌘K / Ctrl-K): role-aware, org-scoped quick nav with subsequence
+> fuzzy match, full keyboard operation (arrows/enter/esc) and an accessible
+> `role="dialog"` listbox; pure `buildCommands`/`filterCommands` unit-tested.
+> **Theme**: system/light/dark preference (cycled from the topbar), persisted to
+> localStorage and applied to `<html data-theme>` before content paints; pure
+> `resolveTheme`/`nextPref`/`normalizePref` unit-tested. **A11y**: skip-to-content
+> link, `aria-current="page"` on the active rail item, and a global
+> `:focus-visible` ring. Verified: SPA 34 vitest + svelte-check (0 errors, 0
+> warnings) + build (~31KB gzip); `cargo build --features dashboard` embeds the
+> bundle. **Deferred from the D5 plan (honest scope):** density toggle, full i18n
+> (needs a string-catalog framework), Playwright E2E (needs a server+SSO harness
+> in CI), and a dedicated performance pass — tracked as follow-ups, not shipped
+> here. With this, the team-dashboard plan (D0–D5 core) is delivered.
+>
 > **2026-06-10 — Team dashboard D4 UI (Policies + People & Access).** On branch
 > `feat/dashboard-d4-ui`. Two admin-only SPA screens on the D4 API. **Policies**:
 > per-repo compliance from `GET .../policies/compliance` — KPI band (repos

@@ -11,13 +11,18 @@
   import Exports from "./screens/Exports.svelte";
   import Policies from "./screens/Policies.svelte";
   import People from "./screens/People.svelte";
+  import CommandPalette from "./components/CommandPalette.svelte";
   import { api, type Me } from "./lib/api";
   import { parseRoute, defaultPath, type Route } from "./lib/router";
+  import { applyPref, loadPref } from "./lib/theme";
 
   let me = $state<Me | null>(null);
   let route = $state<Route | null>(parseRoute(location.pathname));
   let error = $state<string | null>(null);
   let loading = $state(true);
+
+  // Apply the saved theme as early as possible (before first paint of content).
+  applyPref(loadPref());
 
   onMount(() => {
     const onpop = () => {
@@ -48,6 +53,7 @@
 {:else if error}
   <div class="boot err">{error}</div>
 {:else if me}
+  <CommandPalette org={route?.org ?? me.org_id} role={me.role} />
   <AppShell org={route?.org ?? me.org_id} role={me.role} active={route?.name ?? ""}>
     {#if route && route.name === "overview"}
       <Overview org={route.org} />

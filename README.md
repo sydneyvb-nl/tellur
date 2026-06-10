@@ -535,7 +535,9 @@ Overview (org rollup + activity trend), Repositories + per-file provenance,
 Sessions + replay, and — for admins — a **Policies** compliance view (per-repo
 violations by severity + one-click re-evaluation), a **People & Access** view
 (members, SCIM groups, SSO/SCIM health), an **Audit log** browser, and an
-**Exports** console (start exports, watch job status, download results).
+**Exports** console (start exports, watch job status, download results). A
+command palette (**⌘K** / **Ctrl-K**) jumps between screens, and a topbar control
+switches the theme (system / light / dark).
 
 ## Development
 
