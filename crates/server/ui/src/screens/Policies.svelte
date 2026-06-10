@@ -1,8 +1,15 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { api, type ComplianceSnapshot } from "../lib/api";
   import { count, relativeTime } from "../lib/format";
 
   let { org }: { org: string } = $props();
+
+  // Stop the re-eval poll loop if the screen unmounts mid-run.
+  let destroyed = false;
+  onDestroy(() => {
+    destroyed = true;
+  });
 
   let snapshots = $state<ComplianceSnapshot[]>([]);
   let evaluated = $state(false);
@@ -66,16 +73,22 @@
     runError = null;
     try {
       const { job_id } = await api.runCompliance(org);
-      // Poll the durable job to completion.
-      for (let i = 0; i < 60; i++) {
+      // Durable/background work: poll until a terminal state, never treating a
+      // still-running job as success (it can legitimately outlive any fixed cap).
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
         await new Promise((r) => setTimeout(r, 1500));
+        if (destroyed) return;
         const job = await api.job(org, job_id);
-        if (job.status === "completed") break;
+        if (job.status === "completed") {
+          reloadKey += 1;
+          break;
+        }
         if (job.status === "failed") {
           throw new Error(job.error ?? "evaluation failed");
         }
+        // queued/running → keep polling.
       }
-      reloadKey += 1;
     } catch (e) {
       runError = e instanceof Error ? e.message : "evaluation failed";
     } finally {
