@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ActivityBucket } from "../lib/api";
   import { dailyTotals, maxCount } from "../lib/series";
+  import { t } from "../lib/i18n.svelte";
 
   let { buckets, label = "Activity" }: { buckets: ActivityBucket[]; label?: string } =
     $props();
@@ -13,14 +14,14 @@
 <section class="panel">
   <h2>{label}</h2>
   {#if totals.length === 0}
-    <p class="muted">No activity in range.</p>
+    <p class="muted">{t("trend.noActivity")}</p>
   {:else}
     <div class="chart" role="img" aria-label={`${label}: ${totals.length} days`}>
-      {#each totals as t (t.day)}
-        <div class="col" title={`${t.day}: ${t.count}`}>
+      {#each totals as d (d.day)}
+        <div class="col" title={`${d.day}: ${d.count}`}>
           <div
             class="bar"
-            style={`height:${peak > 0 ? Math.max(2, (t.count / peak) * 100) : 0}%`}
+            style={`height:${peak > 0 ? Math.max(2, (d.count / peak) * 100) : 0}%`}
           ></div>
         </div>
       {/each}

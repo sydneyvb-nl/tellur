@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, type Job, type ExportKind } from "../lib/api";
   import { relativeTime } from "../lib/format";
+  import { t } from "../lib/i18n.svelte";
 
   let { org }: { org: string } = $props();
 
@@ -23,7 +24,7 @@
       jobs = res.jobs;
       error = null;
     } catch (e) {
-      error = e instanceof Error ? e.message : "failed to load jobs";
+      error = e instanceof Error ? e.message : t("app.failed");
     } finally {
       loading = false;
     }
@@ -57,12 +58,12 @@
     notice = null;
     try {
       await api.startExport(org, kind);
-      notice = `Queued ${kind} export.`;
+      notice = t("exports.queued", { kind });
       // Restart the polling loop so the newly queued job is tracked to completion
       // even if the page had no active jobs before.
       pollKey += 1;
     } catch (e) {
-      error = e instanceof Error ? e.message : "failed to start export";
+      error = e instanceof Error ? e.message : t("app.failed");
     } finally {
       starting = false;
     }
@@ -85,7 +86,7 @@
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      error = e instanceof Error ? e.message : "failed to download";
+      error = e instanceof Error ? e.message : t("app.failed");
     } finally {
       downloading = null;
     }
@@ -98,20 +99,15 @@
   }
 </script>
 
-<h1>Exports</h1>
-<p class="muted">
-  Generate a portable snapshot of your org's activity log, tamper-evident audit
-  trail, or a full compliance <strong>evidence pack</strong> (every repo's SLSA
-  provenance + latest policy compliance + audit-chain status). Exports run as
-  background jobs; large orgs may take a moment.
-</p>
+<h1>{t("exports.title")}</h1>
+<p class="muted">{t("exports.intro")}</p>
 
 <div class="actions">
   <button class="primary" onclick={() => start("evidence")} disabled={starting}>
-    Evidence pack
+    {t("exports.evidence")}
   </button>
-  <button onclick={() => start("events")} disabled={starting}>Export events</button>
-  <button onclick={() => start("audit")} disabled={starting}>Export audit log</button>
+  <button onclick={() => start("events")} disabled={starting}>{t("exports.events")}</button>
+  <button onclick={() => start("audit")} disabled={starting}>{t("exports.audit")}</button>
   {#if notice}<span class="notice">{notice}</span>{/if}
 </div>
 
@@ -122,12 +118,12 @@
 {#if loading}
   <div class="panel skeleton"></div>
 {:else if jobs.length === 0}
-  <div class="panel empty"><p class="muted">No exports yet.</p></div>
+  <div class="panel empty"><p class="muted">{t("exports.empty")}</p></div>
 {:else}
   <table>
     <thead>
       <tr>
-        <th>Kind</th><th>Status</th><th>Created</th><th>Updated</th><th></th>
+        <th>{t("exports.colKind")}</th><th>{t("exports.colStatus")}</th><th>{t("exports.colCreated")}</th><th>{t("exports.colUpdated")}</th><th></th>
       </tr>
     </thead>
     <tbody>
@@ -140,10 +136,10 @@
           <td class="right">
             {#if j.status === "completed"}
               <button class="link" onclick={() => download(j)} disabled={downloading === j.id}>
-                {downloading === j.id ? "Preparing…" : "Download"}
+                {downloading === j.id ? t("exports.preparing") : t("exports.download")}
               </button>
             {:else if j.status === "failed"}
-              <span class="muted" title={j.error ?? ""}>error</span>
+              <span class="muted" title={j.error ?? ""}>{t("exports.error")}</span>
             {/if}
           </td>
         </tr>

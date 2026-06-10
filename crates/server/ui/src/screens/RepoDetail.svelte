@@ -2,6 +2,7 @@
   import { api, type RepoDetail, type AttrFile } from "../lib/api";
   import { count, pct, relativeTime } from "../lib/format";
   import { reposPath, filePath } from "../lib/router";
+  import { t } from "../lib/i18n.svelte";
 
   let { org, repo }: { org: string; repo: string } = $props();
 
@@ -29,7 +30,7 @@
         }
       })
       .catch((e) => {
-        if (!cancelled) error = e instanceof Error ? e.message : "failed to load";
+        if (!cancelled) error = e instanceof Error ? e.message : t("app.failed");
       })
       .finally(() => {
         if (!cancelled) loading = false;
@@ -40,50 +41,54 @@
   });
 </script>
 
-<p class="crumb"><a href={reposPath(org)}>Repositories</a> / {repo}</p>
+<p class="crumb"><a href={reposPath(org)}>{t("nav.repos")}</a> / {repo}</p>
 
 {#if loading}
   <div class="panel skeleton"></div>
 {:else if error}
   <div class="panel error">
     <p>{error}</p>
-    <button onclick={() => (reloadKey += 1)}>Retry</button>
+    <button onclick={() => (reloadKey += 1)}>{t("common.retry")}</button>
   </div>
 {:else if data}
   <h1>{data.name}</h1>
   <p class="muted">
-    {count(data.event_count)} events · {data.attributed_files} attributed files ·
-    {#if data.last_activity}last activity {relativeTime(data.last_activity)}{:else}no
-      activity{/if}
+    {t("repoDetail.events", { n: count(data.event_count) })} · {t(
+      "repoDetail.attributedFiles",
+      { n: data.attributed_files },
+    )} ·
+    {#if data.last_activity}{t("repoDetail.lastActivity", {
+        time: relativeTime(data.last_activity),
+      })}{:else}{t("repoDetail.noActivity")}{/if}
   </p>
 
   <section class="kpis">
     <div class="kpi">
       <div class="num mono">{data.ai_share === null ? "—" : pct(data.ai_share)}</div>
-      <div class="lbl">AI-attributed lines</div>
+      <div class="lbl">{t("repoDetail.kpiAiShare")}</div>
     </div>
     <div class="kpi">
       <div class="num mono">
         {data.review_coverage === null ? "—" : pct(data.review_coverage)}
       </div>
-      <div class="lbl">AI lines reviewed</div>
+      <div class="lbl">{t("repoDetail.kpiReviewed")}</div>
     </div>
     <div class="kpi">
       <div class="num mono">{count(data.lines.ai)}</div>
-      <div class="lbl">AI lines</div>
+      <div class="lbl">{t("repoDetail.kpiAiLines")}</div>
     </div>
   </section>
 
   <section class="panel">
-    <h2>Attributed files</h2>
+    <h2>{t("repoDetail.attributedFilesTitle")}</h2>
     {#if files.length === 0}
-      <p class="muted">No attribution recorded yet.</p>
+      <p class="muted">{t("repoDetail.noAttribution")}</p>
     {:else}
       <ul class="files">
         {#each files as f (f.file_path)}
           <li>
             <a class="mono" href={filePath(org, repo, f.file_path)}>{f.file_path}</a>
-            <span class="muted">{f.ranges.length} ranges</span>
+            <span class="muted">{t("repoDetail.ranges", { n: f.ranges.length })}</span>
           </li>
         {/each}
       </ul>
@@ -91,9 +96,9 @@
   </section>
 
   <section class="panel">
-    <h2>Contributors</h2>
+    <h2>{t("repoDetail.contributors")}</h2>
     {#if data.contributors.length === 0}
-      <p class="muted">None recorded.</p>
+      <p class="muted">{t("repoDetail.noContributors")}</p>
     {:else}
       <ul class="chips">
         {#each data.contributors as c (c)}

@@ -3,6 +3,7 @@
   import { count, pct, relativeTime } from "../lib/format";
   import { repoPath } from "../lib/router";
   import Trend from "../components/Trend.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   let { org }: { org: string } = $props();
 
@@ -24,7 +25,7 @@
         if (!cancelled) data = d;
       })
       .catch((e) => {
-        if (!cancelled) error = e instanceof Error ? e.message : "failed to load";
+        if (!cancelled) error = e instanceof Error ? e.message : t("app.failed");
       })
       .finally(() => {
         if (!cancelled) loading = false;
@@ -35,7 +36,7 @@
   });
 </script>
 
-<h1>Overview</h1>
+<h1>{t("overview.title")}</h1>
 
 {#if loading}
   <div class="kpis">
@@ -46,34 +47,34 @@
 {:else if error}
   <div class="panel error">
     <p>{error}</p>
-    <button onclick={() => (reloadKey += 1)}>Retry</button>
+    <button onclick={() => (reloadKey += 1)}>{t("common.retry")}</button>
   </div>
 {:else if data}
   {#if data.totals.events === 0}
     <div class="panel empty">
-      <p>No activity yet for this org.</p>
+      <p>{t("overview.emptyTitle")}</p>
       <p class="muted">
-        Connect a repo and push provenance, e.g.
-        <code>tellur notes push</code> or the hub ingest API.
+        {t("overview.emptyHintPre")}
+        <code>tellur notes push</code> {t("overview.emptyHintPost")}
       </p>
     </div>
   {:else}
     <section class="kpis" aria-label="Key metrics">
       <div class="kpi">
         <div class="num mono">{count(data.totals.events)}</div>
-        <div class="lbl">Events</div>
+        <div class="lbl">{t("overview.kpiEvents")}</div>
       </div>
       <div class="kpi">
         <div class="num mono">{count(data.totals.sessions)}</div>
-        <div class="lbl">Sessions</div>
+        <div class="lbl">{t("overview.kpiSessions")}</div>
       </div>
       <div class="kpi">
         <div class="num mono">{count(data.totals.repos)}</div>
-        <div class="lbl">Repositories</div>
+        <div class="lbl">{t("overview.kpiRepos")}</div>
       </div>
       <div class="kpi">
         <div class="num mono">{data.ai_share === null ? "—" : pct(data.ai_share)}</div>
-        <div class="lbl">AI-attributed lines</div>
+        <div class="lbl">{t("overview.kpiAiLines")}</div>
       </div>
       <div
         class="kpi"
@@ -82,17 +83,17 @@
         <div class="num mono">
           {data.review_coverage === null ? "—" : pct(data.review_coverage)}
         </div>
-        <div class="lbl">AI lines reviewed</div>
+        <div class="lbl">{t("overview.kpiReviewed")}</div>
       </div>
     </section>
 
-    <Trend buckets={data.activity} label="Activity (30 days)" />
+    <Trend buckets={data.activity} label={t("trend.activity", { days: 30 })} />
 
     <div class="cols">
       <section class="panel">
-        <h2>Repositories by review gap</h2>
+        <h2>{t("overview.reposByGap")}</h2>
         {#if data.repos.length === 0}
-          <p class="muted">No repositories.</p>
+          <p class="muted">{t("overview.noRepos")}</p>
         {:else}
           <ul class="rows">
             {#each data.repos.slice(0, 6) as r (r.id)}
@@ -100,13 +101,13 @@
                 <a class="repo" href={repoPath(org, r.id)}>{r.name}</a>
                 <span class="spacer"></span>
                 {#if r.review_gap_lines > 0}
-                  <span class="gap mono" title="Unreviewed AI lines">
-                    {count(r.review_gap_lines)} unreviewed
+                  <span class="gap mono">
+                    {t("overview.unreviewed", { n: count(r.review_gap_lines) })}
                   </span>
                 {:else if r.ai_lines > 0}
-                  <span class="clear mono">reviewed</span>
+                  <span class="clear mono">{t("overview.reviewed")}</span>
                 {:else}
-                  <span class="muted mono">no AI lines</span>
+                  <span class="muted mono">{t("overview.noAi")}</span>
                 {/if}
               </li>
             {/each}
@@ -115,15 +116,15 @@
       </section>
 
       <section class="panel">
-        <h2>Recent activity</h2>
+        <h2>{t("overview.recent")}</h2>
         {#if data.recent_events.length === 0}
-          <p class="muted">No recent events.</p>
+          <p class="muted">{t("overview.noRecent")}</p>
         {:else}
           <ul class="rows">
             {#each data.recent_events as e (e.id)}
               <li>
                 <span class="evt mono">{e.type}</span>
-                <span class="muted">by {e.actor}</span>
+                <span class="muted">{t("common.by", { actor: e.actor })}</span>
                 <span class="spacer"></span>
                 <span class="muted">{relativeTime(e.timestamp)}</span>
               </li>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, type AuditRecord } from "../lib/api";
   import { relativeTime } from "../lib/format";
+  import { t } from "../lib/i18n.svelte";
 
   let { org }: { org: string } = $props();
 
@@ -36,7 +37,7 @@
         nextBefore = page.next_before;
       })
       .catch((e) => {
-        if (!cancelled) error = e instanceof Error ? e.message : "failed to load";
+        if (!cancelled) error = e instanceof Error ? e.message : t("app.failed");
       })
       .finally(() => {
         if (!cancelled) loading = false;
@@ -54,7 +55,7 @@
       records = [...records, ...page.records];
       nextBefore = page.next_before;
     } catch (e) {
-      error = e instanceof Error ? e.message : "failed to load more";
+      error = e instanceof Error ? e.message : t("app.failed");
     } finally {
       loadingMore = false;
     }
@@ -76,28 +77,28 @@
 </script>
 
 <div class="head">
-  <h1>Audit log</h1>
+  <h1>{t("audit.title")}</h1>
   {#if chainIntact === true}
-    <span class="badge ok" title="The tamper-evident hash chain verifies">
-      Chain verified
+    <span class="badge ok" title={t("audit.chainOkTitle")}>
+      {t("audit.chainOk")}
     </span>
   {:else if chainIntact === false}
-    <span class="badge bad" title="The audit hash chain failed verification">
-      Chain broken
+    <span class="badge bad" title={t("audit.chainBadTitle")}>
+      {t("audit.chainBad")}
     </span>
   {/if}
 </div>
 
 <form class="filters" onsubmit={apply}>
-  <input placeholder="Actor (member id)" bind:value={actor} />
-  <input placeholder="Action (e.g. policy.update)" bind:value={action} />
+  <input placeholder={t("audit.filterActor")} bind:value={actor} />
+  <input placeholder={t("audit.filterAction")} bind:value={action} />
   <select bind:value={rangeDays}>
-    <option value={7}>Last 7 days</option>
-    <option value={30}>Last 30 days</option>
-    <option value={90}>Last 90 days</option>
-    <option value={365}>Last year</option>
+    <option value={7}>{t("audit.range7")}</option>
+    <option value={30}>{t("audit.range30")}</option>
+    <option value={90}>{t("audit.range90")}</option>
+    <option value={365}>{t("audit.range365")}</option>
   </select>
-  <button type="submit">Apply</button>
+  <button type="submit">{t("audit.apply")}</button>
 </form>
 
 {#if loading}
@@ -105,15 +106,15 @@
 {:else if error}
   <div class="panel error">
     <p>{error}</p>
-    <button onclick={() => apply()}>Retry</button>
+    <button onclick={() => apply()}>{t("common.retry")}</button>
   </div>
 {:else if records.length === 0}
-  <div class="panel empty"><p class="muted">No audit entries match.</p></div>
+  <div class="panel empty"><p class="muted">{t("audit.none")}</p></div>
 {:else}
   <table>
     <thead>
       <tr>
-        <th>When</th><th>Actor</th><th>Action</th><th>Detail</th><th>Entry hash</th>
+        <th>{t("audit.colWhen")}</th><th>{t("audit.colActor")}</th><th>{t("audit.colAction")}</th><th>{t("audit.colDetail")}</th><th>{t("audit.colHash")}</th>
       </tr>
     </thead>
     <tbody>

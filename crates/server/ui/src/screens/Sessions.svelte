@@ -2,6 +2,7 @@
   import { api, type SessionSummary } from "../lib/api";
   import { count, relativeTime } from "../lib/format";
   import { sessionPath } from "../lib/router";
+  import { t } from "../lib/i18n.svelte";
 
   let { org }: { org: string } = $props();
 
@@ -22,7 +23,7 @@
         if (!cancelled) sessions = res.sessions;
       })
       .catch((e) => {
-        if (!cancelled) error = e instanceof Error ? e.message : "failed to load";
+        if (!cancelled) error = e instanceof Error ? e.message : t("app.failed");
       })
       .finally(() => {
         if (!cancelled) loading = false;
@@ -33,22 +34,22 @@
   });
 </script>
 
-<h1>Sessions</h1>
+<h1>{t("sessions.title")}</h1>
 
 {#if loading}
   <div class="panel skeleton"></div>
 {:else if error}
   <div class="panel error">
     <p>{error}</p>
-    <button onclick={() => (reloadKey += 1)}>Retry</button>
+    <button onclick={() => (reloadKey += 1)}>{t("common.retry")}</button>
   </div>
 {:else if sessions.length === 0}
-  <div class="panel empty"><p class="muted">No sessions yet.</p></div>
+  <div class="panel empty"><p class="muted">{t("sessions.empty")}</p></div>
 {:else}
   <table>
     <thead>
       <tr>
-        <th>Session</th><th>Actors</th><th class="num">Events</th><th>Last activity</th>
+        <th>{t("sessions.colSession")}</th><th>{t("sessions.colActors")}</th><th class="num">{t("sessions.colEvents")}</th><th>{t("sessions.colLastActivity")}</th>
       </tr>
     </thead>
     <tbody>

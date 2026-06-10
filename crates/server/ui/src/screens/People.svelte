@@ -6,6 +6,7 @@
     type SsoStatus,
   } from "../lib/api";
   import { count, relativeTime } from "../lib/format";
+  import { t } from "../lib/i18n.svelte";
 
   let { org }: { org: string } = $props();
 
@@ -35,7 +36,7 @@
         sso = s;
       })
       .catch((e) => {
-        if (!cancelled) error = e instanceof Error ? e.message : "failed to load";
+        if (!cancelled) error = e instanceof Error ? e.message : t("app.failed");
       })
       .finally(() => {
         if (!cancelled) loading = false;
@@ -46,63 +47,63 @@
   });
 </script>
 
-<h1>People &amp; Access</h1>
+<h1>{t("people.title")}</h1>
 
 {#if loading}
   <div class="panel skeleton"></div>
 {:else if error}
   <div class="panel error">
     <p>{error}</p>
-    <button onclick={() => (reloadKey += 1)}>Retry</button>
+    <button onclick={() => (reloadKey += 1)}>{t("common.retry")}</button>
   </div>
 {:else}
   {#if sso}
     <section class="status">
       <div class="stat">
-        <div class="stat-h">Single sign-on</div>
+        <div class="stat-h">{t("people.ssoTitle")}</div>
         {#if sso.oidc_enabled}
-          <div class="badge ok">Enabled</div>
+          <div class="badge ok">{t("people.enabled")}</div>
           <div class="meta mono" title={sso.oidc_issuer ?? ""}>{sso.oidc_issuer}</div>
         {:else}
-          <div class="badge off">Not configured</div>
-          <div class="meta">OIDC is not set up on this hub.</div>
+          <div class="badge off">{t("people.notConfigured")}</div>
+          <div class="meta">{t("people.oidcNotSetup")}</div>
         {/if}
       </div>
       <div class="stat">
-        <div class="stat-h">SCIM provisioning</div>
+        <div class="stat-h">{t("people.scimTitle")}</div>
         {#if sso.scim_configured}
-          <div class="badge ok">Active</div>
+          <div class="badge ok">{t("people.scimActive")}</div>
           <div class="meta">
-            Token issued
+            {t("people.tokenIssued")}
             {#if sso.scim_token_created_at}{relativeTime(sso.scim_token_created_at)}{/if}
           </div>
         {:else}
-          <div class="badge off">Not configured</div>
-          <div class="meta">No SCIM token has been minted.</div>
+          <div class="badge off">{t("people.notConfigured")}</div>
+          <div class="meta">{t("people.noScimToken")}</div>
         {/if}
       </div>
       <div class="stat">
-        <div class="stat-h">Members</div>
+        <div class="stat-h">{t("people.members")}</div>
         <div class="big mono">{count(sso.members_active)}<span class="of">/ {count(sso.members_total)}</span></div>
-        <div class="meta">{count(sso.members_sso_bound)} bound to SSO</div>
+        <div class="meta">{t("people.boundToSso", { n: count(sso.members_sso_bound) })}</div>
       </div>
       <div class="stat">
-        <div class="stat-h">Groups</div>
+        <div class="stat-h">{t("people.groups")}</div>
         <div class="big mono">{count(sso.scim_groups)}</div>
-        <div class="meta">SCIM-managed</div>
+        <div class="meta">{t("people.scimManaged")}</div>
       </div>
     </section>
   {/if}
 
   <section class="block">
-    <h2>Members</h2>
+    <h2>{t("people.members")}</h2>
     {#if members.length === 0}
-      <p class="muted">No members yet.</p>
+      <p class="muted">{t("people.noMembers")}</p>
     {:else}
       <table>
         <thead>
           <tr>
-            <th>Member</th><th>Role</th><th>Email</th><th>SSO</th><th>Status</th>
+            <th>{t("people.colMember")}</th><th>{t("people.colRole")}</th><th>{t("people.colEmail")}</th><th>{t("people.colSso")}</th><th>{t("people.colStatus")}</th>
           </tr>
         </thead>
         <tbody>
@@ -112,12 +113,12 @@
               <td><span class="role {m.role}">{m.role}</span></td>
               <td class="muted mono">{m.email ?? "—"}</td>
               <td>
-                {#if m.sso_bound}<span class="dot ok" title="Bound to an SSO identity"></span> Bound
+                {#if m.sso_bound}<span class="dot ok" title={t("people.boundTitle")}></span> {t("people.bound")}
                 {:else}<span class="muted">—</span>{/if}
               </td>
               <td>
-                {#if m.active}<span class="status-pill active">Active</span>
-                {:else}<span class="status-pill off">Deactivated</span>{/if}
+                {#if m.active}<span class="status-pill active">{t("people.statusActive")}</span>
+                {:else}<span class="status-pill off">{t("people.statusDeactivated")}</span>{/if}
               </td>
             </tr>
           {/each}
@@ -127,15 +128,15 @@
   </section>
 
   <section class="block">
-    <h2>Groups</h2>
+    <h2>{t("people.groups")}</h2>
     {#if groups.length === 0}
-      <p class="muted">No SCIM groups. Groups named <span class="mono">tellur-admin</span>,
-        <span class="mono">tellur-contributor</span>, or <span class="mono">tellur-viewer</span>
-        drive member roles automatically.</p>
+      <p class="muted">{t("people.noGroupsPre")} <span class="mono">tellur-admin</span>,
+        <span class="mono">tellur-contributor</span>, <span class="mono">tellur-viewer</span>
+        {t("people.noGroupsPost")}</p>
     {:else}
       <table>
         <thead>
-          <tr><th>Group</th><th>Maps to role</th><th class="num">Members</th></tr>
+          <tr><th>{t("people.colGroup")}</th><th>{t("people.colMapsToRole")}</th><th class="num">{t("people.colMembers")}</th></tr>
         </thead>
         <tbody>
           {#each groups as g (g.id)}
@@ -143,7 +144,7 @@
               <td class="mono">{g.display_name}</td>
               <td>
                 {#if g.maps_to_role}<span class="role {g.maps_to_role}">{g.maps_to_role}</span>
-                {:else}<span class="muted">informational</span>{/if}
+                {:else}<span class="muted">{t("people.informational")}</span>{/if}
               </td>
               <td class="num mono">{count(g.members.length)}</td>
             </tr>
