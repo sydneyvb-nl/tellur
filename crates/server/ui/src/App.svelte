@@ -9,6 +9,8 @@
   import SessionDetail from "./screens/SessionDetail.svelte";
   import Audit from "./screens/Audit.svelte";
   import Exports from "./screens/Exports.svelte";
+  import Policies from "./screens/Policies.svelte";
+  import People from "./screens/People.svelte";
   import { api, type Me } from "./lib/api";
   import { parseRoute, defaultPath, type Route } from "./lib/router";
 
@@ -63,6 +65,10 @@
       <Audit org={route.org} />
     {:else if route && route.name === "exports"}
       <Exports org={route.org} />
+    {:else if route && route.name === "policies"}
+      <Policies org={route.org} />
+    {:else if route && route.name === "people"}
+      <People org={route.org} />
     {:else}
       <div class="notfound">
         <h1>Not found</h1>

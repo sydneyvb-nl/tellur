@@ -11,6 +11,8 @@ export type Route =
   | { name: "session"; org: string; id: string }
   | { name: "audit"; org: string }
   | { name: "exports"; org: string }
+  | { name: "policies"; org: string }
+  | { name: "people"; org: string }
   | { name: "unknown"; org: string | null; path: string };
 
 const BASE = "/app";
@@ -48,6 +50,10 @@ export function parseRoute(pathname: string): Route | null {
       return { name: "audit", org };
     case "exports":
       return { name: "exports", org };
+    case "policies":
+      return { name: "policies", org };
+    case "people":
+      return { name: "people", org };
     default:
       return { name: "unknown", org, path: pathname };
   }
@@ -72,6 +78,10 @@ export function routePath(route: Route): string {
       return auditPath(route.org);
     case "exports":
       return exportsPath(route.org);
+    case "policies":
+      return policiesPath(route.org);
+    case "people":
+      return peoplePath(route.org);
     case "unknown":
       return route.path;
   }
@@ -85,6 +95,16 @@ export function auditPath(org: string): string {
 /** Path to the exports screen (admin). */
 export function exportsPath(org: string): string {
   return `${BASE}/orgs/${org}/exports`;
+}
+
+/** Path to the policies / compliance screen (admin). */
+export function policiesPath(org: string): string {
+  return `${BASE}/orgs/${org}/policies`;
+}
+
+/** Path to the People & Access screen (admin). */
+export function peoplePath(org: string): string {
+  return `${BASE}/orgs/${org}/people`;
 }
 
 /** Path to the sessions list for an org. */

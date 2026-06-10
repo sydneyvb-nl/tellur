@@ -1,11 +1,27 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-10 (team dashboard D4 API — compliance + people; on feature branch)
+**Last updated:** 2026-06-10 (team dashboard D4 UI — Policies + People; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-10 — Team dashboard D4 UI (Policies + People & Access).** On branch
+> `feat/dashboard-d4-ui`. Two admin-only SPA screens on the D4 API. **Policies**:
+> per-repo compliance from `GET .../policies/compliance` — KPI band (repos
+> evaluated, open violations, severity split), a most-at-risk-first table
+> (AI ranges, violations, severity chips high=risk/medium=warn/low=muted, policy
+> version, last run), a "Re-evaluate" action that enqueues the durable job and
+> polls it to completion, and a guided empty state when no `default` policy has
+> run. **People & Access**: an SSO/SCIM status band (OIDC issuer, SCIM token age,
+> active/total members, SSO-bound count, group count — health only), a members
+> table (role chip, email, SSO-bound, active/deactivated; inactive sorted last),
+> and a groups table (displayName → derived role). Admin-only rail items
+> (Policies, People & Access) now active; routes `/app/orgs/:org/policies` and
+> `.../people`. Verified: SPA 22 vitest + svelte-check (0 errors) + build
+> (~29KB gzip); `cargo build --features dashboard` embeds the new bundle. Next:
+> D5 polish (command palette, density/theme/i18n, a11y audit, E2E).
+>
 > **2026-06-10 — Team dashboard D4 API (policy compliance + People & Access).**
 > On branch `feat/dashboard-d4`. API-first; the Policies + People & Access UI
 > follows in a separate D4-UI PR. New admin-only, tenant-scoped endpoints:

@@ -46,6 +46,10 @@ describe("parseRoute", () => {
     expect(parseRoute("/app/orgs/o1/audit")).toEqual({ name: "audit", org: "o1" });
     expect(parseRoute("/app/orgs/o1/exports")).toEqual({ name: "exports", org: "o1" });
   });
+  it("parses policies and people routes", () => {
+    expect(parseRoute("/app/orgs/o1/policies")).toEqual({ name: "policies", org: "o1" });
+    expect(parseRoute("/app/orgs/o1/people")).toEqual({ name: "people", org: "o1" });
+  });
   it("flags unknown screens but keeps the org", () => {
     const r = parseRoute("/app/orgs/org_123/wat");
     expect(r).toMatchObject({ name: "unknown", org: "org_123" });
@@ -69,5 +73,9 @@ describe("routePath / defaultPath", () => {
   it("round-trips audit and exports", () => {
     expect(routePath(parseRoute("/app/orgs/o1/audit")!)).toBe("/app/orgs/o1/audit");
     expect(routePath(parseRoute("/app/orgs/o1/exports")!)).toBe("/app/orgs/o1/exports");
+  });
+  it("round-trips policies and people", () => {
+    expect(routePath(parseRoute("/app/orgs/o1/policies")!)).toBe("/app/orgs/o1/policies");
+    expect(routePath(parseRoute("/app/orgs/o1/people")!)).toBe("/app/orgs/o1/people");
   });
 });

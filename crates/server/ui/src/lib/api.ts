@@ -171,6 +171,53 @@ export interface Job {
 
 export type ExportKind = "events" | "audit";
 
+export interface ComplianceSnapshot {
+  repo_id: string;
+  repo_name: string;
+  policy_name: string;
+  policy_version: number;
+  evaluated_at: string;
+  ai_ranges: number;
+  violations: number;
+  high: number;
+  medium: number;
+  low: number;
+}
+
+export interface CompliancePage {
+  org_id: string;
+  evaluated: boolean;
+  snapshots: ComplianceSnapshot[];
+}
+
+export interface MemberInfo {
+  id: string;
+  display_name: string;
+  role: string;
+  email: string | null;
+  sso_bound: boolean;
+  active: boolean;
+}
+
+export interface GroupInfo {
+  id: string;
+  display_name: string;
+  external_id: string | null;
+  members: string[];
+  maps_to_role: string | null;
+}
+
+export interface SsoStatus {
+  oidc_enabled: boolean;
+  oidc_issuer: string | null;
+  scim_configured: boolean;
+  scim_token_created_at: string | null;
+  members_total: number;
+  members_active: number;
+  members_sso_bound: number;
+  scim_groups: number;
+}
+
 const org = (o: string) => encodeURIComponent(o);
 
 export const api = {
@@ -214,4 +261,15 @@ export const api = {
     post<{ job_id: string; status: string; poll: string }>(
       `/v1/orgs/${org(o)}/export/${kind}`,
     ),
+  compliance: (o: string) =>
+    request<CompliancePage>(`/v1/orgs/${org(o)}/policies/compliance`),
+  runCompliance: (o: string) =>
+    post<{ job_id: string; status: string; poll: string }>(
+      `/v1/orgs/${org(o)}/policies/compliance`,
+    ),
+  members: (o: string) =>
+    request<{ members: MemberInfo[] }>(`/v1/orgs/${org(o)}/members`),
+  groups: (o: string) =>
+    request<{ groups: GroupInfo[] }>(`/v1/orgs/${org(o)}/groups`),
+  ssoStatus: (o: string) => request<SsoStatus>(`/v1/orgs/${org(o)}/sso-status`),
 };
