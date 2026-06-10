@@ -154,45 +154,43 @@ fn full_store_surface() {
     assert_eq!(listed[0].git_blob_sha, "abc123");
     assert_eq!(listed[0].ranges[0].end_line, 10);
 
-    // ── Opt-in source link template (A12) ────────────────────────────────────
+    // ── Opt-in source templates: link + raw (A12) ────────────────────────────
+    let s0 = store.get_repo_source(&org_a.id, &repo.id).unwrap();
+    assert!(s0.link.is_none() && s0.raw.is_none());
+    store
+        .set_repo_source(
+            &org_a.id,
+            &repo.id,
+            Some("https://h/{path}"),
+            Some("https://raw/{path}"),
+        )
+        .unwrap();
+    let s1 = store.get_repo_source(&org_a.id, &repo.id).unwrap();
+    assert_eq!(s1.link.as_deref(), Some("https://h/{path}"));
+    assert_eq!(s1.raw.as_deref(), Some("https://raw/{path}"));
+    // Upsert can set just one field (clearing the other); both None removes.
+    store
+        .set_repo_source(&org_a.id, &repo.id, Some("https://h2/{path}"), None)
+        .unwrap();
+    let s2 = store.get_repo_source(&org_a.id, &repo.id).unwrap();
+    assert_eq!(s2.link.as_deref(), Some("https://h2/{path}"));
+    assert!(s2.raw.is_none());
+    store
+        .set_repo_source(&org_a.id, &repo.id, None, None)
+        .unwrap();
     assert!(
         store
             .get_repo_source(&org_a.id, &repo.id)
             .unwrap()
+            .link
             .is_none()
     );
-    store
-        .set_repo_source(&org_a.id, &repo.id, Some("https://h/{path}"))
-        .unwrap();
-    assert_eq!(
-        store
-            .get_repo_source(&org_a.id, &repo.id)
-            .unwrap()
-            .as_deref(),
-        Some("https://h/{path}")
-    );
-    // Upsert replaces; clearing removes; tenant-scoped.
-    store
-        .set_repo_source(&org_a.id, &repo.id, Some("https://h2/{sha}"))
-        .unwrap();
-    assert_eq!(
-        store
-            .get_repo_source(&org_a.id, &repo.id)
-            .unwrap()
-            .as_deref(),
-        Some("https://h2/{sha}")
-    );
-    store.set_repo_source(&org_a.id, &repo.id, None).unwrap();
-    assert!(
-        store
-            .get_repo_source(&org_a.id, &repo.id)
-            .unwrap()
-            .is_none()
-    );
+    // Tenant-scoped.
     assert!(
         store
             .get_repo_source(&org_b.id, &repo.id)
             .unwrap()
+            .link
             .is_none()
     );
 

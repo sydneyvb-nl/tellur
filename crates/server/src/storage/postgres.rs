@@ -18,7 +18,8 @@ use r2d2_postgres::postgres::GenericClient;
 use super::{
     ActivityBucket, ActivityGroup, AuditEntry, AuditRecord, ComplianceSnapshot, IngestEvent, Job,
     LoginTx, MemberInfo, Org, OrgReport, PolicyDoc, PolicySummary, Repo, RepoFacts, RepoRoleGrant,
-    RepoSummary, ScimGroup, ScimUser, SessionSummary, Store, StoredEvent, role_from_group_name,
+    RepoSource, RepoSummary, ScimGroup, ScimUser, SessionSummary, Store, StoredEvent,
+    role_from_group_name,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
@@ -145,7 +146,7 @@ impl Store for PostgresStore {
                  CREATE TABLE IF NOT EXISTS repo_source (
                      repo_id TEXT PRIMARY KEY REFERENCES repo(id),
                      org_id TEXT NOT NULL REFERENCES org(id),
-                     template TEXT NOT NULL, updated_at TEXT NOT NULL
+                     template TEXT, raw_template TEXT, updated_at TEXT NOT NULL
                  );
                  CREATE TABLE IF NOT EXISTS repo_role (
                      org_id TEXT NOT NULL REFERENCES org(id),
@@ -214,6 +215,8 @@ impl Store for PostgresStore {
             .batch_execute(
                 "ALTER TABLE audit_head ADD COLUMN IF NOT EXISTS sealed_hash TEXT NOT NULL DEFAULT '';
                  ALTER TABLE audit_head ADD COLUMN IF NOT EXISTS sealed_count BIGINT NOT NULL DEFAULT 0;
+                 ALTER TABLE repo_source ADD COLUMN IF NOT EXISTS raw_template TEXT;
+                 ALTER TABLE repo_source ALTER COLUMN template DROP NOT NULL;
                  ALTER TABLE job ADD COLUMN IF NOT EXISTS params TEXT;
                  ALTER TABLE member ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
                  ALTER TABLE member_identity ADD COLUMN IF NOT EXISTS oidc_issuer TEXT;
@@ -225,7 +228,7 @@ impl Store for PostgresStore {
             .context("failed to apply column migrations")?;
         client
             .execute(
-                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '16')
+                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '17')
                  ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                 &[],
             )
@@ -356,32 +359,41 @@ impl Store for PostgresStore {
         }))
     }
 
-    fn get_repo_source(&self, org_id: &str, repo_id: &str) -> Result<Option<String>> {
+    fn get_repo_source(&self, org_id: &str, repo_id: &str) -> Result<RepoSource> {
         let row = self.client()?.query_opt(
-            "SELECT template FROM repo_source WHERE org_id = $1 AND repo_id = $2",
+            "SELECT template, raw_template FROM repo_source WHERE org_id = $1 AND repo_id = $2",
             &[&org_id, &repo_id],
         )?;
-        Ok(row.map(|r| r.get(0)))
+        Ok(row
+            .map(|r| RepoSource {
+                link: r.get(0),
+                raw: r.get(1),
+            })
+            .unwrap_or_default())
     }
 
-    fn set_repo_source(&self, org_id: &str, repo_id: &str, template: Option<&str>) -> Result<()> {
-        match template {
-            Some(t) => {
-                let now = chrono::Utc::now().to_rfc3339();
-                self.client()?.execute(
-                    "INSERT INTO repo_source (repo_id, org_id, template, updated_at)
-                     VALUES ($1, $2, $3, $4)
-                     ON CONFLICT (repo_id) DO UPDATE SET template = excluded.template,
-                                                         updated_at = excluded.updated_at",
-                    &[&repo_id, &org_id, &t, &now],
-                )?;
-            }
-            None => {
-                self.client()?.execute(
-                    "DELETE FROM repo_source WHERE org_id = $1 AND repo_id = $2",
-                    &[&org_id, &repo_id],
-                )?;
-            }
+    fn set_repo_source(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        link: Option<&str>,
+        raw: Option<&str>,
+    ) -> Result<()> {
+        if link.is_none() && raw.is_none() {
+            self.client()?.execute(
+                "DELETE FROM repo_source WHERE org_id = $1 AND repo_id = $2",
+                &[&org_id, &repo_id],
+            )?;
+        } else {
+            let now = chrono::Utc::now().to_rfc3339();
+            self.client()?.execute(
+                "INSERT INTO repo_source (repo_id, org_id, template, raw_template, updated_at)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (repo_id) DO UPDATE SET template = excluded.template,
+                                                     raw_template = excluded.raw_template,
+                                                     updated_at = excluded.updated_at",
+                &[&repo_id, &org_id, &link, &raw, &now],
+            )?;
         }
         Ok(())
     }

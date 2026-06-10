@@ -13,12 +13,13 @@ use super::chain;
 use super::{
     ActivityBucket, ActivityGroup, AuditEntry, AuditRecord, ComplianceSnapshot, IngestEvent, Job,
     LoginTx, MemberInfo, Org, OrgReport, PolicyDoc, PolicySummary, Repo, RepoFacts, RepoRoleGrant,
-    RepoSummary, ScimGroup, ScimUser, SessionSummary, Store, StoredEvent, role_from_group_name,
+    RepoSource, RepoSummary, ScimGroup, ScimUser, SessionSummary, Store, StoredEvent,
+    role_from_group_name,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
-const SCHEMA_VERSION: &str = "16";
+const SCHEMA_VERSION: &str = "17";
 
 /// A SQLite-backed store. The connection is behind a `Mutex` so the store is
 /// `Send + Sync` and usable as `Arc<dyn Store>`.
@@ -73,7 +74,7 @@ fn split_csv(s: Option<String>) -> Vec<String> {
 fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
     debug_assert!(matches!(
         table,
-        "member" | "member_identity" | "oidc_login" | "job" | "audit_head"
+        "member" | "member_identity" | "oidc_login" | "job" | "audit_head" | "repo_source"
     ));
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let present = stmt
@@ -240,10 +241,11 @@ impl Store for SqliteStore {
              -- template — never source code. {path}/{start}/{end} are
              -- substituted client-side to deep-link the provider.
              CREATE TABLE IF NOT EXISTS repo_source (
-                 repo_id    TEXT PRIMARY KEY REFERENCES repo(id),
-                 org_id     TEXT NOT NULL REFERENCES org(id),
-                 template   TEXT NOT NULL,
-                 updated_at TEXT NOT NULL
+                 repo_id      TEXT PRIMARY KEY REFERENCES repo(id),
+                 org_id       TEXT NOT NULL REFERENCES org(id),
+                 template     TEXT,
+                 raw_template TEXT,
+                 updated_at   TEXT NOT NULL
              );
              CREATE TABLE IF NOT EXISTS repo_role (
                  org_id     TEXT NOT NULL REFERENCES org(id),
@@ -347,6 +349,7 @@ impl Store for SqliteStore {
         // every auth lookup now queries).
         ensure_column(&conn, "member", "active", "INTEGER NOT NULL DEFAULT 1")?;
         ensure_column(&conn, "job", "params", "TEXT")?;
+        ensure_column(&conn, "repo_source", "raw_template", "TEXT")?;
         ensure_column(
             &conn,
             "audit_head",
@@ -532,37 +535,47 @@ impl Store for SqliteStore {
         }))
     }
 
-    fn get_repo_source(&self, org_id: &str, repo_id: &str) -> Result<Option<String>> {
+    fn get_repo_source(&self, org_id: &str, repo_id: &str) -> Result<RepoSource> {
         let conn = self.conn()?;
-        let t = conn
+        let row = conn
             .query_row(
-                "SELECT template FROM repo_source WHERE org_id = ?1 AND repo_id = ?2",
+                "SELECT template, raw_template FROM repo_source
+                 WHERE org_id = ?1 AND repo_id = ?2",
                 params![org_id, repo_id],
-                |r| r.get::<_, String>(0),
+                |r| {
+                    Ok(RepoSource {
+                        link: r.get::<_, Option<String>>(0)?,
+                        raw: r.get::<_, Option<String>>(1)?,
+                    })
+                },
             )
             .optional()?;
-        Ok(t)
+        Ok(row.unwrap_or_default())
     }
 
-    fn set_repo_source(&self, org_id: &str, repo_id: &str, template: Option<&str>) -> Result<()> {
+    fn set_repo_source(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        link: Option<&str>,
+        raw: Option<&str>,
+    ) -> Result<()> {
         let conn = self.conn()?;
-        match template {
-            Some(t) => {
-                let now = chrono::Utc::now().to_rfc3339();
-                conn.execute(
-                    "INSERT INTO repo_source (repo_id, org_id, template, updated_at)
-                     VALUES (?1, ?2, ?3, ?4)
-                     ON CONFLICT(repo_id) DO UPDATE SET template = excluded.template,
-                                                        updated_at = excluded.updated_at",
-                    params![repo_id, org_id, t, now],
-                )?;
-            }
-            None => {
-                conn.execute(
-                    "DELETE FROM repo_source WHERE org_id = ?1 AND repo_id = ?2",
-                    params![org_id, repo_id],
-                )?;
-            }
+        if link.is_none() && raw.is_none() {
+            conn.execute(
+                "DELETE FROM repo_source WHERE org_id = ?1 AND repo_id = ?2",
+                params![org_id, repo_id],
+            )?;
+        } else {
+            let now = chrono::Utc::now().to_rfc3339();
+            conn.execute(
+                "INSERT INTO repo_source (repo_id, org_id, template, raw_template, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(repo_id) DO UPDATE SET template = excluded.template,
+                                                    raw_template = excluded.raw_template,
+                                                    updated_at = excluded.updated_at",
+                params![repo_id, org_id, link, raw, now],
+            )?;
         }
         Ok(())
     }

@@ -1,10 +1,28 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-10 (A12 opt-in source links; on feature branch)
+**Last updated:** 2026-06-10 (A12 complete — inline source gutter; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
+
+> **2026-06-10 — A12 complete: inline source gutter (client-fetch variant).** On
+> branch `feat/source-gutter`. Completes A12 while keeping the hub metadata-only:
+> the **browser** fetches raw bytes straight from the provider (never via the
+> hub), so there's no hub egress/SSRF/secret-handling. `repo_source` gains a
+> `raw_template` column (schema v17, SQLite + PG); `RepoSource { link, raw }`,
+> `PUT .../repos/{repo}/source` takes both (each https-validated). The File view
+> gains an opt-in **Show source** toggle that fetches the raw file once
+> (`credentials: omit`, 2 MB cap, graceful CORS/auth fallback to the links) and
+> renders each attributed range's actual lines in an origin-coloured gutter. The
+> `/app` CSP `connect-src` is widened to a small all-list
+> (raw.githubusercontent.com, gitlab.com, bitbucket.org) so the client fetch
+> works for common providers; others fall back to links. Pure `rawUrl`/`sliceLines`
+> unit-tested. Verified: server tests (link+raw set/clear/surface, https+admin
+> validation; PG parity) + SPA 44 vitest + svelte-check + build; clippy -D
+> warnings + cargo-deny green. The hub-proxy `/blob` variant stays intentionally
+> unbuilt (only needed for private repos without provider CORS). Remaining: full
+> i18n, Playwright E2E.
 
 > **2026-06-10 — A12 opt-in source links (provider deep-link variant).** On
 > branch `feat/source-links`. Implements the safe half of A12 from the dashboard

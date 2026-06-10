@@ -841,7 +841,7 @@ pub async fn list_attributions(
         .find_repo(&org_id, &repo)
         .map_err(ServerError::Internal)?
         .ok_or(ServerError::NotFound)?;
-    let (mut files, source_template) = run_blocking({
+    let (mut files, source) = run_blocking({
         let store = state.store.clone();
         let org = org_id.clone();
         let repo_id = repo.id.clone();
@@ -855,29 +855,36 @@ pub async fn list_attributions(
     if let Some(path) = q.path.as_deref() {
         files.retain(|f| f.file_path == path);
     }
-    // `source_template` (opt-in, A12) lets the file view deep-link the provider;
-    // it is only ever a URL template — the hub stores/serves no source.
+    // Opt-in source URL templates (A12): `source_template` deep-links the
+    // provider's web view; `source_raw_template` points at raw bytes the browser
+    // fetches to render the inline source gutter. The hub stores/serves no source.
     serde_json::to_value(json!({
         "repo_id": repo.id,
         "files": files,
-        "source_template": source_template,
+        "source_template": source.link,
+        "source_raw_template": source.raw,
     }))
     .map(Json)
     .map_err(|e| ServerError::Internal(e.into()))
 }
 
-/// Body for setting a repo's source-link template (A12).
+/// Body for setting a repo's source templates (A12).
 #[derive(Debug, Deserialize)]
 pub struct SourceTemplateBody {
-    /// `https://…` URL with `{path}`/`{start}`/`{end}` placeholders, or
-    /// `null`/absent to clear. Only a template is stored — never source code.
+    /// Provider web-view template, `https://…` with `{path}`/`{start}`/`{end}`
+    /// placeholders. `null`/absent clears it.
     #[serde(default)]
     pub template: Option<String>,
+    /// Raw-bytes template (e.g. `raw.githubusercontent.com/...`), `https://…`
+    /// with a `{path}` placeholder, for the inline source gutter. `null`/absent
+    /// clears it. Only templates are stored — never source code.
+    #[serde(default)]
+    pub raw_template: Option<String>,
 }
 
-/// `PUT /v1/orgs/{org}/repos/{repo}/source` — set or clear the opt-in
-/// source-link template (admin only, A12). The template must be an `https://`
-/// URL so the file view can safely render it as an external link.
+/// `PUT /v1/orgs/{org}/repos/{repo}/source` — set or clear the opt-in source
+/// templates (admin only, A12). Each must be an `https://` URL so the file view
+/// can safely render the link / fetch raw bytes client-side.
 pub async fn set_repo_source(
     State(state): State<AppState>,
     Path((org_id, repo)): Path<(String, String)>,
@@ -890,22 +897,26 @@ pub async fn set_repo_source(
         .find_repo(&org_id, &repo)
         .map_err(ServerError::Internal)?
         .ok_or(ServerError::NotFound)?;
-    let template = match body.template.as_deref().map(str::trim) {
-        Some("") | None => None,
-        Some(t) => {
-            // Only https links — guards against javascript:/data: hrefs (XSS) and
-            // plaintext fetches. Length-bounded to keep it a sane URL template.
-            if !t.starts_with("https://") || t.len() > 2048 {
-                return Err(ServerError::BadRequest(
-                    "source template must be an https:// URL under 2048 chars".into(),
-                ));
+    // Only https templates — guards against javascript:/data: hrefs (XSS) and
+    // plaintext fetches; length-bounded to a sane URL template.
+    let validate = |raw: &Option<String>| -> Result<Option<String>, ServerError> {
+        match raw.as_deref().map(str::trim) {
+            Some("") | None => Ok(None),
+            Some(t) => {
+                if !t.starts_with("https://") || t.len() > 2048 {
+                    return Err(ServerError::BadRequest(
+                        "source templates must be https:// URLs under 2048 chars".into(),
+                    ));
+                }
+                Ok(Some(t.to_string()))
             }
-            Some(t.to_string())
         }
     };
+    let link = validate(&body.template)?;
+    let raw = validate(&body.raw_template)?;
     state
         .store
-        .set_repo_source(&org_id, &repo.id, template.as_deref())
+        .set_repo_source(&org_id, &repo.id, link.as_deref(), raw.as_deref())
         .map_err(ServerError::Internal)?;
     state
         .store
@@ -914,15 +925,18 @@ pub async fn set_repo_source(
             actor_member_id: Some(principal.member_id.clone()),
             action: "repo.source.set".to_string(),
             detail: format!(
-                "repo={} {}",
+                "repo={} link={} raw={}",
                 repo.id,
-                if template.is_some() { "set" } else { "cleared" }
+                if link.is_some() { "set" } else { "cleared" },
+                if raw.is_some() { "set" } else { "cleared" }
             ),
         })
         .map_err(ServerError::Internal)?;
-    Ok(Json(
-        json!({ "repo_id": repo.id, "source_template": template }),
-    ))
+    Ok(Json(json!({
+        "repo_id": repo.id,
+        "source_template": link,
+        "source_raw_template": raw,
+    })))
 }
 
 /// Query for the sessions list.

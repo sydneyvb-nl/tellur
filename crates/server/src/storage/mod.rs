@@ -220,6 +220,15 @@ pub struct RepoRoleGrant {
     pub updated_at: String,
 }
 
+/// A repo's opt-in source templates (A12). `link` deep-links a range to the
+/// provider's web view; `raw` points at raw bytes the browser can fetch to render
+/// an inline source gutter. Both are `https://` URL templates — never source.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct RepoSource {
+    pub link: Option<String>,
+    pub raw: Option<String>,
+}
+
 /// A member with the facets the People & Access screen needs (A2). `sso_bound`
 /// is whether the member has a bound OIDC subject (can sign in via SSO).
 #[derive(Debug, Clone, serde::Serialize)]
@@ -304,13 +313,20 @@ pub trait Store: Send + Sync {
     /// be the stable repo id or the human-readable repo name.
     fn find_repo(&self, org_id: &str, repo: &str) -> Result<Option<Repo>>;
 
-    /// Read a repo's opt-in source-link template (A12), or `None` if unset.
-    /// Stores only a URL template — never source code.
-    fn get_repo_source(&self, org_id: &str, repo_id: &str) -> Result<Option<String>>;
+    /// Read a repo's opt-in source templates (A12). Both fields are `None` when
+    /// unset. Stores only URL templates — never source code.
+    fn get_repo_source(&self, org_id: &str, repo_id: &str) -> Result<RepoSource>;
 
-    /// Set (or clear, with `None`) a repo's source-link template. Admin-gated at
-    /// the API; the caller validates the template is an `https://` URL.
-    fn set_repo_source(&self, org_id: &str, repo_id: &str, template: Option<&str>) -> Result<()>;
+    /// Set (or clear, with `None`) a repo's source templates. Admin-gated at the
+    /// API; the caller validates each template is an `https://` URL. When both
+    /// are `None` the row is removed.
+    fn set_repo_source(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        link: Option<&str>,
+        raw: Option<&str>,
+    ) -> Result<()>;
 
     // ─── Fine-grained per-repo RBAC (additive grants) ────────────────────────
 
