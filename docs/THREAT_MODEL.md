@@ -26,7 +26,11 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    `.../dashboard` — viewer+, the dashboard adds a recent-activity feed), **central
    policy distribution** (`PUT/GET .../policies[/{name}]` — admin write of policy
    bodies, validated before storage), **attribution ingest**
-   (`POST .../repos/{repo}/attributions`, contributor+), and the **export portal**
+   (`POST .../repos/{repo}/attributions`, contributor+), an opt-in per-repo
+   **source-link template** (`PUT .../repos/{repo}/source` — admin; stores only an
+   `https://` URL template, never source; validated server-side and rendered as an
+   external link so non-https/`javascript:` hrefs can't inject), and the
+   **export portal**
    — org bundles are **durable jobs**: `POST .../export/events|audit` enqueues
    (admin) and returns a job id, polled at `GET .../jobs/{id}` or listed via
    `GET .../jobs` (admin, tenant-scoped — the worker-produced result carries org

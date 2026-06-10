@@ -60,6 +60,10 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/orgs/{org_id}/repos/{repo}/attributions",
             post(crate::api::ingest_attributions).get(crate::api::list_attributions),
         )
+        .route(
+            "/v1/orgs/{org_id}/repos/{repo}/source",
+            put(crate::api::set_repo_source),
+        )
         .route("/v1/orgs/{org_id}/sessions", get(crate::api::list_sessions))
         .route(
             "/v1/orgs/{org_id}/sessions/{id}",

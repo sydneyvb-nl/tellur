@@ -441,7 +441,7 @@ all session-cookie/Bearer auth + tenant-scoped + audited where it mutates:
 | A9 | `GET /v1/orgs/{org}/overview` | Overview | Optional: one composed payload (review-gap, risk-ranked repos, headline deltas) to keep the landing screen one round-trip. Could extend the existing `/dashboard`. |
 | A10 | `GET /v1/orgs/{org}/sso-status` (admin) | People/Settings | Read-only health (issuer reachable, last SCIM activity, token age). No secrets. |
 | A11 | `GET /v1/orgs/{org}/groups` (admin, **session-auth**) | People & Access | Session-auth read of SCIM groups + members + derived role mapping. The existing `/scim/v2/Groups` needs a SCIM bearer token, which the SPA must not hold — so the People screen needs this browser-auth mirror. |
-| A12 | File source contract (opt-in): Git-provider link/fetch **or** `GET .../repos/{repo}/blob/{git_blob_sha}` | File view (full-source mode) | Persisted attribution has no source text. Only needed for the opt-in full-source gutter (§4.2 mode 2); D2 ships metadata-first without it. |
+| A12 | File source contract (opt-in): Git-provider link/fetch **or** `GET .../repos/{repo}/blob/{git_blob_sha}` | File view (full-source mode) | Persisted attribution has no source text. **Shipped (link variant):** per-repo `repo_source` template + `PUT .../repos/{repo}/source`; the file view deep-links each range to the provider, hub stores no source. The inline-bytes proxy variant remains deferred (needs SSRF allow-listing + secret redaction). |
 | A13 | Job-backed SLSA/SPDX variants (optional) | Exports | Only if we want export history/large-repo handling; per-repo SLSA/SPDX are synchronous today and the UI treats them so (§4.5). |
 
 Cross-cutting API requirements: consistent cursor pagination + `total` where

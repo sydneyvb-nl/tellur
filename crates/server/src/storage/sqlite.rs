@@ -18,7 +18,7 @@ use super::{
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
-const SCHEMA_VERSION: &str = "15";
+const SCHEMA_VERSION: &str = "16";
 
 /// A SQLite-backed store. The connection is behind a `Mutex` so the store is
 /// `Send + Sync` and usable as `Arc<dyn Store>`.
@@ -236,6 +236,15 @@ impl Store for SqliteStore {
              );
              -- Fine-grained per-repo role grants. Additive over the member's org
              -- role: effective role on a repo is max(org_role, repo grant).
+             -- Opt-in source link template per repo (A12). Stores only a URL
+             -- template — never source code. {path}/{start}/{end}/{sha} are
+             -- substituted client-side to deep-link the provider.
+             CREATE TABLE IF NOT EXISTS repo_source (
+                 repo_id    TEXT PRIMARY KEY REFERENCES repo(id),
+                 org_id     TEXT NOT NULL REFERENCES org(id),
+                 template   TEXT NOT NULL,
+                 updated_at TEXT NOT NULL
+             );
              CREATE TABLE IF NOT EXISTS repo_role (
                  org_id     TEXT NOT NULL REFERENCES org(id),
                  repo_id    TEXT NOT NULL REFERENCES repo(id),
@@ -521,6 +530,41 @@ impl Store for SqliteStore {
             org_id: org_id.to_string(),
             name,
         }))
+    }
+
+    fn get_repo_source(&self, org_id: &str, repo_id: &str) -> Result<Option<String>> {
+        let conn = self.conn()?;
+        let t = conn
+            .query_row(
+                "SELECT template FROM repo_source WHERE org_id = ?1 AND repo_id = ?2",
+                params![org_id, repo_id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(t)
+    }
+
+    fn set_repo_source(&self, org_id: &str, repo_id: &str, template: Option<&str>) -> Result<()> {
+        let conn = self.conn()?;
+        match template {
+            Some(t) => {
+                let now = chrono::Utc::now().to_rfc3339();
+                conn.execute(
+                    "INSERT INTO repo_source (repo_id, org_id, template, updated_at)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(repo_id) DO UPDATE SET template = excluded.template,
+                                                        updated_at = excluded.updated_at",
+                    params![repo_id, org_id, t, now],
+                )?;
+            }
+            None => {
+                conn.execute(
+                    "DELETE FROM repo_source WHERE org_id = ?1 AND repo_id = ?2",
+                    params![org_id, repo_id],
+                )?;
+            }
+        }
+        Ok(())
     }
 
     fn set_repo_role(

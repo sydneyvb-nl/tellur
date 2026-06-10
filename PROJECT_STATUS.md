@@ -1,10 +1,26 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-10 (sealed-checkpoint audit retention; on feature branch)
+**Last updated:** 2026-06-10 (A12 opt-in source links; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
+
+> **2026-06-10 — A12 opt-in source links (provider deep-link variant).** On
+> branch `feat/source-links`. Implements the safe half of A12 from the dashboard
+> plan — "Git-provider link/fetch" — **without** the hub ever storing or proxying
+> source. A per-repo `repo_source` template (schema v16, SQLite + PG) holds only
+> a URL template; `set_repo_source`/`get_repo_source` + `PUT
+> /v1/orgs/{org}/repos/{repo}/source` (admin, validates `https://`, ≤2048 chars,
+> audited). The attributions read now returns `source_template`, and the File
+> view renders a per-range **View ↗** deep link (`{path}/{start}/{end}/{sha}`
+> substituted, https-guarded client-side too). Verified: server tests
+> (`dashboard_api` set/clear/surface + https+admin validation; PG parity for
+> get/set), SPA 40 vitest (new `source` helper tests) + svelte-check + build;
+> clippy -D warnings + cargo-deny green. The **inline full-source gutter** (hub
+> serving bytes; option 2 of A12) stays deferred — it needs a provider proxy with
+> SSRF allow-listing + secret redaction, its own careful design. Remaining
+> follow-ups: full i18n, Playwright E2E, A12 inline-source proxy.
 
 > **2026-06-10 — Sealed-checkpoint audit retention.** On branch
 > `feat/audit-checkpoint`. The audit hash chain can now be minimised without

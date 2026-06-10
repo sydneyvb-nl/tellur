@@ -261,7 +261,7 @@ export const api = {
   repo: (o: string, repo: string) =>
     request<RepoDetail>(`/v1/orgs/${org(o)}/repos/${encodeURIComponent(repo)}`),
   attributions: (o: string, repo: string) =>
-    request<{ repo_id: string; files: AttrFile[] }>(
+    request<{ repo_id: string; files: AttrFile[]; source_template: string | null }>(
       `/v1/orgs/${org(o)}/repos/${encodeURIComponent(repo)}/attributions`,
     ),
   sessions: (o: string, repo?: string) =>

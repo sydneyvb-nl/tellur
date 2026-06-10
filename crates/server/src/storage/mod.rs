@@ -304,6 +304,14 @@ pub trait Store: Send + Sync {
     /// be the stable repo id or the human-readable repo name.
     fn find_repo(&self, org_id: &str, repo: &str) -> Result<Option<Repo>>;
 
+    /// Read a repo's opt-in source-link template (A12), or `None` if unset.
+    /// Stores only a URL template — never source code.
+    fn get_repo_source(&self, org_id: &str, repo_id: &str) -> Result<Option<String>>;
+
+    /// Set (or clear, with `None`) a repo's source-link template. Admin-gated at
+    /// the API; the caller validates the template is an `https://` URL.
+    fn set_repo_source(&self, org_id: &str, repo_id: &str, template: Option<&str>) -> Result<()>;
+
     // ─── Fine-grained per-repo RBAC (additive grants) ────────────────────────
 
     /// Grant (or update) a member's per-repo role. Both the repo and the member

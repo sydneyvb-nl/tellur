@@ -2,10 +2,12 @@
   import { api, type AttrFile } from "../lib/api";
   import { pct } from "../lib/format";
   import { repoPath } from "../lib/router";
+  import { sourceLink } from "../lib/source";
 
   let { org, repo, path }: { org: string; repo: string; path: string } = $props();
 
   let file = $state<AttrFile | null>(null);
+  let sourceTemplate = $state<string | null>(null);
   let error = $state<string | null>(null);
   let loading = $state(true);
   let reloadKey = $state(0);
@@ -21,7 +23,9 @@
     api
       .attributions(o, r)
       .then((res) => {
-        if (!cancelled) file = res.files.find((f) => f.file_path === p) ?? null;
+        if (cancelled) return;
+        file = res.files.find((f) => f.file_path === p) ?? null;
+        sourceTemplate = res.source_template;
       })
       .catch((e) => {
         if (!cancelled) error = e instanceof Error ? e.message : "failed to load";
@@ -63,7 +67,8 @@
     </span>
   </p>
   <p class="note muted">
-    Provenance metadata only — source text is never stored or proxied by the hub.
+    Provenance metadata only — the hub never stores or proxies source text.
+    {#if sourceTemplate}Source links open the lines at your configured provider.{/if}
   </p>
 
   <table>
@@ -71,6 +76,7 @@
       <tr>
         <th>Lines</th><th>Origin</th><th>Agent / model</th>
         <th class="num">Conf.</th><th>Reviewed</th>
+        {#if sourceTemplate}<th>Source</th>{/if}
       </tr>
     </thead>
     <tbody>
@@ -90,6 +96,22 @@
               <span class="muted">—</span>
             {/if}
           </td>
+          {#if sourceTemplate}
+            <td>
+              {#if sourceLink(sourceTemplate, { path: file.file_path, start: r.start_line, end: r.end_line, sha: file.git_blob_sha })}
+                <a
+                  class="src"
+                  href={sourceLink(sourceTemplate, { path: file.file_path, start: r.start_line, end: r.end_line, sha: file.git_blob_sha })}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  View ↗
+                </a>
+              {:else}
+                <span class="muted">—</span>
+              {/if}
+            </td>
+          {/if}
         </tr>
       {/each}
     </tbody>
@@ -190,6 +212,10 @@
   }
   .ok {
     color: var(--ok);
+  }
+  .src {
+    color: var(--accent);
+    font-size: 12px;
   }
   .panel {
     background: var(--surface);
