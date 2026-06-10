@@ -445,6 +445,25 @@ fn full_store_surface() {
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].id, job_id);
     assert!(store.list_jobs(&org_b.id, 50).unwrap().is_empty());
+    // Retention: finished jobs pruned by a future cutoff; queued kept.
+    let queued = store.enqueue_job(&org_a.id, "export.audit", None).unwrap();
+    let future = (chrono::Utc::now() + chrono::Duration::days(1)).to_rfc3339();
+    assert_eq!(store.prune_finished_jobs(&future).unwrap(), 1); // the completed one
+    assert!(store.get_job(&org_a.id, &job_id).unwrap().is_none());
+    assert_eq!(
+        store.get_job(&org_a.id, &queued).unwrap().unwrap().status,
+        "queued"
+    );
+    // Expired-session prune parity. Clear any pre-existing expired sessions
+    // first (the SSO section above leaves one) so the count is deterministic.
+    store.prune_expired_sessions().unwrap();
+    let m = store
+        .create_member(&org_a.id, "sess", Role::Viewer)
+        .unwrap();
+    let _expired = store.create_session(&m, -60).unwrap();
+    let live = store.create_session(&m, 3600).unwrap();
+    assert_eq!(store.prune_expired_sessions().unwrap(), 1);
+    assert!(store.session_principal(&live).unwrap().is_some());
 
     // ── SCIM groups: membership drives + revokes roles ───────────────────────
     let gm = store

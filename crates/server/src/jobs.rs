@@ -262,3 +262,64 @@ pub fn spawn_worker(store: Arc<dyn Store>) -> tokio::task::JoinHandle<()> {
         }
     })
 }
+
+/// How often the maintenance loop runs.
+const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(3600);
+
+/// Counts removed by one maintenance pass.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct PruneCounts {
+    pub sessions: u64,
+    pub logins: u64,
+    pub jobs: u64,
+}
+
+/// Run one retention pass: drop expired sessions and stale login transactions
+/// always (safe data-minimisation), and finished jobs older than
+/// `retention_days` when that is non-zero. Never touches the tamper-evident
+/// event or audit chains. Returns the counts removed.
+pub fn run_maintenance_once(store: &Arc<dyn Store>, retention_days: u64) -> Result<PruneCounts> {
+    let sessions = store.prune_expired_sessions()?;
+    let logins = store.prune_expired_logins(crate::oidc::LOGIN_TTL_SECS)?;
+    let jobs = if retention_days > 0 {
+        let cutoff =
+            (chrono::Utc::now() - chrono::Duration::days(retention_days as i64)).to_rfc3339();
+        store.prune_finished_jobs(&cutoff)?
+    } else {
+        0
+    };
+    Ok(PruneCounts {
+        sessions,
+        logins,
+        jobs,
+    })
+}
+
+/// Spawn the background retention loop. `retention_days = 0` disables job
+/// pruning but expired sessions/logins are always cleaned up.
+pub fn spawn_maintenance(
+    store: Arc<dyn Store>,
+    retention_days: u64,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            let store = store.clone();
+            match tokio::task::spawn_blocking(move || run_maintenance_once(&store, retention_days))
+                .await
+            {
+                Ok(Ok(c)) if c != PruneCounts::default() => {
+                    tracing::info!(
+                        sessions = c.sessions,
+                        logins = c.logins,
+                        jobs = c.jobs,
+                        "retention pass pruned records"
+                    );
+                }
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => tracing::error!(error = %e, "retention pass failed"),
+                Err(e) => tracing::error!(error = %e, "retention task panicked"),
+            }
+            tokio::time::sleep(MAINTENANCE_INTERVAL).await;
+        }
+    })
+}

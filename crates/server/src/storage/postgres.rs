@@ -1257,6 +1257,23 @@ impl Store for PostgresStore {
         Ok(n > 0)
     }
 
+    fn prune_expired_sessions(&self) -> Result<u64> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let n = self
+            .client()?
+            .execute("DELETE FROM session WHERE expires_at < $1", &[&now])?;
+        Ok(n)
+    }
+
+    fn prune_finished_jobs(&self, older_than_rfc3339: &str) -> Result<u64> {
+        let n = self.client()?.execute(
+            "DELETE FROM job
+             WHERE status IN ('completed', 'failed') AND updated_at < $1",
+            &[&older_than_rfc3339],
+        )?;
+        Ok(n)
+    }
+
     fn enqueue_job(&self, org_id: &str, kind: &str, job_params: Option<&str>) -> Result<String> {
         let id = ids::generate_id("job");
         let now = chrono::Utc::now().to_rfc3339();
