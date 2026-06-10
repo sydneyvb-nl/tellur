@@ -386,12 +386,13 @@ async fn source_template_set_clear_and_surfaced() {
     assert_eq!(status, StatusCode::OK);
     assert!(body["source_template"].is_null());
 
-    // Admin sets it; viewers then see it on the read.
+    // Admin sets both link + raw templates; viewers then see them on the read.
+    let raw = "https://raw.githubusercontent.com/acme/app/main/{path}";
     let (status, _) = put_json(
         &s.state,
         &format!("/v1/orgs/{}/repos/app/source", s.org_a),
         Some(&admin_a),
-        json!({ "template": tmpl }),
+        json!({ "template": tmpl, "raw_template": raw }),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -402,6 +403,7 @@ async fn source_template_set_clear_and_surfaced() {
     )
     .await;
     assert_eq!(body["source_template"], tmpl);
+    assert_eq!(body["source_raw_template"], raw);
 
     // Clearing it (null) removes it.
     let (status, _) = put_json(

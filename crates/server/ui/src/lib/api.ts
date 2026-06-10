@@ -261,9 +261,12 @@ export const api = {
   repo: (o: string, repo: string) =>
     request<RepoDetail>(`/v1/orgs/${org(o)}/repos/${encodeURIComponent(repo)}`),
   attributions: (o: string, repo: string) =>
-    request<{ repo_id: string; files: AttrFile[]; source_template: string | null }>(
-      `/v1/orgs/${org(o)}/repos/${encodeURIComponent(repo)}/attributions`,
-    ),
+    request<{
+      repo_id: string;
+      files: AttrFile[];
+      source_template: string | null;
+      source_raw_template: string | null;
+    }>(`/v1/orgs/${org(o)}/repos/${encodeURIComponent(repo)}/attributions`),
   sessions: (o: string, repo?: string) =>
     request<{ sessions: SessionSummary[] }>(
       `/v1/orgs/${org(o)}/sessions${repo ? `?repo=${encodeURIComponent(repo)}` : ""}`,

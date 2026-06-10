@@ -27,11 +27,14 @@ use crate::app::AppState;
 #[folder = "ui/dist"]
 struct Assets;
 
-/// Strict same-origin CSP for the dashboard (everything is self-hosted). Matches
-/// the threat-model claim that `/app` allows no remote origins. `style-src`
-/// permits inline styles (Svelte/Vite emit a few) — scripts stay 'self' only.
+/// Strict same-origin CSP for the dashboard. Scripts/styles/images are
+/// self-hosted only. `connect-src` additionally allows a small all-list of
+/// well-known source-hosting raw origins so the opt-in file-source gutter (A12)
+/// can fetch raw bytes **client-side** straight from the provider (the hub never
+/// proxies source). Repos on other providers fall back to the per-range links.
 const CSP: &str = "default-src 'self'; img-src 'self' data:; \
-style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; \
+style-src 'self' 'unsafe-inline'; script-src 'self'; \
+connect-src 'self' https://raw.githubusercontent.com https://gitlab.com https://bitbucket.org; \
 object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
 
 /// Shown at `/app` when the SPA hasn't been built into `ui/dist`.

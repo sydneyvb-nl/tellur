@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sourceLink } from "./source";
+import { sourceLink, rawUrl, sliceLines } from "./source";
 
 const ref = { path: "src/auth/session.ts", start: 10, end: 24 };
 
@@ -24,5 +24,30 @@ describe("sourceLink", () => {
   it("rejects non-https templates (defence-in-depth)", () => {
     expect(sourceLink("javascript:alert(1)", ref)).toBeNull();
     expect(sourceLink("http://insecure/{path}", ref)).toBeNull();
+  });
+});
+
+describe("rawUrl", () => {
+  it("substitutes and encodes the path", () => {
+    expect(rawUrl("https://raw/{path}", "docs/a#b.md")).toBe("https://raw/docs/a%23b.md");
+  });
+  it("rejects non-https / empty templates", () => {
+    expect(rawUrl("http://raw/{path}", "a")).toBeNull();
+    expect(rawUrl(null, "a")).toBeNull();
+  });
+});
+
+describe("sliceLines", () => {
+  const text = "one\ntwo\nthree\nfour";
+  it("returns the inclusive 1-based window", () => {
+    expect(sliceLines(text, 2, 3)).toEqual([
+      { n: 2, text: "two" },
+      { n: 3, text: "three" },
+    ]);
+  });
+  it("clamps past end of file and rejects bad ranges", () => {
+    expect(sliceLines(text, 4, 99)).toEqual([{ n: 4, text: "four" }]);
+    expect(sliceLines(text, 0, 2)).toEqual([]);
+    expect(sliceLines(text, 3, 2)).toEqual([]);
   });
 });

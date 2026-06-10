@@ -26,10 +26,15 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    `.../dashboard` — viewer+, the dashboard adds a recent-activity feed), **central
    policy distribution** (`PUT/GET .../policies[/{name}]` — admin write of policy
    bodies, validated before storage), **attribution ingest**
-   (`POST .../repos/{repo}/attributions`, contributor+), an opt-in per-repo
-   **source-link template** (`PUT .../repos/{repo}/source` — admin; stores only an
-   `https://` URL template, never source; validated server-side and rendered as an
-   external link so non-https/`javascript:` hrefs can't inject), and the
+   (`POST .../repos/{repo}/attributions`, contributor+), opt-in per-repo
+   **source templates** (`PUT .../repos/{repo}/source` — admin; stores only
+   `https://` URL templates, never source; validated server-side). The file
+   view's `link` template renders as an external link (non-https/`javascript:`
+   rejected so it can't inject); the optional `raw` template lets the browser
+   fetch raw bytes **directly from the provider** to show an inline gutter — the
+   hub never proxies source, and `/app`'s CSP `connect-src` only permits a small
+   all-list of raw hosts (raw.githubusercontent.com, gitlab.com, bitbucket.org),
+   bounding any exfiltration surface. The
    **export portal**
    — org bundles are **durable jobs**: `POST .../export/events|audit` enqueues
    (admin) and returns a job id, polled at `GET .../jobs/{id}` or listed via
@@ -63,8 +68,9 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    SPA** is served as static assets at `/app/*` (unauthenticated, but they carry
    no tenant data — the browser fetches all data from the authenticated `/v1`
    API with the first-party SSO session cookie, same-origin, so no CORS and no
-   token in the URL). A strict same-origin CSP (`default-src 'self'`, no remote
-   origins, self-hosted fonts) applies to `/app`. **SSO endpoints**
+   token in the URL). A strict CSP (`default-src 'self'`, self-hosted scripts/
+   styles/fonts) applies to `/app`; `connect-src` additionally allows only a
+   small all-list of source-host raw origins for the opt-in A12 gutter. **SSO endpoints**
    (`/auth/login`, `/auth/callback`, `/auth/logout`) are unauthenticated entry
    points for the browser OIDC flow (404 when SSO is not configured). **SCIM
    provisioning** (`/scim/v2/Users`) authenticates with a dedicated, org-scoped

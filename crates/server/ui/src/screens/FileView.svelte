@@ -2,15 +2,24 @@
   import { api, type AttrFile } from "../lib/api";
   import { pct } from "../lib/format";
   import { repoPath } from "../lib/router";
-  import { sourceLink } from "../lib/source";
+  import { sourceLink, rawUrl, sliceLines } from "../lib/source";
 
   let { org, repo, path }: { org: string; repo: string; path: string } = $props();
 
   let file = $state<AttrFile | null>(null);
   let sourceTemplate = $state<string | null>(null);
+  let rawTemplate = $state<string | null>(null);
   let error = $state<string | null>(null);
   let loading = $state(true);
   let reloadKey = $state(0);
+
+  // Inline source gutter (opt-in): the browser fetches raw bytes straight from
+  // the provider — the hub stores/serves none.
+  let showSource = $state(false);
+  let sourceText = $state<string | null>(null);
+  let sourceError = $state<string | null>(null);
+  let sourceLoading = $state(false);
+  const MAX_SOURCE_BYTES = 2_000_000;
 
   $effect(() => {
     const o = org;
@@ -20,12 +29,19 @@
     let cancelled = false;
     loading = true;
     error = null;
+    // Reset inline-source state so navigating to another file never renders the
+    // previous file's cached source (or keeps its fetch error).
+    showSource = false;
+    sourceText = null;
+    sourceError = null;
+    sourceLoading = false;
     api
       .attributions(o, r)
       .then((res) => {
         if (cancelled) return;
         file = res.files.find((f) => f.file_path === p) ?? null;
         sourceTemplate = res.source_template;
+        rawTemplate = res.source_raw_template;
       })
       .catch((e) => {
         if (!cancelled) error = e instanceof Error ? e.message : "failed to load";
@@ -40,6 +56,34 @@
 
   function originClass(origin: string): string {
     return origin.toLowerCase(); // ai | human | mixed | unknown → CSS class
+  }
+
+  async function toggleSource() {
+    showSource = !showSource;
+    if (!showSource || sourceText || sourceError || sourceLoading) return;
+    const url = file ? rawUrl(rawTemplate, file.file_path) : null;
+    if (!url) {
+      sourceError = "no raw source URL configured";
+      return;
+    }
+    sourceLoading = true;
+    try {
+      // No credentials: this is a plain cross-origin GET to the provider, exactly
+      // as the user's browser would do — nothing flows through the hub.
+      const res = await fetch(url, { credentials: "omit" });
+      if (!res.ok) throw new Error(`provider returned ${res.status}`);
+      const len = Number(res.headers.get("content-length") ?? "0");
+      if (len > MAX_SOURCE_BYTES) throw new Error("file too large to inline");
+      const text = await res.text();
+      if (text.length > MAX_SOURCE_BYTES) throw new Error("file too large to inline");
+      sourceText = text;
+    } catch (e) {
+      // Cross-origin/private repos may block the fetch — fall back to links.
+      sourceError =
+        e instanceof Error ? e.message : "couldn't load source from the provider";
+    } finally {
+      sourceLoading = false;
+    }
   }
 </script>
 
@@ -70,6 +114,40 @@
     Provenance metadata only — the hub never stores or proxies source text.
     {#if sourceTemplate}Source links open the lines at your configured provider.{/if}
   </p>
+
+  {#if rawTemplate}
+    <div class="srcbar">
+      <button class="toggle" onclick={toggleSource}>
+        {showSource ? "Hide source" : "Show source"}
+      </button>
+      <span class="muted small">
+        Fetched in your browser straight from the provider — never via the hub.
+      </span>
+    </div>
+  {/if}
+
+  {#if showSource}
+    {#if sourceLoading}
+      <div class="panel skeleton"></div>
+    {:else if sourceError}
+      <div class="panel warnpanel">
+        <p class="muted">Couldn't load source: {sourceError}. The provider may
+          require auth or block cross-origin reads — use the per-range links instead.</p>
+      </div>
+    {:else if sourceText}
+      <div class="source">
+        {#each file.ranges as r (r.start_line + "-" + r.end_line)}
+          <div class="range">
+            <div class="range-head mono {originClass(r.origin)}">
+              {r.origin} · lines {r.start_line}–{r.end_line}
+            </div>
+            <pre class="code"><code>{#each sliceLines(sourceText, r.start_line, r.end_line) as ln (ln.n)}<span class="ln">{ln.n}</span>{ln.text}
+{/each}</code></pre>
+          </div>
+        {/each}
+      </div>
+    {/if}
+  {/if}
 
   <table>
     <thead>
@@ -216,6 +294,72 @@
   .src {
     color: var(--accent);
     font-size: 12px;
+  }
+  .srcbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .toggle {
+    background: var(--accent-weak);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    padding: 5px 12px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .warnpanel {
+    border-color: var(--warn);
+    margin-bottom: 12px;
+  }
+  .source {
+    margin-bottom: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .range {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    overflow: hidden;
+  }
+  .range-head {
+    font-size: 11px;
+    text-transform: capitalize;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    border-left: 3px solid var(--border);
+    color: var(--text-muted);
+    background: var(--surface-2);
+  }
+  .range-head.ai {
+    border-left-color: var(--ai);
+  }
+  .range-head.human {
+    border-left-color: var(--human);
+  }
+  .range-head.mixed {
+    border-left-color: var(--mixed);
+  }
+  .code {
+    margin: 0;
+    padding: 10px 12px;
+    background: var(--surface);
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre;
+  }
+  .ln {
+    display: inline-block;
+    width: 3em;
+    color: var(--text-muted);
+    user-select: none;
+    text-align: right;
+    margin-right: 12px;
   }
   .panel {
     background: var(--surface);
