@@ -46,7 +46,11 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    reads (`GET .../members`, `GET .../groups` — a session-auth mirror of
    `/scim/v2/Groups` so the browser never needs a SCIM token, `GET .../sso-status`)
    are admin-only; sso-status returns configuration/health and counts only —
-   **no client secret or token material**. Operational
+   **no client secret or token material**. A background **retention** loop
+   minimises data-at-rest by pruning expired sessions, stale login transactions,
+   and (when `TELLUR_RETENTION_DAYS > 0`) finished job results; it never touches
+   the tamper-evident event or audit chains, so log integrity is preserved.
+   Operational
    endpoints (`/healthz`, `/readyz`, `/metrics`) are unauthenticated but expose
    only liveness and aggregate counters — no tenant data. The **team dashboard
    SPA** is served as static assets at `/app/*` (unauthenticated, but they carry

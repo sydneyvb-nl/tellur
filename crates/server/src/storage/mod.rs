@@ -528,6 +528,18 @@ pub trait Store: Send + Sync {
     /// Delete a session (logout). Returns `true` if one existed.
     fn delete_session(&self, session_id: &str) -> Result<bool>;
 
+    // ─── Retention / maintenance (transient data only) ───────────────────────
+
+    /// Delete sessions whose `expires_at` is in the past. Returns the count.
+    /// Safe data-minimisation: expired sessions can no longer authenticate.
+    fn prune_expired_sessions(&self) -> Result<u64>;
+
+    /// Delete `completed`/`failed` jobs whose `updated_at` is older than the
+    /// cutoff (RFC3339). Keeps `queued`/`running` jobs regardless. Returns the
+    /// count. Job results can be large; this bounds the table without touching
+    /// any tamper-evident log.
+    fn prune_finished_jobs(&self, older_than_rfc3339: &str) -> Result<u64>;
+
     // ─── SCIM 2.0 provisioning ───────────────────────────────────────────────
 
     /// Mint an org-scoped SCIM provisioning token (plaintext returned once).

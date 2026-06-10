@@ -1,10 +1,25 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-10 (evidence exports: A13 job-backed SLSA/SPDX + org evidence pack; on feature branch)
+**Last updated:** 2026-06-10 (retention: expired-session/login + finished-job pruning; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
+
+> **2026-06-10 — Data retention / lifecycle hygiene.** On branch
+> `feat/retention`. A background maintenance loop (`jobs::spawn_maintenance`,
+> hourly) prunes **transient** data only: expired browser sessions and stale
+> OIDC login transactions are always cleaned up; finished (`completed`/`failed`)
+> jobs are pruned when `TELLUR_RETENTION_DAYS > 0` (default 0 = keep). New Store
+> methods `prune_expired_sessions` + `prune_finished_jobs(cutoff)` (SQLite + PG);
+> `run_maintenance_once` is pure-ish and unit-tested. The tamper-evident **event
+> and audit chains are never pruned** (that would break verification; a future
+> "sealed checkpoint" design is the path for compliance-driven minimisation).
+> Retention is read from env in `run()` (not `Config`), so no test-literal churn.
+> Verified: full workspace tests (new retention test in `tests/jobs.rs` + PG
+> parity for both prune methods), clippy -D warnings + cargo-deny green; PG tests
+> pass against a local Postgres. Remaining: full i18n, Playwright E2E, A12
+> (opt-in full-source gutter), sealed-checkpoint audit retention.
 
 > **2026-06-10 — Evidence exports (A13 + org evidence pack).** On branch
 > `feat/evidence-exports`. The durable-job queue gains a `params` column (schema

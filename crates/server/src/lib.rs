@@ -79,6 +79,14 @@ pub async fn run(config: Config) -> Result<()> {
     // Start the durable-job worker (processes queued exports in the background).
     jobs::spawn_worker(state.store.clone());
 
+    // Start the retention loop: expired sessions/logins are always pruned;
+    // finished jobs are pruned when TELLUR_RETENTION_DAYS > 0 (default off).
+    let retention_days = std::env::var("TELLUR_RETENTION_DAYS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    jobs::spawn_maintenance(state.store.clone(), retention_days);
+
     let app = build_router(state);
 
     let listener = tokio::net::TcpListener::bind(bind).await?;
