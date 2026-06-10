@@ -105,7 +105,9 @@ impl Store for PostgresStore {
                  );
                  CREATE TABLE IF NOT EXISTS audit_head (
                      id INTEGER PRIMARY KEY CHECK (id = 1),
-                     head_hash TEXT NOT NULL, entry_count BIGINT NOT NULL
+                     head_hash TEXT NOT NULL, entry_count BIGINT NOT NULL,
+                     sealed_hash TEXT NOT NULL DEFAULT '',
+                     sealed_count BIGINT NOT NULL DEFAULT 0
                  );
                  CREATE TABLE IF NOT EXISTS repo (
                      id TEXT PRIMARY KEY,
@@ -205,7 +207,9 @@ impl Store for PostgresStore {
         // upgraded DB would otherwise be missing e.g. member.active).
         client
             .batch_execute(
-                "ALTER TABLE job ADD COLUMN IF NOT EXISTS params TEXT;
+                "ALTER TABLE audit_head ADD COLUMN IF NOT EXISTS sealed_hash TEXT NOT NULL DEFAULT '';
+                 ALTER TABLE audit_head ADD COLUMN IF NOT EXISTS sealed_count BIGINT NOT NULL DEFAULT 0;
+                 ALTER TABLE job ADD COLUMN IF NOT EXISTS params TEXT;
                  ALTER TABLE member ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
                  ALTER TABLE member_identity ADD COLUMN IF NOT EXISTS oidc_issuer TEXT;
                  ALTER TABLE member_identity ADD COLUMN IF NOT EXISTS external_id TEXT;
@@ -216,7 +220,7 @@ impl Store for PostgresStore {
             .context("failed to apply column migrations")?;
         client
             .execute(
-                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '14')
+                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '15')
                  ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                 &[],
             )
@@ -1057,13 +1061,21 @@ impl Store for PostgresStore {
 
     fn verify_audit_chain(&self) -> Result<bool> {
         let mut client = self.client()?;
+        // Seed from the sealed checkpoint (genesis `("", 0)` when nothing sealed).
+        let (sealed_hash, sealed_count): (String, i64) = match client.query_opt(
+            "SELECT sealed_hash, sealed_count FROM audit_head WHERE id = 1",
+            &[],
+        )? {
+            Some(r) => (r.get(0), r.get(1)),
+            None => (String::new(), 0),
+        };
         let rows = client.query(
             "SELECT ts, org_id, actor_member_id, action, detail, prev_hash, entry_hash
              FROM audit_log ORDER BY seq ASC",
             &[],
         )?;
-        let mut expected_prev = String::new();
-        let mut counted: i64 = 0;
+        let mut expected_prev = sealed_hash;
+        let mut counted: i64 = sealed_count;
         for r in &rows {
             let prev_hash: String = r.get(5);
             let entry_hash: String = r.get(6);
@@ -1096,6 +1108,38 @@ impl Store for PostgresStore {
             }
             None => Ok(counted == 0),
         }
+    }
+
+    fn seal_audit_before(&self, cutoff_rfc3339: &str) -> Result<u64> {
+        let mut client = self.client()?;
+        let mut tx = client.transaction()?;
+
+        // Newest entry older than the cutoff becomes the new checkpoint boundary.
+        let boundary = tx.query_opt(
+            "SELECT seq, entry_hash FROM audit_log WHERE ts < $1 ORDER BY seq DESC LIMIT 1",
+            &[&cutoff_rfc3339],
+        )?;
+        let Some(brow) = boundary else {
+            return Ok(0);
+        };
+        let bseq: i64 = brow.get(0);
+        let bhash: String = brow.get(1);
+
+        let entry_count: i64 = tx
+            .query_one("SELECT entry_count FROM audit_head WHERE id = 1", &[])?
+            .get(0);
+        let retained_after: i64 = tx
+            .query_one("SELECT COUNT(*) FROM audit_log WHERE seq > $1", &[&bseq])?
+            .get(0);
+        let sealed_count = entry_count - retained_after;
+
+        let pruned = tx.execute("DELETE FROM audit_log WHERE seq <= $1", &[&bseq])?;
+        tx.execute(
+            "UPDATE audit_head SET sealed_hash = $1, sealed_count = $2 WHERE id = 1",
+            &[&bhash, &sealed_count],
+        )?;
+        tx.commit()?;
+        Ok(pruned)
     }
 
     fn provision_member(

@@ -471,6 +471,13 @@ pub trait Store: Send + Sync {
     /// Recompute the audit hash chain and report whether it is intact.
     fn verify_audit_chain(&self) -> Result<bool>;
 
+    /// Seal + prune the audit chain for data minimisation: drop entries with
+    /// `ts < cutoff_rfc3339`, recording the pruned prefix's tip hash + length as
+    /// a checkpoint so [`verify_audit_chain`] still verifies the remainder (and
+    /// still detects truncation). Returns the number of entries pruned. A no-op
+    /// when nothing is older than the cutoff.
+    fn seal_audit_before(&self, cutoff_rfc3339: &str) -> Result<u64>;
+
     // ─── SSO: identity, login transactions, sessions ─────────────────────────
 
     /// Provision an SSO-capable member with a (globally unique) email and no API

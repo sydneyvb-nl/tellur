@@ -80,12 +80,19 @@ pub async fn run(config: Config) -> Result<()> {
     jobs::spawn_worker(state.store.clone());
 
     // Start the retention loop: expired sessions/logins are always pruned;
-    // finished jobs are pruned when TELLUR_RETENTION_DAYS > 0 (default off).
-    let retention_days = std::env::var("TELLUR_RETENTION_DAYS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(0);
-    jobs::spawn_maintenance(state.store.clone(), retention_days);
+    // finished jobs after TELLUR_RETENTION_DAYS and audit entries after
+    // TELLUR_AUDIT_RETENTION_DAYS (both default 0 = keep forever).
+    let env_days = |k: &str| {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(0)
+    };
+    let policy = jobs::RetentionPolicy {
+        jobs_days: env_days("TELLUR_RETENTION_DAYS"),
+        audit_days: env_days("TELLUR_AUDIT_RETENTION_DAYS"),
+    };
+    jobs::spawn_maintenance(state.store.clone(), policy);
 
     let app = build_router(state);
 

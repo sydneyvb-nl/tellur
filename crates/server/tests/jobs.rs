@@ -131,7 +131,7 @@ fn retention_prunes_expired_sessions_and_finished_jobs() {
 
     // Maintenance with retention off: expired session pruned, jobs kept (cutoff
     // is in the past, the job was just completed).
-    let counts = jobs::run_maintenance_once(&store, 0).unwrap();
+    let counts = jobs::run_maintenance_once(&store, jobs::RetentionPolicy::default()).unwrap();
     assert_eq!(counts.sessions, 1);
     assert_eq!(counts.jobs, 0);
     assert!(store.session_principal(&live).unwrap().is_some());
@@ -139,7 +139,14 @@ fn retention_prunes_expired_sessions_and_finished_jobs() {
 
     // An absurd retention value must clamp, not wrap negative and delete fresh
     // jobs (the cutoff would otherwise land in the future).
-    let counts = jobs::run_maintenance_once(&store, u64::MAX).unwrap();
+    let counts = jobs::run_maintenance_once(
+        &store,
+        jobs::RetentionPolicy {
+            jobs_days: u64::MAX,
+            audit_days: 0,
+        },
+    )
+    .unwrap();
     assert_eq!(counts.jobs, 0);
     assert!(store.get_job(&org, &done).unwrap().is_some());
 
@@ -151,5 +158,59 @@ fn retention_prunes_expired_sessions_and_finished_jobs() {
     assert_eq!(
         store.get_job(&org, &queued).unwrap().unwrap().status,
         "queued"
+    );
+}
+
+#[test]
+fn seal_audit_prunes_old_entries_and_keeps_chain_verifiable() {
+    use tellur_server::storage::AuditEntry;
+    let store = store();
+    let org = store.create_org("A").unwrap().id;
+    let entry = |n: usize| AuditEntry {
+        org_id: Some(org.clone()),
+        actor_member_id: Some("alice".into()),
+        action: "test.action".into(),
+        detail: format!("n{n}"),
+    };
+    // Small delays so entries get strictly monotonic timestamps (the seal
+    // cutoff compares against `ts`), keeping the boundary deterministic.
+    for i in 0..5 {
+        store.append_audit(&entry(i)).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(store.verify_audit_chain().unwrap());
+    assert_eq!(store.audit_len().unwrap(), 5);
+
+    // A past cutoff seals nothing (all five entries are newer).
+    let past = (chrono::Utc::now() - chrono::Duration::days(1)).to_rfc3339();
+    assert_eq!(store.seal_audit_before(&past).unwrap(), 0);
+    assert!(store.verify_audit_chain().unwrap());
+
+    // Cutoff = the 4th-oldest entry's ts seals exactly the 3 oldest (ts < cutoff);
+    // the remaining two still verify against the sealed checkpoint.
+    let all: Vec<_> = store.list_audit(&org, None, None, None, None, 50).unwrap();
+    let cutoff = all[all.len() - 4].ts.clone(); // newest-first → 4th oldest
+    let pruned = store.seal_audit_before(&cutoff).unwrap();
+    assert_eq!(pruned, 3);
+    assert_eq!(store.audit_len().unwrap(), 2);
+    assert!(
+        store.verify_audit_chain().unwrap(),
+        "remainder must verify against the sealed checkpoint"
+    );
+
+    store.append_audit(&entry(99)).unwrap();
+    assert!(
+        store.verify_audit_chain().unwrap(),
+        "appending after a seal keeps the chain verifiable"
+    );
+
+    // Sealing everything leaves an empty but still-verifiable chain.
+    let future = (chrono::Utc::now() + chrono::Duration::days(1)).to_rfc3339();
+    let pruned = store.seal_audit_before(&future).unwrap();
+    assert_eq!(pruned, 3); // the 2 retained + the 1 appended
+    assert_eq!(store.audit_len().unwrap(), 0);
+    assert!(
+        store.verify_audit_chain().unwrap(),
+        "sealed-empty chain must still verify against the checkpoint"
     );
 }

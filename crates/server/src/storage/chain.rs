@@ -71,6 +71,11 @@ pub fn write_head(
 /// then compare the walked length/tip against the persisted head checkpoint.
 ///
 /// `recompute` maps each row to `(prev_hash, stored_entry_hash, recomputed_hash)`.
+/// `base` seeds the walk with `(prev_hash, count)` from a sealed checkpoint — a
+/// pruned prefix's tip hash and how many entries it covered. Pass `("", 0)` to
+/// verify a full chain from genesis. The first retained row must link to the
+/// checkpoint and `base_count + retained == head length`, so truncation stays
+/// detectable across a seal.
 /// Returns `false` on any break in the chain (bad link, hash mismatch, or a
 /// head/length mismatch indicating truncation).
 pub fn verify<P, F>(
@@ -78,16 +83,18 @@ pub fn verify<P, F>(
     rows_sql: &str,
     rows_params: P,
     head: &HeadRef,
+    base: (&str, i64),
     recompute: F,
 ) -> Result<bool>
 where
     P: Params,
     F: Fn(&Row) -> Result<(String, String, String)>,
 {
+    let (base_prev, base_count) = base;
     let mut stmt = conn.prepare(rows_sql)?;
     let mut rows = stmt.query(rows_params)?;
-    let mut expected_prev = String::new();
-    let mut counted: i64 = 0;
+    let mut expected_prev = base_prev.to_string();
+    let mut counted: i64 = base_count;
     while let Some(row) = rows.next()? {
         let (prev_hash, stored_hash, recomputed) = recompute(row)?;
         if prev_hash != expected_prev || recomputed != stored_hash {
