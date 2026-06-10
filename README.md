@@ -532,8 +532,10 @@ binary, served same-origin so it uses your first-party SSO session): sign in at
 `/auth/login`, then open `/app`. It is being built out in phases per
 [`docs/proposals/TEAM_DASHBOARD_UI.md`](docs/proposals/TEAM_DASHBOARD_UI.md):
 Overview (org rollup + activity trend), Repositories + per-file provenance,
-Sessions + replay, and — for admins — an **Audit log** browser and an **Exports**
-console (start exports, watch job status, download results).
+Sessions + replay, and — for admins — a **Policies** compliance view (per-repo
+violations by severity + one-click re-evaluation), a **People & Access** view
+(members, SCIM groups, SSO/SCIM health), an **Audit log** browser, and an
+**Exports** console (start exports, watch job status, download results).
 
 ## Development
 

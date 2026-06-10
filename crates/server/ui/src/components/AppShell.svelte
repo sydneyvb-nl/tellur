@@ -4,6 +4,8 @@
     auditPath,
     defaultPath,
     exportsPath,
+    peoplePath,
+    policiesPath,
     reposPath,
     sessionsPath,
   } from "../lib/router";
@@ -22,9 +24,10 @@
       { key: "overview", label: "Overview", href: defaultPath(org), ready: true, admin: false },
       { key: "repos", label: "Repositories", href: reposPath(org), ready: true, admin: false },
       { key: "sessions", label: "Sessions", href: sessionsPath(org), ready: true, admin: false },
+      { key: "policies", label: "Policies", href: policiesPath(org), ready: true, admin: true },
+      { key: "people", label: "People & Access", href: peoplePath(org), ready: true, admin: true },
       { key: "exports", label: "Exports", href: exportsPath(org), ready: true, admin: true },
       { key: "audit", label: "Audit log", href: auditPath(org), ready: true, admin: true },
-      { key: "policies", label: "Policies", href: "#", ready: false, admin: true },
     ].filter((item) => !item.admin || role === "admin"),
   );
 
