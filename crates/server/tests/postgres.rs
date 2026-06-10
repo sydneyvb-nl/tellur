@@ -154,6 +154,48 @@ fn full_store_surface() {
     assert_eq!(listed[0].git_blob_sha, "abc123");
     assert_eq!(listed[0].ranges[0].end_line, 10);
 
+    // ── Opt-in source link template (A12) ────────────────────────────────────
+    assert!(
+        store
+            .get_repo_source(&org_a.id, &repo.id)
+            .unwrap()
+            .is_none()
+    );
+    store
+        .set_repo_source(&org_a.id, &repo.id, Some("https://h/{path}"))
+        .unwrap();
+    assert_eq!(
+        store
+            .get_repo_source(&org_a.id, &repo.id)
+            .unwrap()
+            .as_deref(),
+        Some("https://h/{path}")
+    );
+    // Upsert replaces; clearing removes; tenant-scoped.
+    store
+        .set_repo_source(&org_a.id, &repo.id, Some("https://h2/{sha}"))
+        .unwrap();
+    assert_eq!(
+        store
+            .get_repo_source(&org_a.id, &repo.id)
+            .unwrap()
+            .as_deref(),
+        Some("https://h2/{sha}")
+    );
+    store.set_repo_source(&org_a.id, &repo.id, None).unwrap();
+    assert!(
+        store
+            .get_repo_source(&org_a.id, &repo.id)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        store
+            .get_repo_source(&org_b.id, &repo.id)
+            .unwrap()
+            .is_none()
+    );
+
     // ── Listings & rollup ───────────────────────────────────────────────────
     let repos = store.list_repos(&org_a.id).unwrap();
     assert_eq!(repos.len(), 1);

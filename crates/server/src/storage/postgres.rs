@@ -142,6 +142,11 @@ impl Store for PostgresStore {
                      ranges_json TEXT NOT NULL, updated_at TEXT NOT NULL,
                      PRIMARY KEY (org_id, repo_id, file_path)
                  );
+                 CREATE TABLE IF NOT EXISTS repo_source (
+                     repo_id TEXT PRIMARY KEY REFERENCES repo(id),
+                     org_id TEXT NOT NULL REFERENCES org(id),
+                     template TEXT NOT NULL, updated_at TEXT NOT NULL
+                 );
                  CREATE TABLE IF NOT EXISTS repo_role (
                      org_id TEXT NOT NULL REFERENCES org(id),
                      repo_id TEXT NOT NULL REFERENCES repo(id),
@@ -220,7 +225,7 @@ impl Store for PostgresStore {
             .context("failed to apply column migrations")?;
         client
             .execute(
-                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '15')
+                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '16')
                  ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                 &[],
             )
@@ -349,6 +354,36 @@ impl Store for PostgresStore {
             org_id: org_id.to_string(),
             name: r.get(1),
         }))
+    }
+
+    fn get_repo_source(&self, org_id: &str, repo_id: &str) -> Result<Option<String>> {
+        let row = self.client()?.query_opt(
+            "SELECT template FROM repo_source WHERE org_id = $1 AND repo_id = $2",
+            &[&org_id, &repo_id],
+        )?;
+        Ok(row.map(|r| r.get(0)))
+    }
+
+    fn set_repo_source(&self, org_id: &str, repo_id: &str, template: Option<&str>) -> Result<()> {
+        match template {
+            Some(t) => {
+                let now = chrono::Utc::now().to_rfc3339();
+                self.client()?.execute(
+                    "INSERT INTO repo_source (repo_id, org_id, template, updated_at)
+                     VALUES ($1, $2, $3, $4)
+                     ON CONFLICT (repo_id) DO UPDATE SET template = excluded.template,
+                                                         updated_at = excluded.updated_at",
+                    &[&repo_id, &org_id, &t, &now],
+                )?;
+            }
+            None => {
+                self.client()?.execute(
+                    "DELETE FROM repo_source WHERE org_id = $1 AND repo_id = $2",
+                    &[&org_id, &repo_id],
+                )?;
+            }
+        }
+        Ok(())
     }
 
     fn set_repo_role(

@@ -6,7 +6,7 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header::AUTHORIZATION};
 use http_body_util::BodyExt;
-use serde_json::Value;
+use serde_json::{Value, json};
 use tellur_core::schema::types::{
     AttributionRange, AttributionState, EvidenceStrength, FileAttribution, Origin,
 };
@@ -338,6 +338,108 @@ async fn sessions_repo_filter_and_tenant_scope() {
         &s.state,
         &format!("/v1/orgs/{}/sessions", s.org_a),
         Some(&s.admin_b),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+// ─── A12: opt-in source link template ────────────────────────────────────────
+
+async fn put_json(
+    state: &AppState,
+    uri: &str,
+    token: Option<&str>,
+    body: Value,
+) -> (StatusCode, Value) {
+    let mut b = Request::builder()
+        .method("PUT")
+        .uri(uri)
+        .header("content-type", "application/json");
+    if let Some(t) = token {
+        b = b.header(AUTHORIZATION, format!("Bearer {t}"));
+    }
+    let resp = build_router(state.clone())
+        .oneshot(b.body(Body::from(body.to_string())).unwrap())
+        .await
+        .unwrap();
+    let status = resp.status();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+#[tokio::test]
+async fn source_template_set_clear_and_surfaced() {
+    let s = setup();
+    let admin_a = admin_token(&s.state, &s.org_a);
+    let tmpl = "https://github.com/acme/app/blob/main/{path}#L{start}-L{end}";
+
+    // Default: no template in the attributions read.
+    let (status, body) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/repos/app/attributions", s.org_a),
+        Some(&s.viewer_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["source_template"].is_null());
+
+    // Admin sets it; viewers then see it on the read.
+    let (status, _) = put_json(
+        &s.state,
+        &format!("/v1/orgs/{}/repos/app/source", s.org_a),
+        Some(&admin_a),
+        json!({ "template": tmpl }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, body) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/repos/app/attributions", s.org_a),
+        Some(&s.viewer_a),
+    )
+    .await;
+    assert_eq!(body["source_template"], tmpl);
+
+    // Clearing it (null) removes it.
+    let (status, _) = put_json(
+        &s.state,
+        &format!("/v1/orgs/{}/repos/app/source", s.org_a),
+        Some(&admin_a),
+        json!({ "template": Value::Null }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, body) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/repos/app/attributions", s.org_a),
+        Some(&s.viewer_a),
+    )
+    .await;
+    assert!(body["source_template"].is_null());
+}
+
+#[tokio::test]
+async fn source_template_validates_https_and_requires_admin() {
+    let s = setup();
+    let admin_a = admin_token(&s.state, &s.org_a);
+    // Non-https is rejected (guards against javascript:/http hrefs).
+    let (status, _) = put_json(
+        &s.state,
+        &format!("/v1/orgs/{}/repos/app/source", s.org_a),
+        Some(&admin_a),
+        json!({ "template": "javascript:alert(1)" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    // Viewers cannot set it.
+    let (status, _) = put_json(
+        &s.state,
+        &format!("/v1/orgs/{}/repos/app/source", s.org_a),
+        Some(&s.viewer_a),
+        json!({ "template": "https://example.com/{path}" }),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);

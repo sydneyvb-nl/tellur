@@ -536,7 +536,10 @@ enqueues a durable job that evaluates the org's `default` policy against every
 repo's attribution and stores timestamped snapshots; read the latest per repo
 with `GET .../policies/compliance`. `GET .../members`, `GET .../groups` (a
 session-auth mirror of `/scim/v2/Groups`), and `GET .../sso-status` back the
-People & Access screen — counts and health only, never secrets. The
+People & Access screen — counts and health only, never secrets. An admin can
+optionally set a per-repo **source-link template** (`PUT .../repos/{repo}/source`,
+`https://` only) so the file provenance view deep-links each range to your own
+provider — the hub still stores and serves **no source code**. The
 hub ships a built-in **team dashboard** at **`/app`** (Svelte SPA embedded in the
 binary, served same-origin so it uses your first-party SSO session): sign in at
 `/auth/login`, then open `/app`. It is being built out in phases per
