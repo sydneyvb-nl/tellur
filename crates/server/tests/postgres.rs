@@ -11,7 +11,7 @@
 
 use r2d2_postgres::postgres::{Client, NoTls};
 use tellur_server::auth::Role;
-use tellur_server::storage::{AuditEntry, IngestEvent, PostgresStore, Store};
+use tellur_server::storage::{AuditEntry, ComplianceSnapshot, IngestEvent, PostgresStore, Store};
 
 use tellur_core::schema::types::{
     AttributionRange, AttributionState, EvidenceStrength, FileAttribution, Origin,
@@ -526,6 +526,49 @@ fn full_store_surface() {
             .unwrap()
             .is_empty()
     );
+
+    // ── People & Access (A2/A10) ─────────────────────────────────────────────
+    let members = store.list_members(&org_a.id).unwrap();
+    // admin (alice, no identity) + the SCIM-provisioned grp user.
+    assert!(members.len() >= 2);
+    let grp = members
+        .iter()
+        .find(|m| m.email.as_deref() == Some("grp@corp.test"))
+        .unwrap();
+    assert!(!grp.sso_bound); // SCIM user has email but no bound OIDC subject
+    assert!(grp.active);
+    assert!(store.list_members(&org_b.id).unwrap().is_empty());
+    // A SCIM token was minted earlier in this test for org A → Some; org B has none.
+    assert!(store.scim_token_created_at(&org_a.id).unwrap().is_some());
+    assert!(store.scim_token_created_at(&org_b.id).unwrap().is_none());
+
+    // ── Policy compliance snapshots (A8) ─────────────────────────────────────
+    let older = ComplianceSnapshot {
+        repo_id: repo.id.clone(),
+        repo_name: repo.name.clone(),
+        policy_name: "default".into(),
+        policy_version: 1,
+        evaluated_at: "2026-06-01T00:00:00Z".into(),
+        ai_ranges: 1,
+        violations: 1,
+        high: 1,
+        medium: 0,
+        low: 0,
+    };
+    let newer = ComplianceSnapshot {
+        evaluated_at: "2026-06-09T00:00:00Z".into(),
+        violations: 0,
+        high: 0,
+        policy_version: 2,
+        ..older.clone()
+    };
+    store.put_compliance_snapshot(&org_a.id, &older).unwrap();
+    store.put_compliance_snapshot(&org_a.id, &newer).unwrap();
+    let latest = store.latest_compliance(&org_a.id).unwrap();
+    assert_eq!(latest.len(), 1, "one snapshot per repo (the newest)");
+    assert_eq!(latest[0].policy_version, 2);
+    assert_eq!(latest[0].violations, 0);
+    assert!(store.latest_compliance(&org_b.id).unwrap().is_empty());
 }
 
 #[test]

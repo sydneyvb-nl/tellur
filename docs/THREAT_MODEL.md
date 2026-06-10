@@ -34,7 +34,13 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    also **read the audit log** (`GET .../audit` — paginated, filterable, tenant-
    scoped; audit detail can name members/actions, so it is admin-only and the
    first page returns `chain_intact` for the tamper-evident hash chain).
-   Operational
+   **Policy compliance** (`POST .../policies/compliance` enqueues a job that
+   evaluates the org policy over stored attribution; `GET .../policies/compliance`
+   reads the latest snapshot — admin, tenant-scoped) and **People & Access**
+   reads (`GET .../members`, `GET .../groups` — a session-auth mirror of
+   `/scim/v2/Groups` so the browser never needs a SCIM token, `GET .../sso-status`)
+   are admin-only; sso-status returns configuration/health and counts only —
+   **no client secret or token material**. Operational
    endpoints (`/healthz`, `/readyz`, `/metrics`) are unauthenticated but expose
    only liveness and aggregate counters — no tenant data. The **team dashboard
    SPA** is served as static assets at `/app/*` (unauthenticated, but they carry

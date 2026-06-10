@@ -11,11 +11,18 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
 
-use crate::storage::{Job, Store};
+use crate::storage::{ComplianceSnapshot, Job, Store};
+use tellur_core::policy::PolicyEngine;
+use tellur_core::schema::types::{Origin, RiskLevel};
 
 /// Job kinds the worker knows how to run.
 pub const KIND_EXPORT_EVENTS: &str = "export.events";
 pub const KIND_EXPORT_AUDIT: &str = "export.audit";
+pub const KIND_COMPLIANCE: &str = "policy.compliance";
+
+/// Policy name evaluated for compliance snapshots (A8). The org's `default`
+/// policy is the convention; if absent, the compliance run is a no-op.
+pub const COMPLIANCE_POLICY: &str = "default";
 
 /// Claim and run a single queued job. Returns `true` if a job was processed,
 /// `false` if the queue was empty.
@@ -60,8 +67,81 @@ fn run_job(store: &Arc<dyn Store>, job: &Job) -> Result<Value> {
                 "entries": entries,
             }))
         }
+        KIND_COMPLIANCE => run_compliance(store, &job.org_id),
         other => bail!("unknown job kind: {other}"),
     }
+}
+
+/// Evaluate the org's `default` policy against every repo's stored attribution
+/// and persist a timestamped snapshot per repo (A8). Returns a summary; the
+/// dashboard reads the persisted snapshots via `latest_compliance`.
+fn run_compliance(store: &Arc<dyn Store>, org_id: &str) -> Result<Value> {
+    let evaluated_at = chrono::Utc::now().to_rfc3339();
+    let Some(policy_doc) = store.get_policy(org_id, COMPLIANCE_POLICY)? else {
+        // No policy configured: nothing to evaluate, and we record nothing so the
+        // dashboard can distinguish "no policy" from "evaluated, zero violations".
+        return Ok(json!({
+            "schema": "tellur.server.compliance.v1",
+            "org_id": org_id,
+            "generated_at": evaluated_at,
+            "policy": Value::Null,
+            "repos_evaluated": 0,
+        }));
+    };
+    let engine = PolicyEngine::from_yaml_str(&policy_doc.content)?;
+
+    let repos = store.list_repos(org_id)?;
+    let mut total_violations: i64 = 0;
+    for repo in &repos {
+        let files = store.list_attributions(org_id, &repo.id)?;
+        let mut ai_ranges = 0i64;
+        let (mut violations, mut high, mut medium, mut low) = (0i64, 0i64, 0i64, 0i64);
+        for file in &files {
+            for range in &file.ranges {
+                if range.origin == Origin::Ai {
+                    ai_ranges += 1;
+                }
+                for result in engine.evaluate_attribution(range, &file.file_path) {
+                    if result.passed {
+                        continue;
+                    }
+                    violations += 1;
+                    match result.severity {
+                        // The snapshot carries three buckets; Critical folds into
+                        // High (the most severe bucket) so it is never understated.
+                        RiskLevel::Critical | RiskLevel::High => high += 1,
+                        RiskLevel::Medium => medium += 1,
+                        RiskLevel::Low => low += 1,
+                    }
+                }
+            }
+        }
+        total_violations += violations;
+        store.put_compliance_snapshot(
+            org_id,
+            &ComplianceSnapshot {
+                repo_id: repo.id.clone(),
+                repo_name: repo.name.clone(),
+                policy_name: policy_doc.name.clone(),
+                policy_version: policy_doc.version,
+                evaluated_at: evaluated_at.clone(),
+                ai_ranges,
+                violations,
+                high,
+                medium,
+                low,
+            },
+        )?;
+    }
+
+    Ok(json!({
+        "schema": "tellur.server.compliance.v1",
+        "org_id": org_id,
+        "generated_at": evaluated_at,
+        "policy": { "name": policy_doc.name, "version": policy_doc.version },
+        "repos_evaluated": repos.len(),
+        "total_violations": total_violations,
+    }))
 }
 
 /// Spawn the background worker loop. Drains the queue, then idles between polls.

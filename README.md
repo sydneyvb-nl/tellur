@@ -519,7 +519,14 @@ poll `GET /v1/orgs/{org}/jobs/{id}` until `completed` to fetch the result, or li
 an org's job history with `GET /v1/orgs/{org}/jobs` (admin). Admins can also read
 the tamper-evident audit log directly with
 `GET /v1/orgs/{org}/audit[?actor=&action=&range=&before=&limit=]` (paginated,
-newest-first; the first page reports `chain_intact` for the hash chain). The
+newest-first; the first page reports `chain_intact` for the hash chain).
+
+**Policy compliance & People/Access** (admin): `POST /v1/orgs/{org}/policies/compliance`
+enqueues a durable job that evaluates the org's `default` policy against every
+repo's attribution and stores timestamped snapshots; read the latest per repo
+with `GET .../policies/compliance`. `GET .../members`, `GET .../groups` (a
+session-auth mirror of `/scim/v2/Groups`), and `GET .../sso-status` back the
+People & Access screen — counts and health only, never secrets. The
 hub ships a built-in **team dashboard** at **`/app`** (Svelte SPA embedded in the
 binary, served same-origin so it uses your first-party SSO session): sign in at
 `/auth/login`, then open `/app`. It is being built out in phases per

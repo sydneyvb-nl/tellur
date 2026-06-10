@@ -11,14 +11,14 @@ use tellur_core::schema::types::FileAttribution;
 
 use super::chain;
 use super::{
-    ActivityBucket, ActivityGroup, AuditEntry, AuditRecord, IngestEvent, Job, LoginTx, Org,
-    OrgReport, PolicyDoc, PolicySummary, Repo, RepoFacts, RepoRoleGrant, RepoSummary, ScimGroup,
-    ScimUser, SessionSummary, Store, StoredEvent, role_from_group_name,
+    ActivityBucket, ActivityGroup, AuditEntry, AuditRecord, ComplianceSnapshot, IngestEvent, Job,
+    LoginTx, MemberInfo, Org, OrgReport, PolicyDoc, PolicySummary, Repo, RepoFacts, RepoRoleGrant,
+    RepoSummary, ScimGroup, ScimUser, SessionSummary, Store, StoredEvent, role_from_group_name,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
-const SCHEMA_VERSION: &str = "12";
+const SCHEMA_VERSION: &str = "13";
 
 /// A SQLite-backed store. The connection is behind a `Mutex` so the store is
 /// `Send + Sync` and usable as `Arc<dyn Store>`.
@@ -290,7 +290,25 @@ impl Store for SqliteStore {
                  member_id TEXT NOT NULL REFERENCES member(id),
                  PRIMARY KEY (group_id, member_id)
              );
-             CREATE INDEX IF NOT EXISTS idx_group_member ON scim_group_member(member_id);",
+             CREATE INDEX IF NOT EXISTS idx_group_member ON scim_group_member(member_id);
+             -- Policy-compliance snapshots (A8): append-only, timestamped per
+             -- (org, repo, policy version); the dashboard reads the latest.
+             CREATE TABLE IF NOT EXISTS compliance_snapshot (
+                 id             TEXT PRIMARY KEY,
+                 org_id         TEXT NOT NULL REFERENCES org(id),
+                 repo_id        TEXT NOT NULL,
+                 repo_name      TEXT NOT NULL,
+                 policy_name    TEXT NOT NULL,
+                 policy_version INTEGER NOT NULL,
+                 evaluated_at   TEXT NOT NULL,
+                 ai_ranges      INTEGER NOT NULL,
+                 violations     INTEGER NOT NULL,
+                 high           INTEGER NOT NULL,
+                 medium         INTEGER NOT NULL,
+                 low            INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_compliance_latest
+                 ON compliance_snapshot(org_id, repo_id, evaluated_at);",
         )
         .context("failed to create schema")?;
 
@@ -1609,6 +1627,114 @@ impl Store for SqliteStore {
                 error: r.get(5)?,
                 created_at: r.get(6)?,
                 updated_at: r.get(7)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    fn list_members(&self, org_id: &str) -> Result<Vec<MemberInfo>> {
+        let conn = self.conn()?;
+        // LEFT JOIN so members without an SSO identity (e.g. CLI-created) still
+        // appear; `sso_bound` is whether a verified OIDC subject is bound.
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.display_name, m.role, m.active, i.email, i.oidc_subject
+             FROM member m
+             LEFT JOIN member_identity i ON i.member_id = m.id
+             WHERE m.org_id = ?1
+             ORDER BY m.display_name",
+        )?;
+        let rows = stmt.query_map([org_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, Option<String>>(4)?,
+                r.get::<_, Option<String>>(5)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, display_name, role, active, email, oidc_subject) = row?;
+            out.push(MemberInfo {
+                id,
+                display_name,
+                role,
+                email,
+                sso_bound: oidc_subject.is_some(),
+                active: active != 0,
+            });
+        }
+        Ok(out)
+    }
+
+    fn scim_token_created_at(&self, org_id: &str) -> Result<Option<String>> {
+        let conn = self.conn()?;
+        let ts = conn
+            .query_row(
+                "SELECT created_at FROM scim_token WHERE org_id = ?1
+                 ORDER BY created_at DESC LIMIT 1",
+                [org_id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(ts)
+    }
+
+    fn put_compliance_snapshot(&self, org_id: &str, snap: &ComplianceSnapshot) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO compliance_snapshot
+                 (id, org_id, repo_id, repo_name, policy_name, policy_version,
+                  evaluated_at, ai_ranges, violations, high, medium, low)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                ids::generate_id("cmp"),
+                org_id,
+                snap.repo_id,
+                snap.repo_name,
+                snap.policy_name,
+                snap.policy_version,
+                snap.evaluated_at,
+                snap.ai_ranges,
+                snap.violations,
+                snap.high,
+                snap.medium,
+                snap.low,
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn latest_compliance(&self, org_id: &str) -> Result<Vec<ComplianceSnapshot>> {
+        let conn = self.conn()?;
+        // Newest snapshot per repo: pick the max (evaluated_at, id) so a tie on
+        // the timestamp is still deterministic.
+        let mut stmt = conn.prepare(
+            "SELECT cs.repo_id, cs.repo_name, cs.policy_name, cs.policy_version,
+                    cs.evaluated_at, cs.ai_ranges, cs.violations, cs.high, cs.medium, cs.low
+             FROM compliance_snapshot cs
+             JOIN (
+                 SELECT repo_id, MAX(evaluated_at || '|' || id) AS mk
+                 FROM compliance_snapshot WHERE org_id = ?1 GROUP BY repo_id
+             ) latest
+               ON cs.repo_id = latest.repo_id
+              AND (cs.evaluated_at || '|' || cs.id) = latest.mk
+             WHERE cs.org_id = ?1
+             ORDER BY cs.evaluated_at DESC, cs.repo_name",
+        )?;
+        let rows = stmt.query_map([org_id], |r| {
+            Ok(ComplianceSnapshot {
+                repo_id: r.get(0)?,
+                repo_name: r.get(1)?,
+                policy_name: r.get(2)?,
+                policy_version: r.get(3)?,
+                evaluated_at: r.get(4)?,
+                ai_ranges: r.get(5)?,
+                violations: r.get(6)?,
+                high: r.get(7)?,
+                medium: r.get(8)?,
+                low: r.get(9)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
