@@ -1113,6 +1113,14 @@ impl Store for PostgresStore {
     fn seal_audit_before(&self, cutoff_rfc3339: &str) -> Result<u64> {
         let mut client = self.client()?;
         let mut tx = client.transaction()?;
+        // Take the same advisory lock as append_audit so sealing and appends are
+        // serialized: otherwise a concurrent append between the entry_count read
+        // and the COUNT(seq > boundary) below would skew sealed_count and make
+        // verify_audit_chain report a false break.
+        tx.execute(
+            "SELECT pg_advisory_xact_lock($1)",
+            &[&advisory_key("audit")],
+        )?;
 
         // Newest entry older than the cutoff becomes the new checkpoint boundary.
         let boundary = tx.query_opt(

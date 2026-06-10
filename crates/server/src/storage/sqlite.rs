@@ -1363,6 +1363,9 @@ impl Store for SqliteStore {
 
     fn seal_audit_before(&self, cutoff_rfc3339: &str) -> Result<u64> {
         let mut guard = self.conn()?;
+        // IMMEDIATE takes the write lock up front, serializing with append_audit
+        // (also IMMEDIATE) so the entry_count read and the boundary count below
+        // can't race a concurrent append and skew sealed_count.
         let tx = guard.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
         // Newest entry older than the cutoff becomes the new checkpoint boundary.
