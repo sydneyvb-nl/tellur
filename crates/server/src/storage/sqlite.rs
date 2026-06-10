@@ -350,6 +350,32 @@ impl Store for SqliteStore {
         ensure_column(&conn, "member", "active", "INTEGER NOT NULL DEFAULT 1")?;
         ensure_column(&conn, "job", "params", "TEXT")?;
         ensure_column(&conn, "repo_source", "raw_template", "TEXT")?;
+        // v16 created repo_source.template as NOT NULL; A12's raw-only configs
+        // store a NULL there, so drop the constraint by rebuilding the table
+        // (SQLite can't ALTER it away). Guarded so it runs only on old DBs.
+        let template_notnull: i64 = conn
+            .query_row(
+                "SELECT \"notnull\" FROM pragma_table_info('repo_source') WHERE name = 'template'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or(0);
+        if template_notnull == 1 {
+            conn.execute_batch(
+                "CREATE TABLE repo_source_new (
+                     repo_id      TEXT PRIMARY KEY REFERENCES repo(id),
+                     org_id       TEXT NOT NULL REFERENCES org(id),
+                     template     TEXT,
+                     raw_template TEXT,
+                     updated_at   TEXT NOT NULL
+                 );
+                 INSERT INTO repo_source_new (repo_id, org_id, template, raw_template, updated_at)
+                     SELECT repo_id, org_id, template, raw_template, updated_at FROM repo_source;
+                 DROP TABLE repo_source;
+                 ALTER TABLE repo_source_new RENAME TO repo_source;",
+            )?;
+        }
         ensure_column(
             &conn,
             "audit_head",

@@ -29,6 +29,12 @@
     let cancelled = false;
     loading = true;
     error = null;
+    // Reset inline-source state so navigating to another file never renders the
+    // previous file's cached source (or keeps its fetch error).
+    showSource = false;
+    sourceText = null;
+    sourceError = null;
+    sourceLoading = false;
     api
       .attributions(o, r)
       .then((res) => {
