@@ -18,7 +18,7 @@ use super::{
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
-const SCHEMA_VERSION: &str = "14";
+const SCHEMA_VERSION: &str = "15";
 
 /// A SQLite-backed store. The connection is behind a `Mutex` so the store is
 /// `Send + Sync` and usable as `Arc<dyn Store>`.
@@ -73,7 +73,7 @@ fn split_csv(s: Option<String>) -> Vec<String> {
 fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
     debug_assert!(matches!(
         table,
-        "member" | "member_identity" | "oidc_login" | "job"
+        "member" | "member_identity" | "oidc_login" | "job" | "audit_head"
     ));
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let present = stmt
@@ -87,6 +87,19 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str)
         )?;
     }
     Ok(())
+}
+
+/// Read the audit chain's sealed checkpoint `(sealed_hash, sealed_count)` — the
+/// tip hash and length of a pruned prefix. Genesis default `("", 0)`.
+fn audit_checkpoint(conn: &Connection) -> Result<(String, i64)> {
+    let row = conn
+        .query_row(
+            "SELECT sealed_hash, sealed_count FROM audit_head WHERE id = 1",
+            [],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+        )
+        .optional()?;
+    Ok(row.unwrap_or_else(|| (String::new(), 0)))
 }
 
 /// Compute an audit entry hash over the previous hash and the entry fields.
@@ -168,9 +181,11 @@ impl Store for SqliteStore {
              -- Single-row checkpoint of the audit chain head + length, so tail
              -- truncation / rollback to an earlier prefix is detectable.
              CREATE TABLE IF NOT EXISTS audit_head (
-                 id          INTEGER PRIMARY KEY CHECK (id = 1),
-                 head_hash   TEXT NOT NULL,
-                 entry_count INTEGER NOT NULL
+                 id           INTEGER PRIMARY KEY CHECK (id = 1),
+                 head_hash    TEXT NOT NULL,
+                 entry_count  INTEGER NOT NULL,
+                 sealed_hash  TEXT NOT NULL DEFAULT '',
+                 sealed_count INTEGER NOT NULL DEFAULT 0
              );
              CREATE TABLE IF NOT EXISTS repo (
                  id         TEXT PRIMARY KEY,
@@ -323,6 +338,18 @@ impl Store for SqliteStore {
         // every auth lookup now queries).
         ensure_column(&conn, "member", "active", "INTEGER NOT NULL DEFAULT 1")?;
         ensure_column(&conn, "job", "params", "TEXT")?;
+        ensure_column(
+            &conn,
+            "audit_head",
+            "sealed_hash",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        ensure_column(
+            &conn,
+            "audit_head",
+            "sealed_count",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
         ensure_column(&conn, "member_identity", "oidc_issuer", "TEXT")?;
         ensure_column(&conn, "member_identity", "external_id", "TEXT")?;
         ensure_column(
@@ -687,6 +714,7 @@ impl Store for SqliteStore {
              FROM event WHERE org_id = ?1 AND repo_id = ?2 ORDER BY seq ASC",
             params![org_id, repo_id],
             &head,
+            ("", 0),
             |r| {
                 let id: String = r.get(0)?;
                 let session_id: String = r.get(1)?;
@@ -1303,12 +1331,15 @@ impl Store for SqliteStore {
             key_col: "id",
             key: &audit_key,
         };
+        // Seed the walk from the sealed checkpoint (genesis when nothing sealed).
+        let (sealed_hash, sealed_count) = audit_checkpoint(&conn)?;
         chain::verify(
             &conn,
             "SELECT ts, org_id, actor_member_id, action, detail, prev_hash, entry_hash
              FROM audit_log ORDER BY seq ASC",
             params![],
             &head,
+            (sealed_hash.as_str(), sealed_count),
             |r| {
                 let ts: String = r.get(0)?;
                 let org_id: Option<String> = r.get(1)?;
@@ -1328,6 +1359,47 @@ impl Store for SqliteStore {
                 Ok((prev_hash, entry_hash, recomputed))
             },
         )
+    }
+
+    fn seal_audit_before(&self, cutoff_rfc3339: &str) -> Result<u64> {
+        let mut guard = self.conn()?;
+        // IMMEDIATE takes the write lock up front, serializing with append_audit
+        // (also IMMEDIATE) so the entry_count read and the boundary count below
+        // can't race a concurrent append and skew sealed_count.
+        let tx = guard.transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+        // Newest entry older than the cutoff becomes the new checkpoint boundary.
+        let boundary: Option<(i64, String)> = tx
+            .query_row(
+                "SELECT seq, entry_hash FROM audit_log WHERE ts < ?1
+                 ORDER BY seq DESC LIMIT 1",
+                params![cutoff_rfc3339],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        let Some((bseq, bhash)) = boundary else {
+            return Ok(0);
+        };
+
+        // entry_count is the chain length (monotonic, survives pruning).
+        let entry_count: i64 =
+            tx.query_row("SELECT entry_count FROM audit_head WHERE id = 1", [], |r| {
+                r.get(0)
+            })?;
+        let retained_after: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM audit_log WHERE seq > ?1",
+            params![bseq],
+            |r| r.get(0),
+        )?;
+        let sealed_count = entry_count - retained_after;
+
+        let pruned = tx.execute("DELETE FROM audit_log WHERE seq <= ?1", params![bseq])?;
+        tx.execute(
+            "UPDATE audit_head SET sealed_hash = ?1, sealed_count = ?2 WHERE id = 1",
+            params![bhash, sealed_count],
+        )?;
+        tx.commit()?;
+        Ok(pruned as u64)
     }
 
     fn provision_member(

@@ -48,9 +48,12 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    are admin-only; sso-status returns configuration/health and counts only —
    **no client secret or token material**. A background **retention** loop
    minimises data-at-rest by pruning expired sessions, stale login transactions,
-   and (when `TELLUR_RETENTION_DAYS > 0`) finished job results; it never touches
-   the tamper-evident event or audit chains, so log integrity is preserved.
-   Operational
+   and (when `TELLUR_RETENTION_DAYS > 0`) finished job results. The audit log can
+   also be minimised (`TELLUR_AUDIT_RETENTION_DAYS`) via a **sealed checkpoint**:
+   old entries are deleted but the pruned prefix's tip hash + length are kept and
+   `verify_audit_chain` seeds from that checkpoint, so the remaining chain still
+   verifies and truncation past the checkpoint stays detectable. The event
+   provenance chain is never pruned. Operational
    endpoints (`/healthz`, `/readyz`, `/metrics`) are unauthenticated but expose
    only liveness and aggregate counters — no tenant data. The **team dashboard
    SPA** is served as static assets at `/app/*` (unauthenticated, but they carry

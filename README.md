@@ -489,9 +489,12 @@ backend by default (zero-config, single-node) or on **Postgres** for horizontal
 scale — set `TELLUR_DATABASE_URL` (e.g. `postgres://user:pass@host:5432/tellur`)
 to switch. Postgres is reached over NoTls, so keep it on a private network or
 front it with a TLS-terminating proxy. A background **retention** loop keeps the
-store tidy: expired sessions and stale login transactions are always pruned, and
-finished export/compliance jobs are pruned after `TELLUR_RETENTION_DAYS` (default
-`0` = keep forever). The tamper-evident event and audit logs are never pruned.
+store tidy: expired sessions and stale login transactions are always pruned;
+finished export/compliance jobs are pruned after `TELLUR_RETENTION_DAYS`; and the
+audit log can be minimised after `TELLUR_AUDIT_RETENTION_DAYS` via a **sealed
+checkpoint** — old entries are deleted but the pruned prefix's tip hash is kept,
+so the chain still verifies and truncation stays detectable (both default `0` =
+keep forever). The event provenance log is never pruned.
 Authorization is RBAC (`viewer` /
 `contributor` / `admin`) with **fine-grained, additive per-repo grants**: an org
 admin can elevate a member on a specific repo (e.g. make an org viewer a

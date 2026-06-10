@@ -1,10 +1,26 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-10 (retention: expired-session/login + finished-job pruning; on feature branch)
+**Last updated:** 2026-06-10 (sealed-checkpoint audit retention; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
+
+> **2026-06-10 — Sealed-checkpoint audit retention.** On branch
+> `feat/audit-checkpoint`. The audit hash chain can now be minimised without
+> losing tamper-evidence. `audit_head` gains `sealed_hash`/`sealed_count`
+> (schema v15, SQLite + PG): `seal_audit_before(cutoff)` deletes entries with
+> `ts < cutoff` and records the pruned prefix's tip hash + length as a
+> checkpoint. `verify_audit_chain` now **seeds** the walk from that checkpoint
+> (via a new `base` arg on the shared `chain::verify`), so the retained suffix —
+> or an empty chain — still verifies against the head and truncation stays
+> detectable. The retention loop gains a second window: `RetentionPolicy { jobs_days,
+> audit_days }`, driven by `TELLUR_AUDIT_RETENTION_DAYS` (default 0 = keep). The
+> event chain is deliberately untouched (events are the provenance data). Verified:
+> `tests/jobs.rs` seal test (partial seal → remainder verifies; append-after-seal;
+> full seal → empty chain verifies) + PG parity; full workspace tests, clippy -D
+> warnings + cargo-deny green. Remaining follow-ups: full i18n, Playwright E2E,
+> A12 (opt-in full-source gutter).
 
 > **2026-06-10 — Data retention / lifecycle hygiene.** On branch
 > `feat/retention`. A background maintenance loop (`jobs::spawn_maintenance`,

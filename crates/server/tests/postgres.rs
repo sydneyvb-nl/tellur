@@ -545,6 +545,28 @@ fn full_store_surface() {
             .unwrap()
             .is_empty()
     );
+    // Sealed-checkpoint audit retention parity. A past cutoff seals nothing; a
+    // future cutoff seals every entry, leaving an empty-but-verifiable chain.
+    assert!(store.verify_audit_chain().unwrap());
+    let past = (chrono::Utc::now() - chrono::Duration::days(1)).to_rfc3339();
+    assert_eq!(store.seal_audit_before(&past).unwrap(), 0);
+    let future = (chrono::Utc::now() + chrono::Duration::days(1)).to_rfc3339();
+    assert_eq!(store.seal_audit_before(&future).unwrap(), 2); // hello + world
+    assert_eq!(store.audit_len().unwrap(), 0);
+    assert!(
+        store.verify_audit_chain().unwrap(),
+        "sealed-empty audit chain must still verify against the checkpoint"
+    );
+    // Appending after a seal keeps the chain verifiable.
+    store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_a.id.clone()),
+            actor_member_id: Some(admin.clone()),
+            action: "post.seal".to_string(),
+            detail: "after".to_string(),
+        })
+        .unwrap();
+    assert!(store.verify_audit_chain().unwrap());
 
     // ── People & Access (A2/A10) ─────────────────────────────────────────────
     let members = store.list_members(&org_a.id).unwrap();
