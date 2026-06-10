@@ -1384,27 +1384,32 @@ impl Store for PostgresStore {
         Ok(row.map(|r| r.get(0)))
     }
 
-    fn put_compliance_snapshot(&self, org_id: &str, snap: &ComplianceSnapshot) -> Result<()> {
-        self.client()?.execute(
-            "INSERT INTO compliance_snapshot
-                 (id, org_id, repo_id, repo_name, policy_name, policy_version,
-                  evaluated_at, ai_ranges, violations, high, medium, low)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
-            &[
-                &ids::generate_id("cmp"),
-                &org_id,
-                &snap.repo_id,
-                &snap.repo_name,
-                &snap.policy_name,
-                &snap.policy_version,
-                &snap.evaluated_at,
-                &snap.ai_ranges,
-                &snap.violations,
-                &snap.high,
-                &snap.medium,
-                &snap.low,
-            ],
-        )?;
+    fn put_compliance_snapshots(&self, org_id: &str, snaps: &[ComplianceSnapshot]) -> Result<()> {
+        let mut client = self.client()?;
+        let mut tx = client.transaction()?;
+        for snap in snaps {
+            tx.execute(
+                "INSERT INTO compliance_snapshot
+                     (id, org_id, repo_id, repo_name, policy_name, policy_version,
+                      evaluated_at, ai_ranges, violations, high, medium, low)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+                &[
+                    &ids::generate_id("cmp"),
+                    &org_id,
+                    &snap.repo_id,
+                    &snap.repo_name,
+                    &snap.policy_name,
+                    &snap.policy_version,
+                    &snap.evaluated_at,
+                    &snap.ai_ranges,
+                    &snap.violations,
+                    &snap.high,
+                    &snap.medium,
+                    &snap.low,
+                ],
+            )?;
+        }
+        tx.commit()?;
         Ok(())
     }
 

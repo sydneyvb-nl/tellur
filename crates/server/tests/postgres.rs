@@ -562,8 +562,13 @@ fn full_store_surface() {
         policy_version: 2,
         ..older.clone()
     };
-    store.put_compliance_snapshot(&org_a.id, &older).unwrap();
-    store.put_compliance_snapshot(&org_a.id, &newer).unwrap();
+    // Two runs (each a batch); the newer batch wins per repo.
+    store
+        .put_compliance_snapshots(&org_a.id, std::slice::from_ref(&older))
+        .unwrap();
+    store
+        .put_compliance_snapshots(&org_a.id, std::slice::from_ref(&newer))
+        .unwrap();
     let latest = store.latest_compliance(&org_a.id).unwrap();
     assert_eq!(latest.len(), 1, "one snapshot per repo (the newest)");
     assert_eq!(latest[0].policy_version, 2);

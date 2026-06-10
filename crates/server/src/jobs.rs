@@ -92,6 +92,10 @@ fn run_compliance(store: &Arc<dyn Store>, org_id: &str) -> Result<Value> {
 
     let repos = store.list_repos(org_id)?;
     let mut total_violations: i64 = 0;
+    // Buffer every repo's snapshot and persist them in one transaction only after
+    // the whole run succeeds, so a mid-run failure (e.g. unreadable attribution)
+    // never leaves a partial run as the "latest" results (see put_compliance_snapshots).
+    let mut snapshots = Vec::with_capacity(repos.len());
     for repo in &repos {
         let files = store.list_attributions(org_id, &repo.id)?;
         let mut ai_ranges = 0i64;
@@ -117,22 +121,20 @@ fn run_compliance(store: &Arc<dyn Store>, org_id: &str) -> Result<Value> {
             }
         }
         total_violations += violations;
-        store.put_compliance_snapshot(
-            org_id,
-            &ComplianceSnapshot {
-                repo_id: repo.id.clone(),
-                repo_name: repo.name.clone(),
-                policy_name: policy_doc.name.clone(),
-                policy_version: policy_doc.version,
-                evaluated_at: evaluated_at.clone(),
-                ai_ranges,
-                violations,
-                high,
-                medium,
-                low,
-            },
-        )?;
+        snapshots.push(ComplianceSnapshot {
+            repo_id: repo.id.clone(),
+            repo_name: repo.name.clone(),
+            policy_name: policy_doc.name.clone(),
+            policy_version: policy_doc.version,
+            evaluated_at: evaluated_at.clone(),
+            ai_ranges,
+            violations,
+            high,
+            medium,
+            low,
+        });
     }
+    store.put_compliance_snapshots(org_id, &snapshots)?;
 
     Ok(json!({
         "schema": "tellur.server.compliance.v1",

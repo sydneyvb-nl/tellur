@@ -447,9 +447,12 @@ pub trait Store: Send + Sync {
     /// the SSO-status "token age" read (A10). No secret material is returned.
     fn scim_token_created_at(&self, org_id: &str) -> Result<Option<String>>;
 
-    /// Persist a policy-compliance snapshot for one repo (A8). Append-only:
-    /// snapshots are timestamped, and [`latest_compliance`] reads the newest.
-    fn put_compliance_snapshot(&self, org_id: &str, snap: &ComplianceSnapshot) -> Result<()>;
+    /// Persist a batch of policy-compliance snapshots for one org (A8) in a
+    /// single transaction. Append-only and atomic: a compliance run buffers all
+    /// its per-repo snapshots and writes them only after every repo evaluates
+    /// successfully, so a mid-run failure never leaves a partial run visible to
+    /// [`latest_compliance`] (which reads the newest per repo).
+    fn put_compliance_snapshots(&self, org_id: &str, snaps: &[ComplianceSnapshot]) -> Result<()>;
 
     /// The latest compliance snapshot per repo for an org (A8), newest first.
     fn latest_compliance(&self, org_id: &str) -> Result<Vec<ComplianceSnapshot>>;
