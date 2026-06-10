@@ -471,3 +471,146 @@ async fn jobs_list_admin_only_and_tenant_scoped() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+// ─── D4: compliance (A8) + People & Access (A2/A10/A11) ──────────────────────
+
+async fn post(state: &AppState, uri: &str, token: Option<&str>) -> (StatusCode, Value) {
+    let mut b = Request::builder().method("POST").uri(uri);
+    if let Some(t) = token {
+        b = b.header(AUTHORIZATION, format!("Bearer {t}"));
+    }
+    let resp = build_router(state.clone())
+        .oneshot(b.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let status = resp.status();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+#[tokio::test]
+async fn compliance_evaluates_policy_and_reads_latest() {
+    let s = setup();
+    let admin_a = admin_token(&s.state, &s.org_a);
+    // A `default` policy that requires human review for src/** — the seeded
+    // attribution has one reviewed AI range and one unreviewed → 1 violation.
+    s.state
+        .store
+        .put_policy(
+            &s.org_a,
+            "default",
+            "version: 1\nsensitive_paths:\n  - path: \"src/**\"\n    tags: [\"core\"]\n    require_human_review: true\n",
+        )
+        .unwrap();
+
+    // Before any run: not evaluated.
+    let (status, body) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/policies/compliance", s.org_a),
+        Some(&admin_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["evaluated"], false);
+
+    // Enqueue via the HTTP endpoint (admin), then run the worker deterministically.
+    let (status, enq) = post(
+        &s.state,
+        &format!("/v1/orgs/{}/policies/compliance", s.org_a),
+        Some(&admin_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert!(enq["job_id"].is_string());
+    assert!(tellur_server::jobs::process_one(&s.state.store).unwrap());
+
+    // Latest snapshot now reflects the evaluation.
+    let (status, body) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/policies/compliance", s.org_a),
+        Some(&admin_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["evaluated"], true);
+    let snaps = body["snapshots"].as_array().unwrap();
+    assert_eq!(snaps.len(), 1);
+    assert_eq!(snaps[0]["ai_ranges"], 2);
+    assert_eq!(snaps[0]["violations"], 1);
+    assert_eq!(snaps[0]["high"], 1);
+    assert_eq!(snaps[0]["policy_version"], 1);
+}
+
+#[tokio::test]
+async fn compliance_and_people_require_admin() {
+    let s = setup();
+    for path in ["policies/compliance", "members", "groups", "sso-status"] {
+        let (status, _) = get(
+            &s.state,
+            &format!("/v1/orgs/{}/{path}", s.org_a),
+            Some(&s.viewer_a),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path} must be admin-only");
+    }
+    // Cross-org admin is also forbidden.
+    let (status, _) = post(
+        &s.state,
+        &format!("/v1/orgs/{}/policies/compliance", s.org_a),
+        Some(&s.admin_b),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn members_groups_and_sso_status() {
+    let s = setup();
+    let admin_a = admin_token(&s.state, &s.org_a);
+
+    // Members: includes the seeded viewer + the admin we just minted.
+    let (status, body) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/members", s.org_a),
+        Some(&admin_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let members = body["members"].as_array().unwrap();
+    assert!(members.len() >= 2);
+    assert!(members.iter().all(|m| m["active"] == true));
+
+    // Groups: a SCIM admin group maps to the admin role.
+    s.state
+        .store
+        .scim_create_group(&s.org_a, "tellur-admin", None, &[])
+        .unwrap();
+    let (status, body) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/groups", s.org_a),
+        Some(&admin_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let groups = body["groups"].as_array().unwrap();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0]["maps_to_role"], "admin");
+
+    // SSO status: no OIDC configured in this harness; counts present, no secrets.
+    let (status, body) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/sso-status", s.org_a),
+        Some(&admin_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["oidc_enabled"], false);
+    assert_eq!(body["scim_configured"], false);
+    assert_eq!(body["scim_groups"], 1);
+    assert!(body["members_total"].as_u64().unwrap() >= 2);
+    // Never leak secrets.
+    assert!(body.get("client_secret").is_none());
+}

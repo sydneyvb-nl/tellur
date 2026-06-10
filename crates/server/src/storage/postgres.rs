@@ -16,9 +16,9 @@ use tellur_core::schema::types::FileAttribution;
 use r2d2_postgres::postgres::GenericClient;
 
 use super::{
-    ActivityBucket, ActivityGroup, AuditEntry, AuditRecord, IngestEvent, Job, LoginTx, Org,
-    OrgReport, PolicyDoc, PolicySummary, Repo, RepoFacts, RepoRoleGrant, RepoSummary, ScimGroup,
-    ScimUser, SessionSummary, Store, StoredEvent, role_from_group_name,
+    ActivityBucket, ActivityGroup, AuditEntry, AuditRecord, ComplianceSnapshot, IngestEvent, Job,
+    LoginTx, MemberInfo, Org, OrgReport, PolicyDoc, PolicySummary, Repo, RepoFacts, RepoRoleGrant,
+    RepoSummary, ScimGroup, ScimUser, SessionSummary, Store, StoredEvent, role_from_group_name,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
@@ -187,7 +187,17 @@ impl Store for PostgresStore {
                      member_id TEXT NOT NULL REFERENCES member(id),
                      PRIMARY KEY (group_id, member_id)
                  );
-                 CREATE INDEX IF NOT EXISTS idx_group_member ON scim_group_member(member_id);",
+                 CREATE INDEX IF NOT EXISTS idx_group_member ON scim_group_member(member_id);
+                 CREATE TABLE IF NOT EXISTS compliance_snapshot (
+                     id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES org(id),
+                     repo_id TEXT NOT NULL, repo_name TEXT NOT NULL,
+                     policy_name TEXT NOT NULL, policy_version BIGINT NOT NULL,
+                     evaluated_at TEXT NOT NULL, ai_ranges BIGINT NOT NULL,
+                     violations BIGINT NOT NULL, high BIGINT NOT NULL,
+                     medium BIGINT NOT NULL, low BIGINT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_compliance_latest
+                     ON compliance_snapshot(org_id, repo_id, evaluated_at);",
             )
             .context("failed to create schema")?;
         // Additive migrations for columns introduced after a table's first
@@ -205,7 +215,7 @@ impl Store for PostgresStore {
             .context("failed to apply column migrations")?;
         client
             .execute(
-                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '12')
+                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '13')
                  ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                 &[],
             )
@@ -1336,6 +1346,101 @@ impl Store for PostgresStore {
                 error: r.get(5),
                 created_at: r.get(6),
                 updated_at: r.get(7),
+            })
+            .collect())
+    }
+
+    fn list_members(&self, org_id: &str) -> Result<Vec<MemberInfo>> {
+        let rows = self.client()?.query(
+            "SELECT m.id, m.display_name, m.role, m.active, i.email, i.oidc_subject
+             FROM member m
+             LEFT JOIN member_identity i ON i.member_id = m.id
+             WHERE m.org_id = $1
+             ORDER BY m.display_name",
+            &[&org_id],
+        )?;
+        Ok(rows
+            .iter()
+            .map(|r| {
+                let oidc_subject: Option<String> = r.get(5);
+                MemberInfo {
+                    id: r.get(0),
+                    display_name: r.get(1),
+                    role: r.get(2),
+                    active: r.get(3),
+                    email: r.get(4),
+                    sso_bound: oidc_subject.is_some(),
+                }
+            })
+            .collect())
+    }
+
+    fn scim_token_created_at(&self, org_id: &str) -> Result<Option<String>> {
+        let row = self.client()?.query_opt(
+            "SELECT created_at FROM scim_token WHERE org_id = $1
+             ORDER BY created_at DESC LIMIT 1",
+            &[&org_id],
+        )?;
+        Ok(row.map(|r| r.get(0)))
+    }
+
+    fn put_compliance_snapshots(&self, org_id: &str, snaps: &[ComplianceSnapshot]) -> Result<()> {
+        let mut client = self.client()?;
+        let mut tx = client.transaction()?;
+        for snap in snaps {
+            tx.execute(
+                "INSERT INTO compliance_snapshot
+                     (id, org_id, repo_id, repo_name, policy_name, policy_version,
+                      evaluated_at, ai_ranges, violations, high, medium, low)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+                &[
+                    &ids::generate_id("cmp"),
+                    &org_id,
+                    &snap.repo_id,
+                    &snap.repo_name,
+                    &snap.policy_name,
+                    &snap.policy_version,
+                    &snap.evaluated_at,
+                    &snap.ai_ranges,
+                    &snap.violations,
+                    &snap.high,
+                    &snap.medium,
+                    &snap.low,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn latest_compliance(&self, org_id: &str) -> Result<Vec<ComplianceSnapshot>> {
+        let rows = self.client()?.query(
+            "SELECT cs.repo_id, cs.repo_name, cs.policy_name, cs.policy_version,
+                    cs.evaluated_at, cs.ai_ranges, cs.violations, cs.high, cs.medium, cs.low
+             FROM compliance_snapshot cs
+             JOIN (
+                 SELECT repo_id, MAX(evaluated_at || '|' || id) AS mk
+                 FROM compliance_snapshot WHERE org_id = $1 GROUP BY repo_id
+             ) latest
+               ON cs.repo_id = latest.repo_id
+              AND (cs.evaluated_at || '|' || cs.id) = latest.mk
+             WHERE cs.org_id = $1
+             ORDER BY cs.evaluated_at DESC, cs.repo_name",
+            &[&org_id],
+        )?;
+        Ok(rows
+            .iter()
+            .map(|r| ComplianceSnapshot {
+                repo_id: r.get(0),
+                repo_name: r.get(1),
+                policy_name: r.get(2),
+                policy_version: r.get(3),
+                evaluated_at: r.get(4),
+                ai_ranges: r.get(5),
+                violations: r.get(6),
+                high: r.get(7),
+                medium: r.get(8),
+                low: r.get(9),
             })
             .collect())
     }

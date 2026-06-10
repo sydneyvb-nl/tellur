@@ -96,6 +96,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/orgs/{org_id}/audit", get(crate::api::list_audit))
         .route("/v1/orgs/{org_id}/jobs", get(crate::api::list_jobs))
         .route("/v1/orgs/{org_id}/jobs/{id}", get(crate::api::get_job))
+        .route(
+            "/v1/orgs/{org_id}/policies/compliance",
+            post(crate::api::enqueue_compliance).get(crate::api::get_compliance),
+        )
+        .route("/v1/orgs/{org_id}/members", get(crate::api::list_members))
+        .route("/v1/orgs/{org_id}/groups", get(crate::api::list_groups))
+        .route("/v1/orgs/{org_id}/sso-status", get(crate::api::sso_status))
         // SCIM 2.0 provisioning (org derived from the SCIM bearer token).
         .route(
             "/scim/v2/Users",

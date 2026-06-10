@@ -1,11 +1,32 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-10 (team dashboard D3 — audit + exports; on feature branch)
+**Last updated:** 2026-06-10 (team dashboard D4 API — compliance + people; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-10 — Team dashboard D4 API (policy compliance + People & Access).**
+> On branch `feat/dashboard-d4`. API-first; the Policies + People & Access UI
+> follows in a separate D4-UI PR. New admin-only, tenant-scoped endpoints:
+> **A8 policy compliance** — `POST /v1/orgs/{org}/policies/compliance` enqueues a
+> durable job that evaluates the org's `default` policy (via the core
+> `PolicyEngine`) over every repo's attribution and persists timestamped
+> snapshots per `(org, repo, policy version)`; `GET .../policies/compliance`
+> reads the latest snapshot per repo (`evaluated` flag + per-repo violation
+> counts by severity, Critical folded into High). **A2** `GET .../members`
+> (role, email, sso_bound, active). **A11** `GET .../groups` — session-auth
+> mirror of `/scim/v2/Groups` (members + derived `maps_to_role`) so the SPA
+> never holds a SCIM token. **A10** `GET .../sso-status` — OIDC/SCIM health
+> (issuer, scim-token age, member/sso/group counts; no secrets). Schema → v13
+> (`compliance_snapshot` table); Store gains `list_members`,
+> `scim_token_created_at`, `put_compliance_snapshot`, `latest_compliance`;
+> worker gains `KIND_COMPLIANCE`. Verified: full workspace tests (new
+> `dashboard_api` compliance + people coverage incl. admin-only/tenant + a
+> policy-eval round-trip via `process_one`; PG parity), clippy -D warnings +
+> cargo-deny green; PG tests pass against a local Postgres. Next: D4 UI
+> (Policies + People & Access screens), then D5 polish.
+>
 > **2026-06-10 — Team dashboard D3 (audit read + exports).** On branch
 > `feat/dashboard-d3`. API-first then UI. New admin-only, tenant-scoped read
 > endpoints: `GET /v1/orgs/{org}/audit[?actor=&action=&range=&before=&limit=]`

@@ -217,6 +217,37 @@ pub struct RepoRoleGrant {
     pub updated_at: String,
 }
 
+/// A member with the facets the People & Access screen needs (A2). `sso_bound`
+/// is whether the member has a bound OIDC subject (can sign in via SSO).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MemberInfo {
+    pub id: String,
+    pub display_name: String,
+    pub role: String,
+    pub email: Option<String>,
+    pub sso_bound: bool,
+    pub active: bool,
+}
+
+/// A point-in-time policy-compliance result for one repo (A8). Denormalised
+/// (captures the repo name + policy version at evaluation time) so a stored
+/// snapshot stays meaningful even if the repo is later renamed or the policy
+/// changes. `violations` is the count of failed rules; `high`/`medium`/`low`
+/// break those failures down by severity.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ComplianceSnapshot {
+    pub repo_id: String,
+    pub repo_name: String,
+    pub policy_name: String,
+    pub policy_version: i64,
+    pub evaluated_at: String,
+    pub ai_ranges: i64,
+    pub violations: i64,
+    pub high: i64,
+    pub medium: i64,
+    pub low: i64,
+}
+
 /// An audit-log record (read model for the export portal).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AuditRecord {
@@ -405,6 +436,26 @@ pub trait Store: Send + Sync {
 
     /// List an org's jobs, newest first (for the Exports history table).
     fn list_jobs(&self, org_id: &str, limit: u32) -> Result<Vec<Job>>;
+
+    // ─── People & Access + policy compliance (dashboard D4) ──────────────────
+
+    /// List an org's members with the People & Access facets (A2). Includes
+    /// inactive (deprovisioned) members so admins can see them.
+    fn list_members(&self, org_id: &str) -> Result<Vec<MemberInfo>>;
+
+    /// Creation timestamp (RFC3339) of the org's SCIM token, if one exists — for
+    /// the SSO-status "token age" read (A10). No secret material is returned.
+    fn scim_token_created_at(&self, org_id: &str) -> Result<Option<String>>;
+
+    /// Persist a batch of policy-compliance snapshots for one org (A8) in a
+    /// single transaction. Append-only and atomic: a compliance run buffers all
+    /// its per-repo snapshots and writes them only after every repo evaluates
+    /// successfully, so a mid-run failure never leaves a partial run visible to
+    /// [`latest_compliance`] (which reads the newest per repo).
+    fn put_compliance_snapshots(&self, org_id: &str, snaps: &[ComplianceSnapshot]) -> Result<()>;
+
+    /// The latest compliance snapshot per repo for an org (A8), newest first.
+    fn latest_compliance(&self, org_id: &str) -> Result<Vec<ComplianceSnapshot>>;
 
     // ─── Audit log (append-only, hash-chained) ──────────────────────────────
 

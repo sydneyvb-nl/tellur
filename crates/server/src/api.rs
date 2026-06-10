@@ -985,6 +985,174 @@ pub async fn list_jobs(
     })))
 }
 
+// ─── Policy compliance + People & Access (dashboard D4) ──────────────────────
+
+/// `POST /v1/orgs/{org}/policies/compliance` — enqueue a durable job that
+/// evaluates the org's `default` policy against every repo's attribution and
+/// persists timestamped snapshots (A8, admin only). Returns `202` + job id.
+pub async fn enqueue_compliance(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    principal: Principal,
+) -> Result<Response, ServerError> {
+    ensure_org_role(
+        &state,
+        &principal,
+        &org_id,
+        Role::Admin,
+        "compliance.enqueue",
+    )?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let job_id = state
+        .store
+        .enqueue_job(&org_id, crate::jobs::KIND_COMPLIANCE)
+        .map_err(ServerError::Internal)?;
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id.clone()),
+            actor_member_id: Some(principal.member_id.clone()),
+            action: "compliance.enqueue".to_string(),
+            detail: format!("job={job_id}"),
+        })
+        .map_err(ServerError::Internal)?;
+    let body = json!({
+        "job_id": job_id,
+        "status": "queued",
+        "poll": format!("/v1/orgs/{org_id}/jobs/{job_id}"),
+    });
+    Ok((StatusCode::ACCEPTED, Json(body)).into_response())
+}
+
+/// `GET /v1/orgs/{org}/policies/compliance` — latest compliance snapshot per
+/// repo (A8, admin only). `evaluated` is false until the first job has run.
+pub async fn get_compliance(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    principal: Principal,
+) -> Result<Json<Value>, ServerError> {
+    ensure_org_role(&state, &principal, &org_id, Role::Admin, "compliance.read")?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let snapshots = run_blocking({
+        let store = state.store.clone();
+        let org = org_id.clone();
+        move || store.latest_compliance(&org)
+    })
+    .await?;
+    Ok(Json(json!({
+        "schema": "tellur.server.compliance.v1",
+        "org_id": org_id,
+        "evaluated": !snapshots.is_empty(),
+        "snapshots": snapshots,
+    })))
+}
+
+/// `GET /v1/orgs/{org}/members` — org members with role, email, SSO-bound and
+/// active flags (A2, admin only). Session-auth read for the People screen.
+pub async fn list_members(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    principal: Principal,
+) -> Result<Json<Value>, ServerError> {
+    ensure_org_role(&state, &principal, &org_id, Role::Admin, "members.list")?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let members = run_blocking({
+        let store = state.store.clone();
+        let org = org_id.clone();
+        move || store.list_members(&org)
+    })
+    .await?;
+    Ok(Json(json!({
+        "schema": "tellur.server.members.v1",
+        "org_id": org_id,
+        "members": members,
+    })))
+}
+
+/// `GET /v1/orgs/{org}/groups` — SCIM groups with members and the org role each
+/// `displayName` maps to (A11, admin only). This is the **session-auth** mirror
+/// of `/scim/v2/Groups` so the browser SPA never needs a SCIM bearer token.
+pub async fn list_groups(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    principal: Principal,
+) -> Result<Json<Value>, ServerError> {
+    ensure_org_role(&state, &principal, &org_id, Role::Admin, "groups.list")?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let groups = run_blocking({
+        let store = state.store.clone();
+        let org = org_id.clone();
+        move || store.scim_list_groups(&org, None)
+    })
+    .await?;
+    let groups: Vec<Value> = groups
+        .into_iter()
+        .map(|g| {
+            let role = crate::storage::role_from_group_name(&g.display_name);
+            json!({
+                "id": g.id,
+                "display_name": g.display_name,
+                "external_id": g.external_id,
+                "members": g.members,
+                "maps_to_role": role.map(|r| r.as_str()),
+            })
+        })
+        .collect();
+    Ok(Json(json!({
+        "schema": "tellur.server.groups.v1",
+        "org_id": org_id,
+        "groups": groups,
+    })))
+}
+
+/// `GET /v1/orgs/{org}/sso-status` — read-only SSO/SCIM health for the People &
+/// Access screen (A10, admin only). Reports configuration and freshness; **no
+/// secrets** (no client secret, no token material).
+pub async fn sso_status(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    principal: Principal,
+) -> Result<Json<Value>, ServerError> {
+    ensure_org_role(&state, &principal, &org_id, Role::Admin, "sso.status")?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let issuer = state.oidc.as_ref().map(|r| r.config.issuer.clone());
+    let (members, scim_created_at, groups) = run_blocking({
+        let store = state.store.clone();
+        let org = org_id.clone();
+        move || {
+            let members = store.list_members(&org)?;
+            let scim = store.scim_token_created_at(&org)?;
+            let groups = store.scim_list_groups(&org, None)?;
+            Ok((members, scim, groups))
+        }
+    })
+    .await?;
+    let sso_bound = members.iter().filter(|m| m.sso_bound).count();
+    let active = members.iter().filter(|m| m.active).count();
+    Ok(Json(json!({
+        "schema": "tellur.server.sso_status.v1",
+        "org_id": org_id,
+        "oidc_enabled": issuer.is_some(),
+        "oidc_issuer": issuer,
+        "scim_configured": scim_created_at.is_some(),
+        "scim_token_created_at": scim_created_at,
+        "members_total": members.len(),
+        "members_active": active,
+        "members_sso_bound": sso_bound,
+        "scim_groups": groups.len(),
+    })))
+}
+
 // ─── Central policy distribution ─────────────────────────────────────────────
 
 /// `PUT /v1/orgs/{org}/policies/{name}` — upload a policy YAML doc (admin only).
