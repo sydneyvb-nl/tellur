@@ -46,6 +46,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/orgs/{org_id}/repos", get(crate::api::list_repos))
         .route("/v1/orgs/{org_id}/report", get(crate::api::org_report))
         .route("/v1/orgs/{org_id}/dashboard", get(crate::api::dashboard))
+        .route("/v1/orgs/{org_id}/overview", get(crate::api::overview))
         .route("/v1/orgs/{org_id}/activity", get(crate::api::activity))
         .route(
             "/v1/orgs/{org_id}/repos/{repo}",

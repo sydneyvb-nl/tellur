@@ -343,6 +343,67 @@ async fn sessions_repo_filter_and_tenant_scope() {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
+// ─── A9: composed overview ───────────────────────────────────────────────────
+
+#[tokio::test]
+async fn overview_rolls_up_totals_and_ranks_repos_by_review_gap() {
+    let s = setup();
+    // Second repo with more unreviewed AI lines, so it must rank first.
+    let repo2 = s.state.store.ensure_repo(&s.org_a, "infra").unwrap();
+    s.state
+        .store
+        .append_events(&s.org_a, &repo2.id, &[ev("s3", "file.write", "claude")])
+        .unwrap();
+    s.state
+        .store
+        .put_attributions(
+            &s.org_a,
+            &repo2.id,
+            &[FileAttribution {
+                schema: "tellur.attribution.v1".into(),
+                file_path: "infra/main.tf".into(),
+                git_blob_sha: "sha2".into(),
+                ranges: vec![ai_range(1, 50, None, None)], // 50 unreviewed AI lines
+                updated_at: chrono::Utc::now().to_rfc3339(),
+            }],
+        )
+        .unwrap();
+
+    let (status, body) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/overview", s.org_a),
+        Some(&s.viewer_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["schema"], "tellur.server.overview.v1");
+    // Totals fold both repos: app has 20 AI lines (8 reviewed), infra 50 (0).
+    assert_eq!(body["totals"]["ai_lines"], 70);
+    assert_eq!(body["totals"]["reviewed_ai_lines"], 8);
+    assert_eq!(body["totals"]["repos"], 2);
+    // Risk ranking: infra (gap 50) ahead of app (gap 12).
+    let repos = body["repos"].as_array().unwrap();
+    assert_eq!(repos[0]["name"], "infra");
+    assert_eq!(repos[0]["review_gap_lines"], 50);
+    assert_eq!(repos[1]["name"], "app");
+    assert_eq!(repos[1]["review_gap_lines"], 12);
+    // One round-trip carries activity + recent feed too.
+    assert!(body["activity"].is_array());
+    assert!(body["recent_events"].is_array());
+}
+
+#[tokio::test]
+async fn overview_is_tenant_scoped() {
+    let s = setup();
+    let (status, _) = get(
+        &s.state,
+        &format!("/v1/orgs/{}/overview", s.org_a),
+        Some(&s.admin_b),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
 // ─── D3: audit read (A7) + jobs list ─────────────────────────────────────────
 
 /// Mint an admin token in an org via the Store trait (setup only gives a viewer).

@@ -171,6 +171,35 @@ export interface Job {
 
 export type ExportKind = "events" | "audit";
 
+export interface OverviewRepo {
+  id: string;
+  name: string;
+  event_count: number;
+  ai_lines: number;
+  reviewed_ai_lines: number;
+  review_gap_lines: number;
+  ai_share: number | null;
+  review_coverage: number | null;
+}
+
+export interface Overview {
+  org_id: string;
+  generated_at: string;
+  totals: {
+    events: number;
+    sessions: number;
+    repos: number;
+    ai_lines: number;
+    reviewed_ai_lines: number;
+    total_attributed_lines: number;
+  };
+  ai_share: number | null;
+  review_coverage: number | null;
+  activity: ActivityBucket[];
+  repos: OverviewRepo[];
+  recent_events: StoredEvent[];
+}
+
 export interface ComplianceSnapshot {
   repo_id: string;
   repo_name: string;
@@ -224,6 +253,7 @@ export const api = {
   me: () => request<Me>("/v1/me"),
   dashboard: (o: string, limit = 25) =>
     request<Dashboard>(`/v1/orgs/${org(o)}/dashboard?limit=${limit}`),
+  overview: (o: string) => request<Overview>(`/v1/orgs/${org(o)}/overview`),
   activity: (o: string, rangeDays = 30, groupBy: "type" | "actor" = "type") =>
     request<Activity>(
       `/v1/orgs/${org(o)}/activity?range=${rangeDays}d&group_by=${groupBy}`,

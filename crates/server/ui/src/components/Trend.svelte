@@ -33,7 +33,7 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-card);
-    padding: 16px;
+    padding: var(--card-pad);
     margin-bottom: 12px;
   }
   h2 {
