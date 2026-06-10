@@ -460,6 +460,16 @@ async fn per_repo_slsa_export_runs_as_a_job() {
     assert_eq!(body["status"], "completed");
     assert_eq!(body["result"]["schema"], "tellur.server.export.slsa.v1");
     assert!(body["result"]["document"].is_object());
+
+    // The async POST requires org admin (the result is polled via the
+    // org-admin-scoped jobs read), so a viewer is refused.
+    let (status, _) = post(
+        &s.state,
+        &format!("/v1/orgs/{}/repos/app/export/slsa", s.org_a),
+        Some(&s.viewer_a),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

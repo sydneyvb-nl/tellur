@@ -1584,8 +1584,10 @@ pub async fn export_spdx(
 }
 
 /// `POST /v1/orgs/{org}/repos/{repo}/export/slsa` — enqueue the SLSA export as a
-/// durable job (A13); for large repos the synchronous `GET` can be slow. Same
-/// admin/per-repo-admin authorization as the synchronous form.
+/// durable job (A13); for large repos the synchronous `GET` can be slow. Org
+/// admin only — unlike the synchronous `GET` (which allows a per-repo admin),
+/// the result is read back through `GET .../jobs/{id}`, which is org-admin-scoped,
+/// so the enqueuer must be an org admin to retrieve it.
 pub async fn export_slsa_job(
     State(state): State<AppState>,
     Path((org_id, repo)): Path<(String, String)>,
@@ -1624,9 +1626,11 @@ pub async fn export_spdx_job(
     .await
 }
 
-/// Authorize (admin / per-repo admin) and enqueue a per-repo export job carrying
-/// the repo id + optional build context as params. Reuses the synchronous
-/// export's authz (including its 404-vs-403 leak protection).
+/// Authorize (**org admin**) and enqueue a per-repo export job carrying the repo
+/// id + optional build context as params. Org admin — not a per-repo grant —
+/// because the result is polled via the org-admin-scoped `GET .../jobs/{id}`; a
+/// per-repo admin could enqueue but never read it. A missing repo is disclosed
+/// as 404 only after the admin check, so existence is not leaked to non-admins.
 async fn enqueue_repo_export(
     state: &AppState,
     principal: &Principal,
@@ -1636,7 +1640,15 @@ async fn enqueue_repo_export(
     kind: &str,
     action: &str,
 ) -> Result<Response, ServerError> {
-    let (repo, _attrs) = export_attributions(state, principal, org_id, repo_name, action).await?;
+    ensure_org_role(state, principal, org_id, Role::Admin, action)?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let repo = state
+        .store
+        .find_repo(org_id, repo_name)
+        .map_err(ServerError::Internal)?
+        .ok_or(ServerError::NotFound)?;
     let params = json!({
         "repo_id": repo.id,
         "repo_url": ctx.repo_url,
@@ -1646,6 +1658,15 @@ async fn enqueue_repo_export(
     let job_id = state
         .store
         .enqueue_job(org_id, kind, Some(&params))
+        .map_err(ServerError::Internal)?;
+    state
+        .store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_id.to_string()),
+            actor_member_id: Some(principal.member_id.clone()),
+            action: action.to_string(),
+            detail: format!("repo={} job={job_id}", repo.id),
+        })
         .map_err(ServerError::Internal)?;
     let body = json!({
         "job_id": job_id,

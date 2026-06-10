@@ -30,8 +30,9 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    — org bundles are **durable jobs**: `POST .../export/events|audit` enqueues
    (admin) and returns a job id, polled at `GET .../jobs/{id}` or listed via
    `GET .../jobs` (admin, tenant-scoped — the worker-produced result carries org
-   data). Per-repo `.../export/slsa|spdx` are available both synchronously (`GET`)
-   and as durable jobs (`POST`, admin / per-repo-admin), and
+   data). Per-repo `.../export/slsa|spdx` are available both synchronously (`GET`,
+   admin or per-repo admin) and as durable jobs (`POST`, **org admin only** — the
+   result is polled via the org-admin-scoped `GET .../jobs/{id}`), and
    `POST .../export/evidence` enqueues an org-wide evidence pack (every repo's
    SLSA provenance + latest compliance + audit-chain status; admin). Durable jobs
    carry a `params` column scoped under the job's own `org_id`, so a per-repo
