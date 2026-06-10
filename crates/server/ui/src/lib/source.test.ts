@@ -1,17 +1,20 @@
 import { describe, it, expect } from "vitest";
 import { sourceLink } from "./source";
 
-const ref = { path: "src/auth/session.ts", start: 10, end: 24, sha: "abc123" };
+const ref = { path: "src/auth/session.ts", start: 10, end: 24 };
 
 describe("sourceLink", () => {
-  it("substitutes all placeholders", () => {
+  it("substitutes the path/start/end placeholders", () => {
     const t = "https://github.com/acme/app/blob/main/{path}#L{start}-L{end}";
     expect(sourceLink(t, ref)).toBe(
       "https://github.com/acme/app/blob/main/src/auth/session.ts#L10-L24",
     );
   });
-  it("substitutes the blob sha", () => {
-    expect(sourceLink("https://h/{sha}", ref)).toBe("https://h/abc123");
+  it("URL-encodes path segments but keeps slashes", () => {
+    const t = "https://h/{path}#L{start}";
+    expect(sourceLink(t, { path: "docs/a#b.md", start: 1, end: 2 })).toBe(
+      "https://h/docs/a%23b.md#L1",
+    );
   });
   it("returns null for an empty/absent template", () => {
     expect(sourceLink(null, ref)).toBeNull();

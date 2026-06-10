@@ -98,10 +98,10 @@
           </td>
           {#if sourceTemplate}
             <td>
-              {#if sourceLink(sourceTemplate, { path: file.file_path, start: r.start_line, end: r.end_line, sha: file.git_blob_sha })}
+              {#if sourceLink(sourceTemplate, { path: file.file_path, start: r.start_line, end: r.end_line })}
                 <a
                   class="src"
-                  href={sourceLink(sourceTemplate, { path: file.file_path, start: r.start_line, end: r.end_line, sha: file.git_blob_sha })}
+                  href={sourceLink(sourceTemplate, { path: file.file_path, start: r.start_line, end: r.end_line })}
                   target="_blank"
                   rel="noopener noreferrer"
                 >

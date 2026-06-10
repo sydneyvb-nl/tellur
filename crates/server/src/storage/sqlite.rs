@@ -237,7 +237,7 @@ impl Store for SqliteStore {
              -- Fine-grained per-repo role grants. Additive over the member's org
              -- role: effective role on a repo is max(org_role, repo grant).
              -- Opt-in source link template per repo (A12). Stores only a URL
-             -- template — never source code. {path}/{start}/{end}/{sha} are
+             -- template — never source code. {path}/{start}/{end} are
              -- substituted client-side to deep-link the provider.
              CREATE TABLE IF NOT EXISTS repo_source (
                  repo_id    TEXT PRIMARY KEY REFERENCES repo(id),

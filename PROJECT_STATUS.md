@@ -13,8 +13,9 @@
 > a URL template; `set_repo_source`/`get_repo_source` + `PUT
 > /v1/orgs/{org}/repos/{repo}/source` (admin, validates `https://`, ≤2048 chars,
 > audited). The attributions read now returns `source_template`, and the File
-> view renders a per-range **View ↗** deep link (`{path}/{start}/{end}/{sha}`
-> substituted, https-guarded client-side too). Verified: server tests
+> view renders a per-range **View ↗** deep link (`{path}` (URL-encoded per
+> segment) /`{start}`/`{end}` substituted, https-guarded client-side too).
+> Verified: server tests
 > (`dashboard_api` set/clear/surface + https+admin validation; PG parity for
 > get/set), SPA 40 vitest (new `source` helper tests) + svelte-check + build;
 > clippy -D warnings + cargo-deny green. The **inline full-source gutter** (hub

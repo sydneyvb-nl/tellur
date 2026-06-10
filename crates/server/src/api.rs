@@ -869,7 +869,7 @@ pub async fn list_attributions(
 /// Body for setting a repo's source-link template (A12).
 #[derive(Debug, Deserialize)]
 pub struct SourceTemplateBody {
-    /// `https://…` URL with `{path}`/`{start}`/`{end}`/`{sha}` placeholders, or
+    /// `https://…` URL with `{path}`/`{start}`/`{end}` placeholders, or
     /// `null`/absent to clear. Only a template is stored — never source code.
     #[serde(default)]
     pub template: Option<String>,
