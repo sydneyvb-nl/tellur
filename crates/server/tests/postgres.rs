@@ -440,6 +440,11 @@ fn full_store_surface() {
         "completed"
     );
     assert!(store.get_job(&org_b.id, &job_id).unwrap().is_none());
+    // list_jobs: tenant-scoped, newest first.
+    let jobs = store.list_jobs(&org_a.id, 50).unwrap();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].id, job_id);
+    assert!(store.list_jobs(&org_b.id, 50).unwrap().is_empty());
 
     // ── SCIM groups: membership drives + revokes roles ───────────────────────
     let gm = store
@@ -488,6 +493,39 @@ fn full_store_surface() {
     assert_eq!(store.audit_len().unwrap(), 1);
     assert!(store.verify_audit_chain().unwrap());
     assert_eq!(store.export_audit(&org_a.id).unwrap().len(), 1);
+    // list_audit: paginated/filtered parity (newest first, tenant-scoped).
+    store
+        .append_audit(&AuditEntry {
+            org_id: Some(org_a.id.clone()),
+            actor_member_id: Some(admin.clone()),
+            action: "test.other".to_string(),
+            detail: "world".to_string(),
+        })
+        .unwrap();
+    let recs = store
+        .list_audit(&org_a.id, None, None, None, None, 1)
+        .unwrap();
+    assert_eq!(recs.len(), 1);
+    assert_eq!(recs[0].detail, "world"); // newest first
+    let cursor = recs[0].seq;
+    let page2 = store
+        .list_audit(&org_a.id, None, None, None, Some(cursor), 10)
+        .unwrap();
+    assert_eq!(page2.len(), 1);
+    assert_eq!(page2[0].detail, "hello");
+    // Action filter.
+    let filtered = store
+        .list_audit(&org_a.id, None, Some("test.other"), None, None, 10)
+        .unwrap();
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].action, "test.other");
+    // Tenant scope: org B sees none of A's audit rows.
+    assert!(
+        store
+            .list_audit(&org_b.id, None, None, None, None, 10)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]

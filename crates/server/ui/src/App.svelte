@@ -7,6 +7,8 @@
   import FileView from "./screens/FileView.svelte";
   import Sessions from "./screens/Sessions.svelte";
   import SessionDetail from "./screens/SessionDetail.svelte";
+  import Audit from "./screens/Audit.svelte";
+  import Exports from "./screens/Exports.svelte";
   import { api, type Me } from "./lib/api";
   import { parseRoute, defaultPath, type Route } from "./lib/router";
 
@@ -57,6 +59,10 @@
       <Sessions org={route.org} />
     {:else if route && route.name === "session"}
       <SessionDetail org={route.org} id={route.id} />
+    {:else if route && route.name === "audit"}
+      <Audit org={route.org} />
+    {:else if route && route.name === "exports"}
+      <Exports org={route.org} />
     {:else}
       <div class="notfound">
         <h1>Not found</h1>

@@ -936,6 +936,60 @@ impl Store for PostgresStore {
             .collect())
     }
 
+    fn list_audit(
+        &self,
+        org_id: &str,
+        actor: Option<&str>,
+        action: Option<&str>,
+        since_rfc3339: Option<&str>,
+        before_seq: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<AuditRecord>> {
+        // Dynamic filter; every clause is a bound parameter (no injection
+        // surface). `org_id = $1` keeps it tenant-scoped (NULL-org rows excluded).
+        let org = org_id.to_string();
+        let lim = limit as i64;
+        let mut sql = String::from(
+            "SELECT seq, ts, org_id, actor_member_id, action, detail, entry_hash
+             FROM audit_log WHERE org_id = $1",
+        );
+        let mut params: Vec<Box<dyn postgres::types::ToSql + Sync>> = vec![Box::new(org)];
+        if let Some(a) = actor {
+            params.push(Box::new(a.to_string()));
+            sql.push_str(&format!(" AND actor_member_id = ${}", params.len()));
+        }
+        if let Some(a) = action {
+            params.push(Box::new(a.to_string()));
+            sql.push_str(&format!(" AND action = ${}", params.len()));
+        }
+        if let Some(s) = since_rfc3339 {
+            params.push(Box::new(s.to_string()));
+            sql.push_str(&format!(" AND ts >= ${}", params.len()));
+        }
+        if let Some(c) = before_seq {
+            params.push(Box::new(c));
+            sql.push_str(&format!(" AND seq < ${}", params.len()));
+        }
+        params.push(Box::new(lim));
+        sql.push_str(&format!(" ORDER BY seq DESC LIMIT ${}", params.len()));
+
+        let refs: Vec<&(dyn postgres::types::ToSql + Sync)> =
+            params.iter().map(|b| b.as_ref()).collect();
+        let rows = self.client()?.query(&sql, refs.as_slice())?;
+        Ok(rows
+            .iter()
+            .map(|r| AuditRecord {
+                seq: r.get(0),
+                ts: r.get(1),
+                org_id: r.get(2),
+                actor_member_id: r.get(3),
+                action: r.get(4),
+                detail: r.get(5),
+                entry_hash: r.get(6),
+            })
+            .collect())
+    }
+
     fn append_audit(&self, entry: &AuditEntry) -> Result<()> {
         let ts = chrono::Utc::now().to_rfc3339();
         let mut client = self.client()?;
@@ -1262,6 +1316,28 @@ impl Store for PostgresStore {
             created_at: r.get(6),
             updated_at: r.get(7),
         }))
+    }
+
+    fn list_jobs(&self, org_id: &str, limit: u32) -> Result<Vec<Job>> {
+        let lim = limit as i64;
+        let rows = self.client()?.query(
+            "SELECT id, org_id, kind, status, result, error, created_at, updated_at
+             FROM job WHERE org_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2",
+            &[&org_id, &lim],
+        )?;
+        Ok(rows
+            .iter()
+            .map(|r| Job {
+                id: r.get(0),
+                org_id: r.get(1),
+                kind: r.get(2),
+                status: r.get(3),
+                result: r.get(4),
+                error: r.get(5),
+                created_at: r.get(6),
+                updated_at: r.get(7),
+            })
+            .collect())
     }
 
     fn scim_create_group(

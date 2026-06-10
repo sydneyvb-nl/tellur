@@ -28,9 +28,13 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    bodies, validated before storage), **attribution ingest**
    (`POST .../repos/{repo}/attributions`, contributor+), and the **export portal**
    — org bundles are **durable jobs**: `POST .../export/events|audit` enqueues
-   (admin) and returns a job id, polled at `GET .../jobs/{id}` (admin, tenant-
-   scoped — the worker-produced result carries org data); per-repo
-   `.../export/slsa|spdx` remain synchronous (admin). Operational
+   (admin) and returns a job id, polled at `GET .../jobs/{id}` or listed via
+   `GET .../jobs` (admin, tenant-scoped — the worker-produced result carries org
+   data); per-repo `.../export/slsa|spdx` remain synchronous (admin). Admins can
+   also **read the audit log** (`GET .../audit` — paginated, filterable, tenant-
+   scoped; audit detail can name members/actions, so it is admin-only and the
+   first page returns `chain_intact` for the tamper-evident hash chain).
+   Operational
    endpoints (`/healthz`, `/readyz`, `/metrics`) are unauthenticated but expose
    only liveness and aggregate counters — no tenant data. The **team dashboard
    SPA** is served as static assets at `/app/*` (unauthenticated, but they carry

@@ -1165,6 +1165,59 @@ impl Store for SqliteStore {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    fn list_audit(
+        &self,
+        org_id: &str,
+        actor: Option<&str>,
+        action: Option<&str>,
+        since_rfc3339: Option<&str>,
+        before_seq: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<AuditRecord>> {
+        let conn = self.conn()?;
+        // Build the filter dynamically; every clause is a bound parameter so
+        // there is no injection surface. `org_id = ?` keeps it tenant-scoped
+        // (rows with a NULL org — e.g. pre-auth denials — are never returned).
+        let mut sql = String::from(
+            "SELECT seq, ts, org_id, actor_member_id, action, detail, entry_hash
+             FROM audit_log WHERE org_id = ?1",
+        );
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(org_id.to_string())];
+        if let Some(a) = actor {
+            params.push(Box::new(a.to_string()));
+            sql.push_str(&format!(" AND actor_member_id = ?{}", params.len()));
+        }
+        if let Some(a) = action {
+            params.push(Box::new(a.to_string()));
+            sql.push_str(&format!(" AND action = ?{}", params.len()));
+        }
+        if let Some(s) = since_rfc3339 {
+            params.push(Box::new(s.to_string()));
+            sql.push_str(&format!(" AND ts >= ?{}", params.len()));
+        }
+        if let Some(c) = before_seq {
+            params.push(Box::new(c));
+            sql.push_str(&format!(" AND seq < ?{}", params.len()));
+        }
+        params.push(Box::new(limit as i64));
+        sql.push_str(&format!(" ORDER BY seq DESC LIMIT ?{}", params.len()));
+
+        let mut stmt = conn.prepare(&sql)?;
+        let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
+        let rows = stmt.query_map(refs.as_slice(), |r| {
+            Ok(AuditRecord {
+                seq: r.get(0)?,
+                ts: r.get(1)?,
+                org_id: r.get(2)?,
+                actor_member_id: r.get(3)?,
+                action: r.get(4)?,
+                detail: r.get(5)?,
+                entry_hash: r.get(6)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     fn append_audit(&self, entry: &AuditEntry) -> Result<()> {
         let ts = chrono::Utc::now().to_rfc3339();
         let mut guard = self.conn()?;
@@ -1538,6 +1591,27 @@ impl Store for SqliteStore {
             )
             .optional()?;
         Ok(row)
+    }
+
+    fn list_jobs(&self, org_id: &str, limit: u32) -> Result<Vec<Job>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, org_id, kind, status, result, error, created_at, updated_at
+             FROM job WHERE org_id = ?1 ORDER BY created_at DESC, id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![org_id, limit as i64], |r| {
+            Ok(Job {
+                id: r.get(0)?,
+                org_id: r.get(1)?,
+                kind: r.get(2)?,
+                status: r.get(3)?,
+                result: r.get(4)?,
+                error: r.get(5)?,
+                created_at: r.get(6)?,
+                updated_at: r.get(7)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     fn scim_create_group(

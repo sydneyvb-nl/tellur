@@ -9,6 +9,8 @@ export type Route =
   | { name: "file"; org: string; repo: string; path: string }
   | { name: "sessions"; org: string }
   | { name: "session"; org: string; id: string }
+  | { name: "audit"; org: string }
+  | { name: "exports"; org: string }
   | { name: "unknown"; org: string | null; path: string };
 
 const BASE = "/app";
@@ -42,6 +44,10 @@ export function parseRoute(pathname: string): Route | null {
       return parts[3]
         ? { name: "session", org, id: decodeURIComponent(parts[3]) }
         : { name: "sessions", org };
+    case "audit":
+      return { name: "audit", org };
+    case "exports":
+      return { name: "exports", org };
     default:
       return { name: "unknown", org, path: pathname };
   }
@@ -62,9 +68,23 @@ export function routePath(route: Route): string {
       return `${BASE}/orgs/${route.org}/sessions`;
     case "session":
       return `${BASE}/orgs/${route.org}/sessions/${encodeURIComponent(route.id)}`;
+    case "audit":
+      return auditPath(route.org);
+    case "exports":
+      return exportsPath(route.org);
     case "unknown":
       return route.path;
   }
+}
+
+/** Path to the audit log (admin). */
+export function auditPath(org: string): string {
+  return `${BASE}/orgs/${org}/audit`;
+}
+
+/** Path to the exports screen (admin). */
+export function exportsPath(org: string): string {
+  return `${BASE}/orgs/${org}/exports`;
 }
 
 /** Path to the sessions list for an org. */

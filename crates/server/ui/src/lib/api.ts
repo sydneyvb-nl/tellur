@@ -10,11 +10,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string): Promise<T> {
-  const res = await fetch(path, {
-    credentials: "include",
-    headers: { Accept: "application/json" },
-  });
+async function handle<T>(res: Response): Promise<T> {
   if (res.status === 401) {
     const target = location.pathname + location.search;
     location.assign(`/auth/login?return=${encodeURIComponent(target)}`);
@@ -32,6 +28,26 @@ async function request<T>(path: string): Promise<T> {
     throw new ApiError(res.status, detail);
   }
   return (await res.json()) as T;
+}
+
+async function request<T>(path: string): Promise<T> {
+  return handle<T>(
+    await fetch(path, {
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    }),
+  );
+}
+
+/** POST with no body (used to enqueue durable export jobs → 202 + job_id). */
+async function post<T>(path: string): Promise<T> {
+  return handle<T>(
+    await fetch(path, {
+      method: "POST",
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    }),
+  );
 }
 
 // ── Typed views of the hub payloads we consume in D0 ────────────────────────
@@ -123,6 +139,38 @@ export interface SessionSummary {
   repos: string[];
 }
 
+export interface AuditRecord {
+  seq: number;
+  ts: string;
+  org_id: string | null;
+  actor_member_id: string | null;
+  action: string;
+  detail: string;
+  entry_hash: string;
+}
+
+export interface AuditPage {
+  org_id: string;
+  // Whether the tamper-evident chain still verifies (only on the first page).
+  chain_intact: boolean | null;
+  // Cursor for the next (older) page, or null at the end.
+  next_before: number | null;
+  records: AuditRecord[];
+}
+
+export interface Job {
+  id: string;
+  org_id: string;
+  kind: string;
+  status: string;
+  result: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ExportKind = "events" | "audit";
+
 const org = (o: string) => encodeURIComponent(o);
 
 export const api = {
@@ -146,5 +194,24 @@ export const api = {
   session: (o: string, id: string) =>
     request<{ session_id: string; events: StoredEvent[]; truncated?: boolean }>(
       `/v1/orgs/${org(o)}/sessions/${encodeURIComponent(id)}`,
+    ),
+  audit: (
+    o: string,
+    opts: { actor?: string; action?: string; rangeDays?: number; before?: number } = {},
+  ) => {
+    const q = new URLSearchParams();
+    if (opts.actor) q.set("actor", opts.actor);
+    if (opts.action) q.set("action", opts.action);
+    if (opts.rangeDays) q.set("range", `${opts.rangeDays}d`);
+    if (opts.before != null) q.set("before", String(opts.before));
+    const qs = q.toString();
+    return request<AuditPage>(`/v1/orgs/${org(o)}/audit${qs ? `?${qs}` : ""}`);
+  },
+  jobs: (o: string) => request<{ jobs: Job[] }>(`/v1/orgs/${org(o)}/jobs`),
+  job: (o: string, id: string) =>
+    request<Job>(`/v1/orgs/${org(o)}/jobs/${encodeURIComponent(id)}`),
+  startExport: (o: string, kind: ExportKind) =>
+    post<{ job_id: string; status: string; poll: string }>(
+      `/v1/orgs/${org(o)}/export/${kind}`,
     ),
 };

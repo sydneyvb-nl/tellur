@@ -391,6 +391,21 @@ pub trait Store: Send + Sync {
     /// All audit records scoped to an org, oldest first.
     fn export_audit(&self, org_id: &str) -> Result<Vec<AuditRecord>>;
 
+    /// Paginated audit read (newest first) with optional actor/action/`since`
+    /// filters and a `before_seq` cursor. Tenant-scoped.
+    fn list_audit(
+        &self,
+        org_id: &str,
+        actor: Option<&str>,
+        action: Option<&str>,
+        since_rfc3339: Option<&str>,
+        before_seq: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<AuditRecord>>;
+
+    /// List an org's jobs, newest first (for the Exports history table).
+    fn list_jobs(&self, org_id: &str, limit: u32) -> Result<Vec<Job>>;
+
     // ─── Audit log (append-only, hash-chained) ──────────────────────────────
 
     /// Append an entry to the tamper-evident audit log.

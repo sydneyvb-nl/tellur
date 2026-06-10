@@ -1,11 +1,30 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-08 (team dashboard D2 — evidence; on feature branch)
+**Last updated:** 2026-06-10 (team dashboard D3 — audit + exports; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-10 — Team dashboard D3 (audit read + exports).** On branch
+> `feat/dashboard-d3`. API-first then UI. New admin-only, tenant-scoped read
+> endpoints: `GET /v1/orgs/{org}/audit[?actor=&action=&range=&before=&limit=]`
+> (A7 — paginated, newest-first read of the tamper-evident audit log; keyset
+> cursor via `before=<seq>`; on the first page only, `chain_intact` reports
+> whether the global hash chain still verifies — an O(n) check skipped on later
+> pages) and `GET /v1/orgs/{org}/jobs` (durable-job history for the Exports
+> table; results not inlined — poll `.../jobs/{id}`). Store gains `list_audit`
+> (dynamic but fully parameterised filter) + `list_jobs` (SQLite + Postgres
+> parity). SPA adds an **Audit log** screen (filterable table, chain-verified
+> badge, load-more pagination) and an **Exports** screen (start events/audit
+> exports, live job-status polling, download a completed job's JSON result);
+> both are admin-only and hidden from the rail for non-admins (the API enforces
+> the role too). Routes `/app/orgs/:org/audit` and `.../exports`. Verified: all
+> server tests pass (incl. `dashboard_api` A7/jobs coverage + PG parity), SPA 20
+> vitest + check + build (~26KB gzip); clippy -D warnings + cargo-deny green; PG
+> tests pass against a local Postgres. Next: D4 (policy compliance snapshots A8 +
+> People & Access A2/A10/A11).
+>
 > **2026-06-08 — Team dashboard D2 (evidence: attribution + sessions).** On
 > branch `feat/dashboard-d2`. API-first then UI. New read endpoints (viewer+,
 > tenant-scoped): `GET /v1/orgs/{org}/repos/{repo}/attributions[?path=]` (A4 —
