@@ -16,6 +16,8 @@
     toggleDensity,
     type Density,
   } from "../lib/density";
+  import { t, getLocale, setLocale } from "../lib/i18n.svelte";
+  import { nextLocale } from "../lib/i18n";
 
   let {
     org,
@@ -25,30 +27,34 @@
   }: { org: string; role: string; active?: string; children: Snippet } = $props();
 
   let themePref = $state<ThemePref>(loadPref());
-  const themeLabel = { system: "Auto", light: "Light", dark: "Dark" };
+  const themeLabel = { system: "theme.system", light: "theme.light", dark: "theme.dark" };
   function cycleTheme() {
     themePref = nextPref(themePref);
     applyPref(themePref);
   }
 
   let density = $state<Density>(loadDensity());
-  const densityLabel = { comfortable: "Cozy", compact: "Compact" };
+  const densityLabel = { comfortable: "density.comfortable", compact: "density.compact" };
   function flipDensity() {
     density = toggleDensity(density);
     applyDensity(density);
+  }
+
+  function flipLocale() {
+    setLocale(nextLocale(getLocale()));
   }
 
   // Items without a ready screen are shown disabled until their phase lands.
   // `admin` items are hidden entirely for non-admins (the API enforces this too).
   const nav = $derived(
     [
-      { key: "overview", label: "Overview", href: defaultPath(org), ready: true, admin: false },
-      { key: "repos", label: "Repositories", href: reposPath(org), ready: true, admin: false },
-      { key: "sessions", label: "Sessions", href: sessionsPath(org), ready: true, admin: false },
-      { key: "policies", label: "Policies", href: policiesPath(org), ready: true, admin: true },
-      { key: "people", label: "People & Access", href: peoplePath(org), ready: true, admin: true },
-      { key: "exports", label: "Exports", href: exportsPath(org), ready: true, admin: true },
-      { key: "audit", label: "Audit log", href: auditPath(org), ready: true, admin: true },
+      { key: "overview", labelKey: "nav.overview", href: defaultPath(org), ready: true, admin: false },
+      { key: "repos", labelKey: "nav.repos", href: reposPath(org), ready: true, admin: false },
+      { key: "sessions", labelKey: "nav.sessions", href: sessionsPath(org), ready: true, admin: false },
+      { key: "policies", labelKey: "nav.policies", href: policiesPath(org), ready: true, admin: true },
+      { key: "people", labelKey: "nav.people", href: peoplePath(org), ready: true, admin: true },
+      { key: "exports", labelKey: "nav.exports", href: exportsPath(org), ready: true, admin: true },
+      { key: "audit", labelKey: "nav.audit", href: auditPath(org), ready: true, admin: true },
     ].filter((item) => !item.admin || role === "admin"),
   );
 
@@ -62,7 +68,7 @@
   );
 </script>
 
-<a class="skip" href="#main">Skip to content</a>
+<a class="skip" href="#main">{t("shell.skip")}</a>
 <div class="shell">
   <nav class="rail" aria-label="Primary">
     <div class="brand">
@@ -79,8 +85,8 @@
             aria-disabled={!item.ready}
             class:soon={!item.ready}
           >
-            {item.label}
-            {#if !item.ready}<span class="tag">soon</span>{/if}
+            {t(item.labelKey)}
+            {#if !item.ready}<span class="tag">{t("nav.soon")}</span>{/if}
           </a>
         </li>
       {/each}
@@ -89,36 +95,44 @@
 
   <div class="frame">
     <header class="topbar">
-      <div class="org" title="Organization">{org}</div>
+      <div class="org" title={t("shell.org")}>{org}</div>
       <div class="spacer"></div>
       <button
         class="ghost kbd-hint"
-        title="Command palette (⌘K / Ctrl-K)"
+        title="{t('palette.label')} (⌘K / Ctrl-K)"
         onclick={() =>
           window.dispatchEvent(
             new KeyboardEvent("keydown", { key: "k", metaKey: true }),
           )}
       >
-        Search <kbd>⌘K</kbd>
+        {t("shell.search")} <kbd>⌘K</kbd>
       </button>
       <button
         class="ghost"
-        title="Display density: {densityLabel[density]}"
-        aria-label="Toggle density (currently {densityLabel[density]})"
+        title={t("shell.langTitle")}
+        aria-label={t("shell.langTitle")}
+        onclick={flipLocale}
+      >
+        {getLocale().toUpperCase()}
+      </button>
+      <button
+        class="ghost"
+        title="{t('shell.densityTitle')}: {t(densityLabel[density])}"
+        aria-label="{t('shell.densityTitle')}"
         onclick={flipDensity}
       >
-        {densityLabel[density]}
+        {t(densityLabel[density])}
       </button>
       <button
         class="ghost"
-        title="Theme: {themeLabel[themePref]}"
-        aria-label="Toggle theme (currently {themeLabel[themePref]})"
+        title="{t('shell.themeTitle')}: {t(themeLabel[themePref])}"
+        aria-label="{t('shell.themeTitle')}"
         onclick={cycleTheme}
       >
-        {themeLabel[themePref]}
+        {t(themeLabel[themePref])}
       </button>
-      <div class="role" title="Your role">{role}</div>
-      <a class="signout" href="/auth/logout">Sign out</a>
+      <div class="role" title={t("shell.role")}>{role}</div>
+      <a class="signout" href="/auth/logout">{t("shell.signOut")}</a>
     </header>
     <main class="content" id="main">
       {@render children()}

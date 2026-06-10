@@ -2,6 +2,7 @@
   import { onDestroy } from "svelte";
   import { api, type ComplianceSnapshot } from "../lib/api";
   import { count, relativeTime } from "../lib/format";
+  import { t } from "../lib/i18n.svelte";
 
   let { org }: { org: string } = $props();
 
@@ -38,7 +39,7 @@
         evaluated = page.evaluated;
       })
       .catch((e) => {
-        if (!cancelled) error = e instanceof Error ? e.message : "failed to load";
+        if (!cancelled) error = e instanceof Error ? e.message : t("app.failed");
       })
       .finally(() => {
         if (!cancelled) loading = false;
@@ -85,12 +86,12 @@
           break;
         }
         if (job.status === "failed") {
-          throw new Error(job.error ?? "evaluation failed");
+          throw new Error(job.error ?? t("app.failed"));
         }
         // queued/running → keep polling.
       }
     } catch (e) {
-      runError = e instanceof Error ? e.message : "evaluation failed";
+      runError = e instanceof Error ? e.message : t("app.failed");
     } finally {
       running = false;
     }
@@ -99,17 +100,16 @@
 
 <div class="head">
   <div>
-    <h1>Policy compliance</h1>
+    <h1>{t("policies.title")}</h1>
     <p class="sub">
-      Your <span class="mono">default</span> policy evaluated against every repo's
-      recorded attribution.
+      {t("policies.subPre")} <span class="mono">default</span> {t("policies.subPost")}
       {#if lastEvaluated}
-        Last run {relativeTime(lastEvaluated)}.
+        {t("policies.lastRun", { time: relativeTime(lastEvaluated) })}
       {/if}
     </p>
   </div>
   <button class="primary" onclick={reevaluate} disabled={running}>
-    {running ? "Evaluating…" : "Re-evaluate"}
+    {running ? t("policies.evaluating") : t("policies.reevaluate")}
   </button>
 </div>
 
@@ -122,49 +122,47 @@
 {:else if error}
   <div class="panel error">
     <p>{error}</p>
-    <button onclick={() => (reloadKey += 1)}>Retry</button>
+    <button onclick={() => (reloadKey += 1)}>{t("common.retry")}</button>
   </div>
 {:else if !evaluated}
   <div class="panel empty">
-    <h2>No evaluation yet</h2>
+    <h2>{t("policies.emptyTitle")}</h2>
     <p class="muted">
-      Upload a policy named <span class="mono">default</span> (via
-      <span class="mono">PUT /v1/orgs/{org}/policies/default</span> or the admin CLI),
-      then run an evaluation to see per-repo compliance here.
+      {t("policies.emptyBodyPre")} <span class="mono">default</span> {t("policies.emptyBodyPost", { org })}
     </p>
     <button class="primary" onclick={reevaluate} disabled={running}>
-      {running ? "Evaluating…" : "Run evaluation"}
+      {running ? t("policies.evaluating") : t("policies.runEval")}
     </button>
   </div>
 {:else}
   <section class="kpis">
     <div class="kpi">
       <div class="num">{count(snapshots.length)}</div>
-      <div class="lbl">Repos evaluated</div>
+      <div class="lbl">{t("policies.kpiRepos")}</div>
     </div>
     <div class="kpi" class:clean={totals.violations === 0}>
       <div class="num">{count(totals.violations)}</div>
-      <div class="lbl">Open violations</div>
+      <div class="lbl">{t("policies.kpiViolations")}</div>
     </div>
     <div class="kpi">
       <div class="sev-row">
-        <span class="sev high">{count(totals.high)} high</span>
-        <span class="sev medium">{count(totals.medium)} med</span>
-        <span class="sev low">{count(totals.low)} low</span>
+        <span class="sev high">{t("policies.sevHigh", { n: count(totals.high) })}</span>
+        <span class="sev medium">{t("policies.sevMed", { n: count(totals.medium) })}</span>
+        <span class="sev low">{t("policies.sevLow", { n: count(totals.low) })}</span>
       </div>
-      <div class="lbl">By severity</div>
+      <div class="lbl">{t("policies.kpiBySeverity")}</div>
     </div>
   </section>
 
   <table>
     <thead>
       <tr>
-        <th>Repository</th>
-        <th class="num">AI ranges</th>
-        <th class="num">Violations</th>
-        <th>Severity</th>
-        <th class="num">Policy</th>
-        <th>Evaluated</th>
+        <th>{t("policies.colRepo")}</th>
+        <th class="num">{t("policies.colAiRanges")}</th>
+        <th class="num">{t("policies.colViolations")}</th>
+        <th>{t("policies.colSeverity")}</th>
+        <th class="num">{t("policies.colPolicy")}</th>
+        <th>{t("policies.colEvaluated")}</th>
       </tr>
     </thead>
     <tbody>
@@ -174,7 +172,7 @@
           <td class="num mono">{count(s.ai_ranges)}</td>
           <td class="num mono">
             {#if s.violations === 0}
-              <span class="ok-dot" title="Compliant">✓</span>
+              <span class="ok-dot" title={t("policies.compliant")}>✓</span>
             {:else}
               {count(s.violations)}
             {/if}

@@ -16,6 +16,7 @@
   import { parseRoute, defaultPath, type Route } from "./lib/router";
   import { applyPref, loadPref } from "./lib/theme";
   import { applyDensity, loadDensity } from "./lib/density";
+  import { t, initLocale } from "./lib/i18n.svelte";
 
   let me = $state<Me | null>(null);
   let route = $state<Route | null>(parseRoute(location.pathname));
@@ -25,6 +26,7 @@
   // Apply saved display preferences as early as possible (before first paint).
   applyPref(loadPref());
   applyDensity(loadDensity());
+  initLocale();
 
   onMount(() => {
     const onpop = () => {
@@ -51,7 +53,7 @@
 </script>
 
 {#if loading}
-  <div class="boot">Loading…</div>
+  <div class="boot">{t("common.loading")}</div>
 {:else if error}
   <div class="boot err">{error}</div>
 {:else if me}
@@ -79,8 +81,8 @@
       <People org={route.org} />
     {:else}
       <div class="notfound">
-        <h1>Not found</h1>
-        <p><a href={defaultPath(me.org_id)}>Back to overview</a></p>
+        <h1>{t("app.notFound")}</h1>
+        <p><a href={defaultPath(me.org_id)}>{t("app.backToOverview")}</a></p>
       </div>
     {/if}
   </AppShell>

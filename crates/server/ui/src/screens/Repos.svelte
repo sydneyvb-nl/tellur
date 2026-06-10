@@ -2,6 +2,7 @@
   import { api, type Dashboard } from "../lib/api";
   import { count } from "../lib/format";
   import { repoPath } from "../lib/router";
+  import { t } from "../lib/i18n.svelte";
 
   let { org }: { org: string } = $props();
 
@@ -22,7 +23,7 @@
         if (!cancelled) data = d;
       })
       .catch((e) => {
-        if (!cancelled) error = e instanceof Error ? e.message : "failed to load";
+        if (!cancelled) error = e instanceof Error ? e.message : t("app.failed");
       })
       .finally(() => {
         if (!cancelled) loading = false;
@@ -33,24 +34,24 @@
   });
 </script>
 
-<h1>Repositories</h1>
+<h1>{t("repos.title")}</h1>
 
 {#if loading}
   <div class="panel skeleton"></div>
 {:else if error}
   <div class="panel error">
     <p>{error}</p>
-    <button onclick={() => (reloadKey += 1)}>Retry</button>
+    <button onclick={() => (reloadKey += 1)}>{t("common.retry")}</button>
   </div>
 {:else if data}
   {#if data.report.repos.length === 0}
     <div class="panel empty">
-      <p class="muted">No repositories yet.</p>
+      <p class="muted">{t("repos.empty")}</p>
     </div>
   {:else}
     <table>
       <thead>
-        <tr><th>Repository</th><th class="num">Events</th></tr>
+        <tr><th>{t("repos.colRepo")}</th><th class="num">{t("repos.colEvents")}</th></tr>
       </thead>
       <tbody>
         {#each data.report.repos as r (r.id)}

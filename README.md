@@ -555,7 +555,8 @@ violations by severity + one-click re-evaluation), a **People & Access** view
 loads in a single round-trip from `GET /v1/orgs/{org}/overview` (org totals,
 AI-share + review-coverage rollups, activity trend, and repos ranked by review
 gap). A command palette (**⌘K** / **Ctrl-K**) jumps between screens, and topbar
-controls switch the theme (system / light / dark) and density (cozy / compact).
+controls switch the theme (system / light / dark), density (cozy / compact), and
+language (English / Dutch).
 
 ## Development
 

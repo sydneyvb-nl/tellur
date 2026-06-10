@@ -3,6 +3,7 @@
   import { pct } from "../lib/format";
   import { repoPath } from "../lib/router";
   import { sourceLink, rawUrl, sliceLines } from "../lib/source";
+  import { t } from "../lib/i18n.svelte";
 
   let { org, repo, path }: { org: string; repo: string; path: string } = $props();
 
@@ -44,7 +45,7 @@
         rawTemplate = res.source_raw_template;
       })
       .catch((e) => {
-        if (!cancelled) error = e instanceof Error ? e.message : "failed to load";
+        if (!cancelled) error = e instanceof Error ? e.message : t("app.failed");
       })
       .finally(() => {
         if (!cancelled) loading = false;
@@ -63,7 +64,7 @@
     if (!showSource || sourceText || sourceError || sourceLoading) return;
     const url = file ? rawUrl(rawTemplate, file.file_path) : null;
     if (!url) {
-      sourceError = "no raw source URL configured";
+      sourceError = t("fileView.noRawUrl");
       return;
     }
     sourceLoading = true;
@@ -73,14 +74,13 @@
       const res = await fetch(url, { credentials: "omit" });
       if (!res.ok) throw new Error(`provider returned ${res.status}`);
       const len = Number(res.headers.get("content-length") ?? "0");
-      if (len > MAX_SOURCE_BYTES) throw new Error("file too large to inline");
+      if (len > MAX_SOURCE_BYTES) throw new Error(t("fileView.tooLarge"));
       const text = await res.text();
-      if (text.length > MAX_SOURCE_BYTES) throw new Error("file too large to inline");
+      if (text.length > MAX_SOURCE_BYTES) throw new Error(t("fileView.tooLarge"));
       sourceText = text;
     } catch (e) {
       // Cross-origin/private repos may block the fetch — fall back to links.
-      sourceError =
-        e instanceof Error ? e.message : "couldn't load source from the provider";
+      sourceError = e instanceof Error ? e.message : t("app.failed");
     } finally {
       sourceLoading = false;
     }
@@ -96,33 +96,31 @@
 {:else if error}
   <div class="panel error">
     <p>{error}</p>
-    <button onclick={() => (reloadKey += 1)}>Retry</button>
+    <button onclick={() => (reloadKey += 1)}>{t("common.retry")}</button>
   </div>
 {:else if !file}
-  <div class="panel empty"><p class="muted">No attribution recorded for this file.</p></div>
+  <div class="panel empty"><p class="muted">{t("fileView.empty")}</p></div>
 {:else}
   <h1 class="mono">{file.file_path}</h1>
   <p class="muted">
-    blob <code>{file.git_blob_sha}</code> · {file.ranges.length} attributed ranges
+    {t("fileView.blob")} <code>{file.git_blob_sha}</code> · {t("fileView.attributedRanges", { n: file.ranges.length })}
     <span class="legend">
-      <span class="dot ai"></span> AI
-      <span class="dot human"></span> human
-      <span class="dot mixed"></span> mixed
+      <span class="dot ai"></span> {t("common.ai")}
+      <span class="dot human"></span> {t("common.human")}
+      <span class="dot mixed"></span> {t("common.mixed")}
     </span>
   </p>
   <p class="note muted">
-    Provenance metadata only — the hub never stores or proxies source text.
-    {#if sourceTemplate}Source links open the lines at your configured provider.{/if}
+    {t("fileView.note")}
+    {#if sourceTemplate}{t("fileView.noteLinks")}{/if}
   </p>
 
   {#if rawTemplate}
     <div class="srcbar">
       <button class="toggle" onclick={toggleSource}>
-        {showSource ? "Hide source" : "Show source"}
+        {showSource ? t("fileView.hideSource") : t("fileView.showSource")}
       </button>
-      <span class="muted small">
-        Fetched in your browser straight from the provider — never via the hub.
-      </span>
+      <span class="muted small">{t("fileView.fetchedNote")}</span>
     </div>
   {/if}
 
@@ -131,15 +129,14 @@
       <div class="panel skeleton"></div>
     {:else if sourceError}
       <div class="panel warnpanel">
-        <p class="muted">Couldn't load source: {sourceError}. The provider may
-          require auth or block cross-origin reads — use the per-range links instead.</p>
+        <p class="muted">{t("fileView.loadError", { err: sourceError })}</p>
       </div>
     {:else if sourceText}
       <div class="source">
         {#each file.ranges as r (r.start_line + "-" + r.end_line)}
           <div class="range">
             <div class="range-head mono {originClass(r.origin)}">
-              {r.origin} · lines {r.start_line}–{r.end_line}
+              {t("fileView.rangeHead", { origin: r.origin, start: r.start_line, end: r.end_line })}
             </div>
             <pre class="code"><code>{#each sliceLines(sourceText, r.start_line, r.end_line) as ln (ln.n)}<span class="ln">{ln.n}</span>{ln.text}
 {/each}</code></pre>
@@ -152,9 +149,9 @@
   <table>
     <thead>
       <tr>
-        <th>Lines</th><th>Origin</th><th>Agent / model</th>
-        <th class="num">Conf.</th><th>Reviewed</th>
-        {#if sourceTemplate}<th>Source</th>{/if}
+        <th>{t("fileView.colLines")}</th><th>{t("fileView.colOrigin")}</th><th>{t("fileView.colAgent")}</th>
+        <th class="num">{t("fileView.colConf")}</th><th>{t("fileView.colReviewed")}</th>
+        {#if sourceTemplate}<th>{t("fileView.colSource")}</th>{/if}
       </tr>
     </thead>
     <tbody>
@@ -183,7 +180,7 @@
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  View ↗
+                  {t("fileView.view")}
                 </a>
               {:else}
                 <span class="muted">—</span>

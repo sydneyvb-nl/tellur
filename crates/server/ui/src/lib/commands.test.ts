@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { buildCommands, filterCommands } from "./commands";
+import { buildCommands, filterCommands, type ResolvedCommand } from "./commands";
+import { translate } from "./i18n";
+
+/** Resolve labels (as the palette does) so filtering matches displayed text. */
+function resolved(org: string, role: string): ResolvedCommand[] {
+  return buildCommands(org, role).map((c) => ({
+    ...c,
+    label: translate("en", c.labelKey),
+  }));
+}
 
 describe("buildCommands", () => {
   it("hides admin-only targets from non-admins", () => {
@@ -22,7 +31,7 @@ describe("buildCommands", () => {
 });
 
 describe("filterCommands", () => {
-  const cmds = buildCommands("o1", "admin");
+  const cmds = resolved("o1", "admin");
 
   it("returns everything for an empty query", () => {
     expect(filterCommands(cmds, "").length).toBe(cmds.length);
@@ -32,7 +41,6 @@ describe("filterCommands", () => {
     expect(r[0]?.id).toBe("audit");
   });
   it("matches a subsequence (fuzzy)", () => {
-    // "ppl" is a subsequence of "People & Access" → peoP… no; use letters in order.
     const r = filterCommands(cmds, "peo");
     expect(r.map((c) => c.id)).toContain("people");
   });
@@ -40,7 +48,6 @@ describe("filterCommands", () => {
     expect(filterCommands(cmds, "zzzzz")).toHaveLength(0);
   });
   it("ranks an earlier match ahead of a later one", () => {
-    // "o" appears at start of "Overview" and later in others.
     const r = filterCommands(cmds, "over");
     expect(r[0]?.id).toBe("overview");
   });

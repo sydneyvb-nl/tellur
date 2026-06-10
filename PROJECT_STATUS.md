@@ -1,10 +1,25 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-10 (A12 complete — inline source gutter; on feature branch)
+**Last updated:** 2026-06-10 (dashboard i18n: full en + nl; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
+
+> **2026-06-10 — Full dashboard i18n (English + Dutch).** On branch `feat/i18n`.
+> Every user-facing string in the SPA resolves through a message catalog: pure
+> `lib/i18n.ts` (`translate(locale, key, vars)` with `{var}` interpolation +
+> en-fallback) + reactive `lib/i18n.svelte.ts` (`t()` reads a `$state` locale
+> rune, so switching language re-renders the whole UI live). Wired through every
+> screen + component (AppShell nav/topbar, CommandPalette, App, Trend, Overview,
+> Repos, RepoDetail, FileView, Sessions, SessionDetail, Audit, Exports, Policies,
+> People); palette labels became i18n keys (`labelKey`/`hintKey`, resolved before
+> fuzzy-filtering). A topbar **EN/NL** switcher persists to localStorage and sets
+> `<html lang>`. Two complete hand-authored locales (no machine-fill); a vitest
+> **catalog-parity** test fails if the en/nl key sets diverge. Verified: SPA 51
+> vitest (i18n + commands incl. parity) + svelte-check (0/0) + build; `cargo build
+> --features dashboard` embeds. Remaining follow-ups: Playwright E2E; A12
+> hub-proxy `/blob` variant.
 
 > **2026-06-10 — A12 complete: inline source gutter (client-fetch variant).** On
 > branch `feat/source-gutter`. Completes A12 while keeping the hub metadata-only:

@@ -2,6 +2,7 @@
   import { api, type StoredEvent } from "../lib/api";
   import { relativeTime } from "../lib/format";
   import { sessionsPath } from "../lib/router";
+  import { t } from "../lib/i18n.svelte";
 
   let { org, id }: { org: string; id: string } = $props();
 
@@ -27,7 +28,7 @@
         }
       })
       .catch((e) => {
-        if (!cancelled) error = e instanceof Error ? e.message : "failed to load";
+        if (!cancelled) error = e instanceof Error ? e.message : t("app.failed");
       })
       .finally(() => {
         if (!cancelled) loading = false;
@@ -48,19 +49,19 @@
   }
 </script>
 
-<p class="crumb"><a href={sessionsPath(org)}>Sessions</a> / {id}</p>
+<p class="crumb"><a href={sessionsPath(org)}>{t("nav.sessions")}</a> / {id}</p>
 
 {#if loading}
   <div class="panel skeleton"></div>
 {:else if error}
   <div class="panel error">
     <p>{error}</p>
-    <button onclick={() => (reloadKey += 1)}>Retry</button>
+    <button onclick={() => (reloadKey += 1)}>{t("common.retry")}</button>
   </div>
 {:else}
   <h1 class="mono">{id}</h1>
   <p class="muted">
-    {events.length} events{#if truncated} · showing the first {events.length} (truncated){/if}
+    {t("sessionDetail.events", { n: events.length })}{#if truncated} · {t("sessionDetail.truncated", { n: events.length })}{/if}
   </p>
   <ol class="timeline">
     {#each events as e (e.id)}
@@ -68,7 +69,7 @@
         <span class="tick"></span>
         <div class="row">
           <span class="evt mono">{e.type}</span>
-          <span class="muted">by {e.actor}</span>
+          <span class="muted">{t("common.by", { actor: e.actor })}</span>
           {#if fileOf(e.payload)}<span class="file mono">{fileOf(e.payload)}</span>{/if}
           <span class="spacer"></span>
           <span class="muted" title={e.timestamp}>{relativeTime(e.timestamp)}</span>

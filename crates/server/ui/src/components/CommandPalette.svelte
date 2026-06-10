@@ -2,6 +2,7 @@
   import { onMount, tick } from "svelte";
   import { buildCommands, filterCommands } from "../lib/commands";
   import { navigate } from "../lib/router";
+  import { t } from "../lib/i18n.svelte";
 
   let { org, role }: { org: string; role: string } = $props();
 
@@ -10,7 +11,11 @@
   let selected = $state(0);
   let input = $state<HTMLInputElement | null>(null);
 
-  const commands = $derived(buildCommands(org, role));
+  // Resolve labels to the active locale before filtering, so search matches the
+  // text the user actually sees.
+  const commands = $derived(
+    buildCommands(org, role).map((c) => ({ ...c, label: t(c.labelKey) })),
+  );
   const results = $derived(filterCommands(commands, query));
 
   // Keep the highlight in range as the result set changes. Clamps both ends so a
@@ -78,7 +83,7 @@
       class="palette"
       role="dialog"
       aria-modal="true"
-      aria-label="Command palette"
+      aria-label={t("palette.label")}
       tabindex="-1"
       onclick={(e) => e.stopPropagation()}
     >
@@ -86,15 +91,15 @@
         bind:this={input}
         bind:value={query}
         type="text"
-        placeholder="Jump to…"
-        aria-label="Search commands"
+        placeholder={t("palette.placeholder")}
+        aria-label={t("palette.search")}
         autocomplete="off"
         spellcheck="false"
       />
       {#if results.length === 0}
-        <p class="none">No matches</p>
+        <p class="none">{t("palette.none")}</p>
       {:else}
-        <ul role="listbox" aria-label="Commands">
+        <ul role="listbox" aria-label={t("palette.label")}>
           {#each results as cmd, i (cmd.id)}
             <!-- Options are keyboard-operable via the focused input (arrows/enter);
                  mouse handlers are enhancement-only. -->
@@ -107,13 +112,13 @@
               onclick={() => choose(i)}
             >
               <span class="label">{cmd.label}</span>
-              {#if cmd.hint}<span class="hint">{cmd.hint}</span>{/if}
+              {#if cmd.hintKey}<span class="hint">{t(cmd.hintKey)}</span>{/if}
             </li>
           {/each}
         </ul>
       {/if}
       <div class="foot">
-        <kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>↵</kbd> open · <kbd>esc</kbd> close
+        <kbd>↑</kbd><kbd>↓</kbd> {t("palette.navigate")} · <kbd>↵</kbd> {t("palette.open")} · <kbd>esc</kbd> {t("palette.close")}
       </div>
     </div>
   </div>
