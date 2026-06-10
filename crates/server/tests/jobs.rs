@@ -137,6 +137,12 @@ fn retention_prunes_expired_sessions_and_finished_jobs() {
     assert!(store.session_principal(&live).unwrap().is_some());
     assert!(store.get_job(&org, &done).unwrap().is_some());
 
+    // An absurd retention value must clamp, not wrap negative and delete fresh
+    // jobs (the cutoff would otherwise land in the future).
+    let counts = jobs::run_maintenance_once(&store, u64::MAX).unwrap();
+    assert_eq!(counts.jobs, 0);
+    assert!(store.get_job(&org, &done).unwrap().is_some());
+
     // Direct finished-job prune with a future cutoff removes completed/failed
     // but keeps queued.
     let future = (chrono::Utc::now() + chrono::Duration::days(1)).to_rfc3339();

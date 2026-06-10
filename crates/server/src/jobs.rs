@@ -266,6 +266,10 @@ pub fn spawn_worker(store: Arc<dyn Store>) -> tokio::task::JoinHandle<()> {
 /// How often the maintenance loop runs.
 const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(3600);
 
+/// Upper bound on the retention window (~100 years) — effectively "keep forever"
+/// while keeping the day count well within i64 and chrono's valid date range.
+const MAX_RETENTION_DAYS: u64 = 36_500;
+
 /// Counts removed by one maintenance pass.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct PruneCounts {
@@ -282,8 +286,11 @@ pub fn run_maintenance_once(store: &Arc<dyn Store>, retention_days: u64) -> Resu
     let sessions = store.prune_expired_sessions()?;
     let logins = store.prune_expired_logins(crate::oidc::LOGIN_TTL_SECS)?;
     let jobs = if retention_days > 0 {
-        let cutoff =
-            (chrono::Utc::now() - chrono::Duration::days(retention_days as i64)).to_rfc3339();
+        // Clamp to a sane ceiling (~100y) so an absurd env value can't wrap the
+        // i64 cast negative (which would put the cutoff in the future and delete
+        // every finished job) or overflow chrono's date arithmetic.
+        let days = retention_days.min(MAX_RETENTION_DAYS) as i64;
+        let cutoff = (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
         store.prune_finished_jobs(&cutoff)?
     } else {
         0
