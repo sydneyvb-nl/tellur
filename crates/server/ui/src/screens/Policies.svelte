@@ -226,7 +226,7 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-card);
-    padding: 16px;
+    padding: var(--card-pad);
   }
   .kpi.clean {
     border-color: var(--ok);
@@ -258,7 +258,7 @@
   th,
   td {
     text-align: left;
-    padding: 10px 14px;
+    padding: var(--row-pad-y) var(--row-pad-x);
     border-bottom: 1px solid var(--border);
     font-size: 13px;
   }
@@ -310,7 +310,7 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-card);
-    padding: 16px;
+    padding: var(--card-pad);
   }
   .panel.empty {
     padding: 32px;

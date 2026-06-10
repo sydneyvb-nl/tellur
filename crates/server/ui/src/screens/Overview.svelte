@@ -1,31 +1,27 @@
 <script lang="ts">
-  import { api, type Dashboard, type ActivityBucket } from "../lib/api";
-  import { count, relativeTime } from "../lib/format";
+  import { api, type Overview } from "../lib/api";
+  import { count, pct, relativeTime } from "../lib/format";
+  import { repoPath } from "../lib/router";
   import Trend from "../components/Trend.svelte";
 
   let { org }: { org: string } = $props();
 
-  let data = $state<Dashboard | null>(null);
-  let activity = $state<ActivityBucket[]>([]);
+  let data = $state<Overview | null>(null);
   let error = $state<string | null>(null);
   let loading = $state(true);
-  // Bumped to force a reload (e.g. the Retry button), since re-assigning the
-  // same `org` would not re-trigger the effect.
   let reloadKey = $state(0);
 
   $effect(() => {
-    // Reload whenever the org changes or a reload is requested.
     const currentOrg = org;
     void reloadKey;
     let cancelled = false;
     loading = true;
     error = null;
-    Promise.all([api.dashboard(currentOrg), api.activity(currentOrg, 30, "type")])
-      .then(([d, a]) => {
-        if (!cancelled) {
-          data = d;
-          activity = a.buckets;
-        }
+    // One round-trip: totals, rollups, activity, ranked repos, recent feed.
+    api
+      .overview(currentOrg)
+      .then((d) => {
+        if (!cancelled) data = d;
       })
       .catch((e) => {
         if (!cancelled) error = e instanceof Error ? e.message : "failed to load";
@@ -33,24 +29,17 @@
       .finally(() => {
         if (!cancelled) loading = false;
       });
-    // If org/reloadKey changes before this resolves, ignore the stale result.
     return () => {
       cancelled = true;
     };
   });
-
-  function topTypes(d: Dashboard): [string, number][] {
-    return Object.entries(d.report.by_type)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5);
-  }
 </script>
 
 <h1>Overview</h1>
 
 {#if loading}
   <div class="kpis">
-    {#each Array(3) as _unused}
+    {#each Array(5) as _unused}
       <div class="kpi skeleton"></div>
     {/each}
   </div>
@@ -60,7 +49,7 @@
     <button onclick={() => (reloadKey += 1)}>Retry</button>
   </div>
 {:else if data}
-  {#if data.report.total_events === 0}
+  {#if data.totals.events === 0}
     <div class="panel empty">
       <p>No activity yet for this org.</p>
       <p class="muted">
@@ -71,32 +60,54 @@
   {:else}
     <section class="kpis" aria-label="Key metrics">
       <div class="kpi">
-        <div class="num mono">{count(data.report.total_events)}</div>
+        <div class="num mono">{count(data.totals.events)}</div>
         <div class="lbl">Events</div>
       </div>
       <div class="kpi">
-        <div class="num mono">{count(data.report.distinct_sessions)}</div>
+        <div class="num mono">{count(data.totals.sessions)}</div>
         <div class="lbl">Sessions</div>
       </div>
       <div class="kpi">
-        <div class="num mono">{count(data.report.repos.length)}</div>
+        <div class="num mono">{count(data.totals.repos)}</div>
         <div class="lbl">Repositories</div>
+      </div>
+      <div class="kpi">
+        <div class="num mono">{data.ai_share === null ? "—" : pct(data.ai_share)}</div>
+        <div class="lbl">AI-attributed lines</div>
+      </div>
+      <div
+        class="kpi"
+        class:warn={data.review_coverage !== null && data.review_coverage < 0.5}
+      >
+        <div class="num mono">
+          {data.review_coverage === null ? "—" : pct(data.review_coverage)}
+        </div>
+        <div class="lbl">AI lines reviewed</div>
       </div>
     </section>
 
-    <Trend buckets={activity} label="Activity (30 days)" />
+    <Trend buckets={data.activity} label="Activity (30 days)" />
 
     <div class="cols">
       <section class="panel">
-        <h2>Repositories</h2>
-        {#if data.report.repos.length === 0}
+        <h2>Repositories by review gap</h2>
+        {#if data.repos.length === 0}
           <p class="muted">No repositories.</p>
         {:else}
           <ul class="rows">
-            {#each data.report.repos as r (r.id)}
+            {#each data.repos.slice(0, 6) as r (r.id)}
               <li>
-                <span class="repo">{r.name}</span>
-                <span class="muted mono">{count(r.event_count)} events</span>
+                <a class="repo" href={repoPath(org, r.name)}>{r.name}</a>
+                <span class="spacer"></span>
+                {#if r.review_gap_lines > 0}
+                  <span class="gap mono" title="Unreviewed AI lines">
+                    {count(r.review_gap_lines)} unreviewed
+                  </span>
+                {:else if r.ai_lines > 0}
+                  <span class="clear mono">reviewed</span>
+                {:else}
+                  <span class="muted mono">no AI lines</span>
+                {/if}
               </li>
             {/each}
           </ul>
@@ -121,21 +132,6 @@
         {/if}
       </section>
     </div>
-
-    {#if topTypes(data).length > 0}
-      <section class="panel">
-        <h2>Event types</h2>
-        <ul class="rows">
-          {#each topTypes(data) as [type, n] (type)}
-            <li>
-              <span class="evt mono">{type}</span>
-              <span class="spacer"></span>
-              <span class="muted mono">{count(n)}</span>
-            </li>
-          {/each}
-        </ul>
-      </section>
-    {/if}
   {/if}
 {/if}
 
@@ -153,7 +149,7 @@
   }
   .kpis {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 12px;
     margin-bottom: 16px;
   }
@@ -161,10 +157,13 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-card);
-    padding: 16px;
+    padding: var(--card-pad);
+  }
+  .kpi.warn {
+    border-color: var(--warn);
   }
   .kpi .num {
-    font-size: 28px;
+    font-size: 26px;
     font-weight: 600;
   }
   .kpi .lbl {
@@ -191,7 +190,7 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-card);
-    padding: 16px;
+    padding: var(--card-pad);
   }
   .panel.error {
     border-color: var(--risk);
@@ -214,6 +213,17 @@
   .rows li:last-child {
     border-bottom: none;
   }
+  .repo {
+    color: var(--accent);
+  }
+  .gap {
+    font-size: 12px;
+    color: var(--warn);
+  }
+  .clear {
+    font-size: 12px;
+    color: var(--ok);
+  }
   .spacer {
     flex: 1;
   }
@@ -228,8 +238,12 @@
     padding: 6px 12px;
     cursor: pointer;
   }
+  @media (max-width: 1024px) {
+    .kpis {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
   @media (max-width: 768px) {
-    .kpis,
     .cols {
       grid-template-columns: 1fr;
     }

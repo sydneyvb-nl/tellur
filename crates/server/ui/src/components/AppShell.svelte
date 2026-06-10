@@ -10,6 +10,12 @@
     sessionsPath,
   } from "../lib/router";
   import { applyPref, loadPref, nextPref, type ThemePref } from "../lib/theme";
+  import {
+    applyDensity,
+    loadDensity,
+    toggleDensity,
+    type Density,
+  } from "../lib/density";
 
   let {
     org,
@@ -23,6 +29,13 @@
   function cycleTheme() {
     themePref = nextPref(themePref);
     applyPref(themePref);
+  }
+
+  let density = $state<Density>(loadDensity());
+  const densityLabel = { comfortable: "Cozy", compact: "Compact" };
+  function flipDensity() {
+    density = toggleDensity(density);
+    applyDensity(density);
   }
 
   // Items without a ready screen are shown disabled until their phase lands.
@@ -87,6 +100,14 @@
           )}
       >
         Search <kbd>⌘K</kbd>
+      </button>
+      <button
+        class="ghost"
+        title="Display density: {densityLabel[density]}"
+        aria-label="Toggle density (currently {densityLabel[density]})"
+        onclick={flipDensity}
+      >
+        {densityLabel[density]}
       </button>
       <button
         class="ghost"

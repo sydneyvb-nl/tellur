@@ -22,9 +22,20 @@
   --radius-card: 10px;
   --space: 4px;
 
+  /* Density tokens — overridden by :root[data-density="compact"]. */
+  --row-pad-y: 10px;
+  --row-pad-x: 14px;
+  --card-pad: 16px;
+
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica,
     Arial, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+:root[data-density="compact"] {
+  --row-pad-y: 6px;
+  --row-pad-x: 10px;
+  --card-pad: 12px;
 }
 
 :root[data-theme="light"] {

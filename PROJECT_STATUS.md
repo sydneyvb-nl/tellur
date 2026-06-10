@@ -1,11 +1,27 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-10 (team dashboard D5 — palette + theme + a11y; on feature branch)
+**Last updated:** 2026-06-10 (dashboard: composed /overview (A9) + density toggle; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
+> **2026-06-10 — Dashboard: composed `/overview` (A9) + density toggle.** On
+> branch `feat/dashboard-overview-density`. Two bundled items. **A9**: new
+> `GET /v1/orgs/{org}/overview` (viewer+, rate-limited, off-runtime) returns the
+> landing screen in one round-trip — org totals, org-wide AI share + review
+> coverage (folds attribution across repos), a 30-day activity series, repos
+> **ranked by review gap** (most unreviewed AI lines first), and a recent-activity
+> feed; the Overview screen now makes a single fetch and surfaces the review-gap
+> ranking + an AI-reviewed KPI (warns under 50%). **Density toggle**: a
+> Cozy/Compact control in the topbar drives `--row-pad-*` / `--card-pad` spacing
+> tokens via `<html data-density>`, persisted to localStorage and applied before
+> first paint; threaded through every table/card. Verified: full workspace tests
+> (new `overview_*` coverage incl. tenant scoping + review-gap ranking; PG parity
+> unaffected), SPA 36 vitest + svelte-check (0/0) + build; clippy -D warnings +
+> cargo-deny green. Remaining follow-ups: full i18n, Playwright E2E, A12 (opt-in
+> full-source gutter), A13 (job-backed SLSA/SPDX), backup/retention.
+>
 > **2026-06-10 — Team dashboard D5 (polish: command palette + theme + a11y).**
 > On branch `feat/dashboard-d5`. Cross-cutting polish on the SPA. **Command
 > palette** (⌘K / Ctrl-K): role-aware, org-scoped quick nav with subsequence

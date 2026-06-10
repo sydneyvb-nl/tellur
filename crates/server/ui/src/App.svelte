@@ -15,14 +15,16 @@
   import { api, type Me } from "./lib/api";
   import { parseRoute, defaultPath, type Route } from "./lib/router";
   import { applyPref, loadPref } from "./lib/theme";
+  import { applyDensity, loadDensity } from "./lib/density";
 
   let me = $state<Me | null>(null);
   let route = $state<Route | null>(parseRoute(location.pathname));
   let error = $state<string | null>(null);
   let loading = $state(true);
 
-  // Apply the saved theme as early as possible (before first paint of content).
+  // Apply saved display preferences as early as possible (before first paint).
   applyPref(loadPref());
+  applyDensity(loadDensity());
 
   onMount(() => {
     const onpop = () => {
