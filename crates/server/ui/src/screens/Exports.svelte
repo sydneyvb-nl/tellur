@@ -10,6 +10,9 @@
   let loading = $state(true);
   let starting = $state(false);
   let downloading = $state<string | null>(null);
+  // Bumped to (re)start the polling loop — e.g. after queueing a new export,
+  // even when the page previously had no active jobs and polling had stopped.
+  let pollKey = $state(0);
 
   // Poll while any job is still in flight so status updates live.
   const POLL_MS = 3000;
@@ -33,6 +36,7 @@
   $effect(() => {
     const o = org;
     void o;
+    void pollKey; // restart the loop on demand
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = async () => {
@@ -54,9 +58,9 @@
     try {
       await api.startExport(org, kind);
       notice = `Queued ${kind} export.`;
-      await refresh();
-      // Resume polling for the new job.
-      if (active(jobs)) setTimeout(() => void refresh(), POLL_MS);
+      // Restart the polling loop so the newly queued job is tracked to completion
+      // even if the page had no active jobs before.
+      pollKey += 1;
     } catch (e) {
       error = e instanceof Error ? e.message : "failed to start export";
     } finally {

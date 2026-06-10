@@ -4,10 +4,15 @@
 
   let { org }: { org: string } = $props();
 
-  // Filters (applied on submit so we don't fetch on every keystroke).
+  // Live input state (bound to the form). Editing these must NOT trigger a
+  // fetch — only `applied` does, so the effect can't read them reactively.
   let actor = $state("");
   let action = $state("");
   let rangeDays = $state(30);
+
+  // The snapshot the effect actually queries; updated only on Apply/retry.
+  type Filters = { actor?: string; action?: string; rangeDays: number };
+  let applied = $state<Filters>({ rangeDays: 30 });
 
   let records = $state<AuditRecord[]>([]);
   let chainIntact = $state<boolean | null>(null);
@@ -15,18 +20,10 @@
   let error = $state<string | null>(null);
   let loading = $state(true);
   let loadingMore = $state(false);
-  // Bumped to re-run the initial load (apply filters / retry).
-  let queryKey = $state(0);
 
   $effect(() => {
     const o = org;
-    void queryKey;
-    // Snapshot filters at apply time.
-    const opts = {
-      actor: actor.trim() || undefined,
-      action: action.trim() || undefined,
-      rangeDays,
-    };
+    const opts = applied; // sole reactive dependency besides org
     let cancelled = false;
     loading = true;
     error = null;
@@ -53,12 +50,7 @@
     if (nextBefore == null || loadingMore) return;
     loadingMore = true;
     try {
-      const page = await api.audit(org, {
-        actor: actor.trim() || undefined,
-        action: action.trim() || undefined,
-        rangeDays,
-        before: nextBefore,
-      });
+      const page = await api.audit(org, { ...applied, before: nextBefore });
       records = [...records, ...page.records];
       nextBefore = page.next_before;
     } catch (e) {
@@ -68,9 +60,14 @@
     }
   }
 
-  function apply(e: Event) {
-    e.preventDefault();
-    queryKey += 1;
+  function apply(e?: Event) {
+    e?.preventDefault();
+    // New object identity → effect reruns once, here and only here.
+    applied = {
+      actor: actor.trim() || undefined,
+      action: action.trim() || undefined,
+      rangeDays,
+    };
   }
 
   function shortHash(h: string): string {
@@ -108,7 +105,7 @@
 {:else if error}
   <div class="panel error">
     <p>{error}</p>
-    <button onclick={() => (queryKey += 1)}>Retry</button>
+    <button onclick={() => apply()}>Retry</button>
   </div>
 {:else if records.length === 0}
   <div class="panel empty"><p class="muted">No audit entries match.</p></div>
