@@ -13,9 +13,12 @@
   const commands = $derived(buildCommands(org, role));
   const results = $derived(filterCommands(commands, query));
 
-  // Keep the highlight in range as the result set changes.
+  // Keep the highlight in range as the result set changes. Clamps both ends so a
+  // negative index (e.g. ArrowDown on an empty result set) can't survive into a
+  // later matching query and break Enter.
   $effect(() => {
-    if (selected >= results.length) selected = Math.max(0, results.length - 1);
+    if (results.length === 0) selected = 0;
+    else selected = Math.min(Math.max(selected, 0), results.length - 1);
   });
 
   async function show() {
