@@ -102,7 +102,13 @@ async function mockApi(page: Page, role: "admin" | "viewer" = "admin") {
     if (path.endsWith("/members")) return route.fulfill(json(fx.members));
     if (path.endsWith("/groups")) return route.fulfill(json(fx.groups));
     if (path.endsWith("/sso-status")) return route.fulfill(json(fx.sso));
-    return route.fulfill(json({}));
+    // Fail loudly on anything unmocked (a typo or new endpoint) so a screen's
+    // data fetch landing on the wrong URL surfaces as an error, not a false pass.
+    return route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ title: `unmocked: ${path}` }),
+    });
   });
 }
 
@@ -160,4 +166,7 @@ test("command palette navigates to a screen", async ({ page }) => {
 
   await expect(page).toHaveURL(new RegExp(`/app/orgs/${ORG}/people`));
   await expect(page.getByRole("heading", { name: "People & Access", level: 1 })).toBeVisible();
+  // Assert data-derived content too, so a wrong/failed fetch (error state) can't
+  // pass on the always-rendered heading alone.
+  await expect(page.getByText("alice@corp.test")).toBeVisible();
 });
