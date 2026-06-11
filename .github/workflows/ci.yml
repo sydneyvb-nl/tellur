@@ -71,6 +71,28 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build -p tellur-server --features dashboard
 
+  e2e:
+    name: dashboard E2E (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: crates/server/ui/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: crates/server/ui
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: crates/server/ui
+      # Drives the real production bundle in Chromium against a mocked /v1 API;
+      # the Playwright webServer config builds + previews the SPA first.
+      - run: pnpm e2e
+        working-directory: crates/server/ui
+
   supply-chain:
     name: cargo-deny
     runs-on: ubuntu-latest

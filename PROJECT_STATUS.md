@@ -1,10 +1,22 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-10 (dashboard i18n: full en + nl; on feature branch)
+**Last updated:** 2026-06-10 (dashboard E2E: Playwright; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
+
+> **2026-06-10 — Dashboard E2E (Playwright).** On branch `feat/e2e`. Browser
+> end-to-end tests drive the **real production bundle** in Chromium with the
+> `/v1` API mocked per-test via route interception — the SPA can't complete the
+> cookie/SSO login flow headlessly, so this is honest *frontend* E2E (routing,
+> rendering from fixtures, admin role-gating, live EN/NL switch, theme toggle,
+> command-palette navigation), not full-stack. `crates/server/ui/e2e/` +
+> `playwright.config.ts` (webServer builds + `vite preview`s under `/app/`); 5
+> specs, all green locally. New CI job **dashboard E2E (Playwright)** installs
+> chromium and runs them. The full-stack/hub-proxy paths stay out (would need a
+> test-only auth bypass — deliberately not added). Remaining follow-up: A12
+> hub-proxy `/blob` variant (private repos without provider CORS).
 
 > **2026-06-10 — Full dashboard i18n (English + Dutch).** On branch `feat/i18n`.
 > Every user-facing string in the SPA resolves through a message catalog: pure
