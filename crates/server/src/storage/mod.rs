@@ -108,6 +108,47 @@ pub struct LoginTx {
     pub created_at: String,
 }
 
+/// A pending device-authorization request (`tellur login`, RFC 8628-style).
+/// The CLI polls by the secret `device_code`; a human approves it in the browser
+/// by the short, typed `user_code`.
+#[derive(Debug, Clone)]
+pub struct DeviceAuth {
+    pub user_code: String,
+    /// `pending` | `approved` | `denied`.
+    pub status: String,
+    /// The approving member, set once the request is approved.
+    pub member_id: Option<String>,
+    pub created_at: String,
+}
+
+/// Whether an RFC3339 timestamp is older than `ttl_secs` (an unparseable value
+/// is treated as expired). Shared by both backends' device-authorization poll.
+pub(crate) fn device_expired(created_at: &str, ttl_secs: i64) -> bool {
+    match chrono::DateTime::parse_from_rfc3339(created_at) {
+        Ok(t) => {
+            chrono::Utc::now()
+                .signed_duration_since(t.with_timezone(&chrono::Utc))
+                .num_seconds()
+                > ttl_secs
+        }
+        Err(_) => true,
+    }
+}
+
+/// Outcome of polling a device-authorization request by its `device_code`.
+/// Terminal outcomes consume the row so a token is delivered at most once.
+#[derive(Debug, Clone)]
+pub enum DevicePoll {
+    /// Still awaiting the human's decision.
+    Pending,
+    /// Approved by the given member — the caller mints and returns a token.
+    Approved(String),
+    /// The human denied the request.
+    Denied,
+    /// Unknown or expired `device_code`.
+    NotFound,
+}
+
 /// One day's event count for a single grouping key (activity time-series).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ActivityBucket {
@@ -556,8 +597,36 @@ pub trait Store: Send + Sync {
     /// Resolve a non-expired session id to a principal.
     fn session_principal(&self, session_id: &str) -> Result<Option<Principal>>;
 
+    /// Resolve an active member id to a principal (org + current role). Used to
+    /// mint a device-login token reflecting the member's state at poll time.
+    fn member_principal(&self, member_id: &str) -> Result<Option<Principal>>;
+
     /// Delete a session (logout). Returns `true` if one existed.
     fn delete_session(&self, session_id: &str) -> Result<bool>;
+
+    // ─── Device authorization (CLI `tellur login`, RFC 8628-style) ───────────
+
+    /// Persist a new pending device-authorization request.
+    fn create_device_auth(&self, device_code: &str, user_code: &str) -> Result<()>;
+
+    /// Count outstanding device-authorization requests (anti-flood cap).
+    fn count_device_auths(&self) -> Result<u64>;
+
+    /// Delete device-authorization requests older than `ttl_secs`. Returns the
+    /// number removed.
+    fn prune_expired_device_auths(&self, ttl_secs: i64) -> Result<u64>;
+
+    /// Look up a *pending* request by its human `user_code` (approval page).
+    fn find_device_by_user_code(&self, user_code: &str) -> Result<Option<DeviceAuth>>;
+
+    /// Record an approve/deny decision against a *pending* request, binding the
+    /// approving `member_id`. Returns `true` if a pending row was updated.
+    fn set_device_decision(&self, user_code: &str, member_id: &str, approve: bool) -> Result<bool>;
+
+    /// Poll a request by its secret `device_code`. A request older than
+    /// `ttl_secs` is treated as expired (`NotFound`). Terminal states
+    /// (`Approved`/`Denied`) consume the row so the result is delivered once.
+    fn poll_device(&self, device_code: &str, ttl_secs: i64) -> Result<DevicePoll>;
 
     // ─── Retention / maintenance (transient data only) ───────────────────────
 

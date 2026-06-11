@@ -246,6 +246,23 @@ pub fn random_token(bytes: usize) -> String {
     URL_SAFE_NO_PAD.encode(buf)
 }
 
+/// A short, human-typable device user-code formatted `XXXX-XXXX`. Drawn from an
+/// unambiguous alphabet (no vowels — avoids accidental words — and no
+/// 0/O/1/I/L lookalikes) so it reads cleanly aloud and over the phone.
+pub fn random_user_code() -> String {
+    const ALPHABET: &[u8] = b"BCDFGHJKMNPQRSTVWXYZ23456789";
+    let mut buf = [0u8; 8];
+    OsRng.fill_bytes(&mut buf);
+    let c: Vec<char> = buf
+        .iter()
+        .map(|b| ALPHABET[(*b as usize) % ALPHABET.len()] as char)
+        .collect();
+    format!(
+        "{}{}{}{}-{}{}{}{}",
+        c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]
+    )
+}
+
 /// Build the IdP authorization URL for the code flow with PKCE.
 pub fn build_authorize_url(
     disc: &Discovery,

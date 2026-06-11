@@ -16,10 +16,10 @@ use tellur_core::schema::types::FileAttribution;
 use r2d2_postgres::postgres::GenericClient;
 
 use super::{
-    ActivityBucket, ActivityGroup, AuditEntry, AuditRecord, ComplianceSnapshot, IngestEvent, Job,
-    LoginTx, MemberInfo, Org, OrgReport, PolicyDoc, PolicySummary, Repo, RepoFacts, RepoRoleGrant,
-    RepoSource, RepoSummary, ScimGroup, ScimUser, SessionSummary, Store, StoredEvent,
-    role_from_group_name,
+    ActivityBucket, ActivityGroup, AuditEntry, AuditRecord, ComplianceSnapshot, DeviceAuth,
+    DevicePoll, IngestEvent, Job, LoginTx, MemberInfo, Org, OrgReport, PolicyDoc, PolicySummary,
+    Repo, RepoFacts, RepoRoleGrant, RepoSource, RepoSummary, ScimGroup, ScimUser, SessionSummary,
+    Store, StoredEvent, role_from_group_name,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
@@ -177,6 +177,10 @@ impl Store for PostgresStore {
                      created_at TEXT NOT NULL, expires_at TEXT NOT NULL
                  );
                  CREATE INDEX IF NOT EXISTS idx_session_member ON session(member_id);
+                 CREATE TABLE IF NOT EXISTS device_auth (
+                     device_code TEXT PRIMARY KEY, user_code TEXT NOT NULL UNIQUE,
+                     status TEXT NOT NULL, member_id TEXT, created_at TEXT NOT NULL
+                 );
                  CREATE TABLE IF NOT EXISTS job (
                      id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES org(id),
                      kind TEXT NOT NULL, status TEXT NOT NULL,
@@ -1354,6 +1358,112 @@ impl Store for PostgresStore {
             .client()?
             .execute("DELETE FROM session WHERE id = $1", &[&session_id])?;
         Ok(n > 0)
+    }
+
+    fn member_principal(&self, member_id: &str) -> Result<Option<Principal>> {
+        let row = self.client()?.query_opt(
+            "SELECT id, org_id, role FROM member WHERE id = $1 AND active = TRUE",
+            &[&member_id],
+        )?;
+        match row {
+            Some(r) => Ok(Some(Principal {
+                member_id: r.get(0),
+                org_id: r.get(1),
+                role: Role::parse(&r.get::<_, String>(2))?,
+            })),
+            None => Ok(None),
+        }
+    }
+
+    fn create_device_auth(&self, device_code: &str, user_code: &str) -> Result<()> {
+        self.client()?.execute(
+            "INSERT INTO device_auth (device_code, user_code, status, created_at)
+             VALUES ($1, $2, 'pending', $3)",
+            &[&device_code, &user_code, &chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    fn count_device_auths(&self) -> Result<u64> {
+        let n: i64 = self
+            .client()?
+            .query_one("SELECT COUNT(*) FROM device_auth", &[])?
+            .get(0);
+        Ok(n as u64)
+    }
+
+    fn prune_expired_device_auths(&self, ttl_secs: i64) -> Result<u64> {
+        let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(ttl_secs)).to_rfc3339();
+        let n = self
+            .client()?
+            .execute("DELETE FROM device_auth WHERE created_at < $1", &[&cutoff])?;
+        Ok(n)
+    }
+
+    fn find_device_by_user_code(&self, user_code: &str) -> Result<Option<DeviceAuth>> {
+        let row = self.client()?.query_opt(
+            "SELECT user_code, status, member_id, created_at
+             FROM device_auth WHERE user_code = $1",
+            &[&user_code],
+        )?;
+        Ok(row.map(|r| DeviceAuth {
+            user_code: r.get(0),
+            status: r.get(1),
+            member_id: r.get(2),
+            created_at: r.get(3),
+        }))
+    }
+
+    fn set_device_decision(&self, user_code: &str, member_id: &str, approve: bool) -> Result<bool> {
+        let status = if approve { "approved" } else { "denied" };
+        let n = self.client()?.execute(
+            "UPDATE device_auth SET status = $2, member_id = $3
+             WHERE user_code = $1 AND status = 'pending'",
+            &[&user_code, &status, &member_id],
+        )?;
+        Ok(n > 0)
+    }
+
+    fn poll_device(&self, device_code: &str, ttl_secs: i64) -> Result<DevicePoll> {
+        // A short transaction with an advisory lock serializes the read +
+        // terminal delete so an approved token is delivered at most once.
+        let mut client = self.client()?;
+        let mut tx = client.transaction()?;
+        tx.execute(
+            "SELECT pg_advisory_xact_lock(hashtext($1))",
+            &[&device_code],
+        )?;
+        let row = tx.query_opt(
+            "SELECT status, member_id, created_at FROM device_auth WHERE device_code = $1",
+            &[&device_code],
+        )?;
+        let Some(row) = row else {
+            return Ok(DevicePoll::NotFound);
+        };
+        let status: String = row.get(0);
+        let member_id: Option<String> = row.get(1);
+        let created_at: String = row.get(2);
+        if super::device_expired(&created_at, ttl_secs) {
+            tx.execute(
+                "DELETE FROM device_auth WHERE device_code = $1",
+                &[&device_code],
+            )?;
+            tx.commit()?;
+            return Ok(DevicePoll::NotFound);
+        }
+        let outcome = match status.as_str() {
+            "approved" => DevicePoll::Approved(member_id.unwrap_or_default()),
+            "denied" => DevicePoll::Denied,
+            _ => DevicePoll::Pending,
+        };
+        if !matches!(outcome, DevicePoll::Pending) {
+            tx.execute(
+                "DELETE FROM device_auth WHERE device_code = $1",
+                &[&device_code],
+            )?;
+        }
+        tx.commit()?;
+        Ok(outcome)
     }
 
     fn prune_expired_sessions(&self) -> Result<u64> {

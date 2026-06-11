@@ -189,6 +189,9 @@ tellur pr-report --base main        # Generate a PR risk report
 tellur policy check                 # Evaluate configured policies
 tellur event --event-type file.write --session <id> --file <path>
 tellur import <adapter> <source>    # Import external AI tool data
+tellur login --hub <url>            # Sign in to a team hub (browser; no token to paste)
+tellur push                         # Send captured events to the hub (incremental)
+tellur logout                       # Forget stored hub credentials
 tellur export --format json         # Export provenance data
 tellur notes export                 # Write Git AI-compatible refs/notes/ai
 tellur notes import                 # Import refs/notes/ai into the local index
@@ -500,6 +503,9 @@ the browser, an SSO session cookie). Cross-org access is denied and audited.
 - **Exports** — `POST .../export/events|audit|evidence` enqueue durable jobs
   (`GET .../jobs[/{id}]` to poll); per-repo `GET/POST .../export/slsa|spdx`
   produce SLSA v1.0 / SPDX SBOM attestations.
+- **Device login** — `POST /v1/device/authorize` + `/v1/device/token` back the
+  CLI's `tellur login` (RFC 8628 device grant); the human approves at
+  `/auth/device`.
 - **Operational** — `GET /healthz`, `/readyz`, `/metrics` (Prometheus); no auth,
   no tenant data.
 
@@ -532,6 +538,29 @@ forever; the event provenance log is never pruned.
   `PATCH active=false`) revokes every credential type at once. A group named
   `tellur-admin` / `tellur-contributor` / `tellur-viewer` drives its members'
   role, recomputed on membership change.
+
+### Connect a developer (`tellur login` + `tellur push`)
+
+Developers couple their machine to the hub without copying a token. `tellur login`
+runs a browser-based device-authorization flow (RFC 8628): the CLI prints a short
+code, opens the hub's approval page, and the signed-in member confirms it. The hub
+then mints a member API token and the CLI stores it under the per-user config dir
+(`~/.config/tellur/hosts.json`, `0600`). It requires SSO to be enabled.
+
+```bash
+tellur login --hub https://hub.example.com   # opens a browser; approve the code
+tellur push                                   # send this repo's events to the hub
+```
+
+`tellur push` reads locally-captured events and forwards them to the ingest API,
+tracking a per-`(hub, org, repo)` high-water mark in `.tellur/push_state.json` so
+repeated runs are **incremental and idempotent** (no duplicates). The hub, org,
+and token default to the stored login; override any of them with `--hub`, `--org`,
+`--repo`, `--token` (or `TELLUR_HUB_URL` / `TELLUR_HUB_ORG` / `TELLUR_HUB_TOKEN`).
+The repo name defaults to the working directory's name and is created on the hub
+on first push. Use `--dry-run` to preview and `--reset` to re-push from scratch.
+For unattended CI, skip `login` and pass a `tellur-server admin create-token`
+token via `--token` / `TELLUR_HUB_TOKEN`.
 
 ### Team dashboard
 

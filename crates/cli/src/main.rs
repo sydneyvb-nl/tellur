@@ -14,8 +14,10 @@
 //!   tellur gc         — Garbage collect expired data
 //!   tellur verify     — Verify provenance integrity
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
+
+mod hub;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -201,6 +203,45 @@ enum Commands {
     Setup {
         #[command(subcommand)]
         action: SetupActions,
+    },
+
+    /// Sign in to a Tellur team hub (opens a browser; no token to copy/paste)
+    Login {
+        /// Hub base URL (or env TELLUR_HUB_URL), e.g. https://hub.example.com
+        #[arg(long)]
+        hub: Option<String>,
+        /// Do not try to open a browser; just print the URL and code
+        #[arg(long)]
+        no_browser: bool,
+    },
+
+    /// Remove stored credentials for a hub
+    Logout {
+        /// Hub base URL (or env TELLUR_HUB_URL). Defaults to the only saved hub.
+        #[arg(long)]
+        hub: Option<String>,
+    },
+
+    /// Push locally-captured events to a team hub (incremental + idempotent)
+    Push {
+        /// Hub base URL (or env TELLUR_HUB_URL). Defaults to the only saved hub.
+        #[arg(long)]
+        hub: Option<String>,
+        /// Organization id (or stored from `tellur login`, or env TELLUR_HUB_ORG)
+        #[arg(long)]
+        org: Option<String>,
+        /// Repository name on the hub (default: this repo's directory name)
+        #[arg(long)]
+        repo: Option<String>,
+        /// Bearer token (or stored credentials, or env TELLUR_HUB_TOKEN)
+        #[arg(long)]
+        token: Option<String>,
+        /// Show what would be pushed without sending anything
+        #[arg(long)]
+        dry_run: bool,
+        /// Ignore the saved high-water mark and re-push every local event
+        #[arg(long)]
+        reset: bool,
     },
 }
 
@@ -434,6 +475,23 @@ async fn main() -> Result<()> {
                 out.as_deref(),
             ),
         },
+        Commands::Login { hub, no_browser } => cmd_login(hub.as_deref(), no_browser),
+        Commands::Logout { hub } => cmd_logout(hub.as_deref()),
+        Commands::Push {
+            hub,
+            org,
+            repo,
+            token,
+            dry_run,
+            reset,
+        } => cmd_push(
+            hub.as_deref(),
+            org.as_deref(),
+            repo.as_deref(),
+            token.as_deref(),
+            dry_run,
+            reset,
+        ),
         Commands::Export { format, output } => cmd_export(&format, output.as_deref()),
         Commands::Import { adapter, source } => cmd_import(&adapter, &source).await,
         Commands::Watch {
@@ -734,6 +792,46 @@ fn executable_candidates(name: &str) -> impl Iterator<Item = String> + '_ {
 mod tests {
     use super::*;
 
+    #[test]
+    fn push_start_index_pushes_all_without_a_mark() {
+        let ids = ["a", "b", "c"];
+        assert_eq!(push_start_index(&ids, None, false).unwrap(), 0);
+    }
+
+    #[test]
+    fn push_start_index_resumes_after_last_mark() {
+        let ids = ["a", "b", "c", "d"];
+        assert_eq!(push_start_index(&ids, Some("b"), false).unwrap(), 2);
+        // Up to date: mark is the final event → nothing new.
+        assert_eq!(push_start_index(&ids, Some("d"), false).unwrap(), 4);
+    }
+
+    #[test]
+    fn push_start_index_reset_ignores_the_mark() {
+        let ids = ["a", "b", "c"];
+        assert_eq!(push_start_index(&ids, Some("b"), true).unwrap(), 0);
+    }
+
+    #[test]
+    fn push_start_index_errors_when_mark_is_gone() {
+        let ids = ["c", "d", "e"]; // "b" was pruned out
+        assert!(push_start_index(&ids, Some("b"), false).is_err());
+    }
+
+    #[test]
+    fn actor_wire_maps_every_variant() {
+        assert_eq!(actor_wire(&EventActor::Human), "human");
+        assert_eq!(actor_wire(&EventActor::Agent), "agent");
+        assert_eq!(actor_wire(&EventActor::System), "system");
+        assert_eq!(actor_wire(&EventActor::Unknown), "unknown");
+    }
+
+    #[test]
+    fn normalize_host_strips_trailing_slash() {
+        assert_eq!(hub::normalize_host("https://h.test/"), "https://h.test");
+        assert_eq!(hub::normalize_host("https://h.test"), "https://h.test");
+    }
+
     #[cfg(unix)]
     #[test]
     fn executable_detection_requires_execute_bit_on_unix() {
@@ -1024,6 +1122,313 @@ fn cmd_policy_pull(
         parsed["version"],
         out_path.display()
     );
+    Ok(())
+}
+
+/// Resolve the hub base URL from an explicit flag, the `TELLUR_HUB_URL` env, or
+/// — when exactly one hub is saved — the stored credentials. Errors otherwise so
+/// a typo never silently targets the wrong hub.
+fn resolve_hub(explicit: Option<&str>, creds: &hub::Credentials) -> Result<String> {
+    if let Some(h) = explicit {
+        return Ok(hub::normalize_host(h));
+    }
+    if let Ok(h) = std::env::var("TELLUR_HUB_URL") {
+        return Ok(hub::normalize_host(&h));
+    }
+    match creds.hosts.len() {
+        1 => Ok(creds.hosts.keys().next().unwrap().clone()),
+        0 => bail!("no hub configured — pass --hub or set TELLUR_HUB_URL (or run `tellur login`)"),
+        _ => bail!("multiple hubs are saved — pass --hub to choose one"),
+    }
+}
+
+/// Best-effort open of a URL in the user's default browser. A failure is not
+/// fatal: the URL is always printed so the user can open it manually.
+fn open_browser(url: &str) -> bool {
+    let (program, args): (&str, Vec<&str>) = if cfg!(target_os = "macos") {
+        ("open", vec![url])
+    } else if cfg!(target_os = "windows") {
+        ("cmd", vec!["/C", "start", "", url])
+    } else {
+        ("xdg-open", vec![url])
+    };
+    std::process::Command::new(program)
+        .args(args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// `tellur login` — device-authorization flow. Opens the hub's approval page in
+/// a browser, then polls until a signed-in member approves, and stores the
+/// minted token under the per-user config dir.
+fn cmd_login(hub_arg: Option<&str>, no_browser: bool) -> Result<()> {
+    let mut creds = hub::Credentials::load()?;
+    // For login the hub must be explicit (flag or env); we are not yet logged in.
+    let hub_url = hub_arg
+        .map(hub::normalize_host)
+        .or_else(|| {
+            std::env::var("TELLUR_HUB_URL")
+                .ok()
+                .map(|h| hub::normalize_host(&h))
+        })
+        .context("hub URL required for login (--hub or TELLUR_HUB_URL)")?;
+
+    let auth = hub::device_authorize(&hub_url)
+        .context("could not start login (is the hub reachable and SSO enabled?)")?;
+    let verify_url = format!(
+        "{}/auth/device?user_code={}",
+        hub_url,
+        auth.user_code.replace('-', "%2D")
+    );
+
+    println!("\nTo sign in, open this URL in your browser:\n");
+    println!("    {verify_url}\n");
+    println!("and confirm this code:\n");
+    println!("    {}\n", auth.user_code);
+
+    if !no_browser && open_browser(&verify_url) {
+        println!("(Opened your browser automatically.)\n");
+    }
+
+    let mut interval = auth.interval.max(1);
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_secs(auth.expires_in.max(60));
+    print!("Waiting for approval");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    loop {
+        if std::time::Instant::now() >= deadline {
+            println!();
+            bail!("login timed out before approval — run `tellur login` again");
+        }
+        std::thread::sleep(std::time::Duration::from_secs(interval));
+        match hub::device_poll(&hub_url, &auth.device_code)? {
+            hub::DevicePoll::Approved(host_creds) => {
+                let role = host_creds.role.clone();
+                let org = host_creds.org_id.clone();
+                creds
+                    .hosts
+                    .insert(hub::normalize_host(&hub_url), host_creds);
+                creds.save()?;
+                println!("\n\n✓ Signed in to {hub_url}");
+                println!("  org {org} · role {role}");
+                println!("  Token stored in {}", hub::Credentials::path()?.display());
+                println!("\nNext: run `tellur push` from a repo to send activity to the hub.");
+                return Ok(());
+            }
+            hub::DevicePoll::Pending => {
+                print!(".");
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+            }
+            hub::DevicePoll::SlowDown => {
+                interval += 5;
+            }
+            hub::DevicePoll::Denied => {
+                println!();
+                bail!("login was denied in the browser");
+            }
+            hub::DevicePoll::Expired => {
+                println!();
+                bail!("the login request expired — run `tellur login` again");
+            }
+        }
+    }
+}
+
+/// `tellur logout` — forget stored credentials for a hub.
+fn cmd_logout(hub_arg: Option<&str>) -> Result<()> {
+    let mut creds = hub::Credentials::load()?;
+    let hub_url = resolve_hub(hub_arg, &creds)?;
+    if creds.hosts.remove(&hub_url).is_some() {
+        creds.save()?;
+        println!("Removed stored credentials for {hub_url}");
+    } else {
+        println!("No stored credentials for {hub_url}");
+    }
+    Ok(())
+}
+
+/// Per-target push high-water mark, persisted in `.tellur/push_state.json`.
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct PushState {
+    #[serde(default)]
+    targets: std::collections::BTreeMap<String, PushTarget>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct PushTarget {
+    /// Id of the last event already delivered to this target.
+    last_pushed_id: String,
+    /// How many events have been delivered (for display).
+    count: u64,
+}
+
+fn push_state_path(storage: &RepoStorage) -> PathBuf {
+    storage.tellur_dir.join("push_state.json")
+}
+
+fn load_push_state(storage: &RepoStorage) -> Result<PushState> {
+    let path = push_state_path(storage);
+    if !path.exists() {
+        return Ok(PushState::default());
+    }
+    let body = std::fs::read_to_string(&path)?;
+    Ok(serde_json::from_str(&body).unwrap_or_default())
+}
+
+fn save_push_state(storage: &RepoStorage, state: &PushState) -> Result<()> {
+    let path = push_state_path(storage);
+    std::fs::write(&path, serde_json::to_string_pretty(state)?)?;
+    Ok(())
+}
+
+/// The hub's ingest wire string for an event actor.
+fn actor_wire(actor: &EventActor) -> &'static str {
+    match actor {
+        EventActor::Human => "human",
+        EventActor::Agent => "agent",
+        EventActor::System => "system",
+        EventActor::Unknown => "unknown",
+    }
+}
+
+/// Index of the first event to push, given the ordered local event ids and the
+/// saved high-water mark. `reset` (or no mark yet) pushes everything; otherwise
+/// resume strictly after the last delivered id. A missing mark means the local
+/// log was rotated/pruned out from under us — error rather than risk silently
+/// re-sending (the hub would store duplicates).
+fn push_start_index(ids: &[&str], last_pushed: Option<&str>, reset: bool) -> Result<usize> {
+    if reset {
+        return Ok(0);
+    }
+    match last_pushed {
+        None => Ok(0),
+        Some(id) => match ids.iter().rposition(|x| *x == id) {
+            Some(pos) => Ok(pos + 1),
+            None => bail!(
+                "the last pushed event ({id}) is no longer in the local log — it may have been \
+                 rotated or pruned. Re-run with --reset to push all events again."
+            ),
+        },
+    }
+}
+
+/// `tellur push` — forward locally-captured events to a team hub, incrementally.
+fn cmd_push(
+    hub_arg: Option<&str>,
+    org_arg: Option<&str>,
+    repo_arg: Option<&str>,
+    token_arg: Option<&str>,
+    dry_run: bool,
+    reset: bool,
+) -> Result<()> {
+    let storage = RepoStorage::discover()?;
+    if !storage.is_initialized() {
+        bail!("Tellur is not initialized here — run `tellur init` first");
+    }
+    let creds = hub::Credentials::load()?;
+    let hub_url = resolve_hub(hub_arg, &creds)?;
+    let saved = creds.get(&hub_url);
+
+    // Token: flag › env › stored credentials.
+    let token = token_arg
+        .map(str::to_string)
+        .or_else(|| std::env::var("TELLUR_HUB_TOKEN").ok())
+        .or_else(|| saved.map(|s| s.token.clone()))
+        .context("no token — run `tellur login`, pass --token, or set TELLUR_HUB_TOKEN")?;
+
+    // Org: flag › env › stored credentials.
+    let org = org_arg
+        .map(str::to_string)
+        .or_else(|| std::env::var("TELLUR_HUB_ORG").ok())
+        .or_else(|| saved.map(|s| s.org_id.clone()))
+        .context("no org — pass --org, set TELLUR_HUB_ORG, or run `tellur login`")?;
+
+    // Repo: flag › env › this repo's directory name.
+    let repo = repo_arg
+        .map(str::to_string)
+        .or_else(|| std::env::var("TELLUR_HUB_REPO").ok())
+        .or_else(|| {
+            storage
+                .root
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_string)
+        })
+        .context("could not determine a repo name — pass --repo")?;
+
+    let events = tellur_core::storage::read_events(&storage.traces_dir)?;
+    if events.is_empty() {
+        println!("No local events to push.");
+        return Ok(());
+    }
+
+    let target_key = format!("{hub_url}#{org}#{repo}");
+    let mut state = load_push_state(&storage)?;
+
+    // Determine the slice of new events using the saved high-water mark.
+    let last_pushed = state
+        .targets
+        .get(&target_key)
+        .map(|t| t.last_pushed_id.as_str());
+    let ids: Vec<&str> = events.iter().map(|e| e.id.as_str()).collect();
+    let start = push_start_index(&ids, last_pushed, reset)?;
+
+    let to_send = &events[start..];
+    if to_send.is_empty() {
+        println!("Already up to date — {} event(s) on the hub.", events.len());
+        return Ok(());
+    }
+
+    if dry_run {
+        println!(
+            "Would push {} event(s) to {hub_url}\n  org {org} · repo {repo}",
+            to_send.len()
+        );
+        println!(
+            "  first: {} ({})\n  last:  {} ({})",
+            to_send.first().unwrap().event_type.as_wire(),
+            to_send.first().unwrap().timestamp,
+            to_send.last().unwrap().event_type.as_wire(),
+            to_send.last().unwrap().timestamp,
+        );
+        return Ok(());
+    }
+
+    // Chunk under the server's per-request cap and update the high-water mark
+    // after each accepted batch, so an interruption resumes cleanly.
+    const CHUNK: usize = 500;
+    let mut pushed = 0usize;
+    for chunk in to_send.chunks(CHUNK) {
+        let wire: Vec<serde_json::Value> = chunk
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "session_id": e.session_id,
+                    "type": e.event_type.as_wire(),
+                    "timestamp": e.timestamp,
+                    "actor": actor_wire(&e.actor),
+                    "payload": e.payload,
+                })
+            })
+            .collect();
+        let accepted = hub::ingest_events(&hub_url, &token, &org, &repo, &wire)
+            .with_context(|| format!("failed pushing a batch of {} events", wire.len()))?;
+        pushed += accepted;
+        let last = chunk.last().unwrap();
+        state.targets.insert(
+            target_key.clone(),
+            PushTarget {
+                last_pushed_id: last.id.clone(),
+                count: (start + pushed) as u64,
+            },
+        );
+        save_push_state(&storage, &state)?;
+    }
+
+    println!("✓ Pushed {pushed} event(s) to {hub_url}\n  org {org} · repo {repo}");
     Ok(())
 }
 
