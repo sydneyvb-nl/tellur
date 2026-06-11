@@ -566,6 +566,14 @@ cargo test
 cargo run -p tellur-cli -- doctor
 ```
 
+Dashboard SPA (`crates/server/ui`):
+
+```bash
+pnpm install
+pnpm check && pnpm test      # svelte-check + vitest
+pnpm e2e                      # Playwright (real bundle, mocked /v1 API)
+```
+
 VS Code extension:
 
 ```bash
