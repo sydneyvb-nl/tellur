@@ -103,6 +103,23 @@ pub fn normalize_host(hub: &str) -> String {
     hub.trim_end_matches('/').to_string()
 }
 
+/// Percent-encode a single URL **path segment** (RFC 3986 unreserved set kept
+/// verbatim, everything else `%XX`). The default repo name comes from the local
+/// directory name, which can contain spaces or `#`, so segments must be encoded
+/// or the request builds an invalid/truncated path that misses the repo.
+fn encode_segment(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 /// The device-authorization ticket returned by `POST /v1/device/authorize`.
 #[derive(Debug, Deserialize)]
 pub struct DeviceAuthorization {
@@ -178,8 +195,8 @@ pub fn ingest_events(
     let url = format!(
         "{}/v1/orgs/{}/repos/{}/events",
         normalize_host(hub),
-        org,
-        repo
+        encode_segment(org),
+        encode_segment(repo)
     );
     let resp = ureq::post(&url)
         .set("Authorization", &format!("Bearer {token}"))
@@ -216,5 +233,19 @@ fn map_transport(e: ureq::Error) -> anyhow::Error {
             }
         }
         ureq::Error::Transport(t) => anyhow::anyhow!("could not reach hub: {t}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::encode_segment;
+
+    #[test]
+    fn encode_segment_escapes_reserved_chars() {
+        assert_eq!(encode_segment("my repo"), "my%20repo");
+        assert_eq!(encode_segment("foo#bar"), "foo%23bar");
+        assert_eq!(encode_segment("a/b?c"), "a%2Fb%3Fc");
+        // Unreserved characters pass through untouched.
+        assert_eq!(encode_segment("repo-1_v.2~x"), "repo-1_v.2~x");
     }
 }
