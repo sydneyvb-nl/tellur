@@ -82,9 +82,11 @@ CLI/Antigravity hooks, Cursor MCP/settings, VS Code/Cursor extension capture,
 importers for Cursor, Aider, Codex CLI, Gemini CLI, Antigravity, GitHub
 Copilot, Windsurf/Cascade, JetBrains AI/Junie, Devin, Continue, and
 Cline/Roo Code, a local token-authenticated daemon, an MCP stdio server,
-provenance export, Git notes interop, a static session replay dashboard backed
-by daemon data, and a self-hosted `tellur-server` hub preview for team
-ingest/read/report/policy/export workflows.
+provenance export, and Git notes interop. For teams, the self-hosted
+`tellur-server` hub adds multi-tenant ingest/read/report/policy/export with OIDC
+SSO, SCIM provisioning, durable jobs, and an embedded web dashboard
+(Overview, repositories, sessions, policy compliance, people & access, audit log,
+and exports).
 
 ## Install
 
@@ -133,19 +135,26 @@ Install one-time global agent/editor integrations:
 tellur setup agents
 ```
 
-Import activity from supported tools:
+Most agents are captured **live** once you run `tellur setup agents` (see
+[One-Time Agent Setup](#one-time-agent-setup)). Use `tellur import` to backfill
+history, or for tools that only expose an export:
 
 ```bash
-tellur import cursor path/to/agent-trace.json
-tellur import aider path/to/repo
-tellur import codex path/to/codex-events.jsonl
-tellur import copilot path/to/copilot-metadata.jsonl
-tellur import windsurf path/to/cascade-session.jsonl
-tellur import jetbrains path/to/ai-assistant-export.json
-tellur import devin path/to/devin-run.json
-tellur import continue path/to/.continue/dev_data/chat.jsonl
-tellur import cline path/to/tasks/<id>/ui_messages.json
+tellur import claude-code path/to/transcript.jsonl
+tellur import codex       path/to/codex-events.jsonl
+tellur import gemini-cli  path/to/gemini-events.jsonl
+tellur import cursor      path/to/agent-trace.json
+tellur import copilot     path/to/copilot-metadata.jsonl
+tellur import aider       path/to/repo          # an Aider git repository
+tellur import windsurf    path/to/cascade-session.jsonl
+tellur import jetbrains   path/to/ai-assistant-export.json
+tellur import devin       path/to/devin-run.json
+tellur import continue    path/to/.continue/dev_data/chat.jsonl
+tellur import cline       path/to/tasks/<id>/ui_messages.json
 ```
+
+Also available: `antigravity` and `generic` (JSONL). See
+`tellur import --help` for the full list.
 
 Query attribution:
 
@@ -454,100 +463,83 @@ under active development — see
 [`docs/proposals/TEAM_SERVER_IMPLEMENTATION.md`](docs/proposals/TEAM_SERVER_IMPLEMENTATION.md).
 
 Local-first stays the default: the hub is opt-in, loopback-bound unless you
-explicitly allow otherwise, token-authenticated, and tenant-isolated. Bootstrap
-and run it:
+explicitly allow otherwise, token-authenticated, and tenant-isolated.
+
+### Run it
 
 ```bash
 tellur-server admin create-org --name "Acme"
 tellur-server admin create-token --org <org-id> --role admin   # printed once
 tellur-server admin set-policy --org <org-id> --file policy.yml # optional
-tellur-server                                                   # serve (default 127.0.0.1:4920)
+tellur-server                                                   # serve at 127.0.0.1:4920
 ```
 
-Authenticated, org-scoped API (Bearer token): provenance ingest
-(`POST /v1/orgs/{org}/repos/{repo}/events`, with inbound secret redaction and a
-re-verified per-repo hash chain), reads (`GET .../repos`, `.../events`,
-`.../report`), central policy distribution (`PUT/GET .../policies[/{name}]`),
-attribution ingest (`POST .../repos/{repo}/attributions`), and an admin export
-portal (`POST .../export/events|audit` enqueues a durable job, polled at
-`GET .../jobs/{id}`; plus per-repo `GET .../repos/{repo}/export/slsa|spdx`
-for SLSA v1.0 / SPDX SBOM compliance attestations). Cross-org access is
-denied and audited; the audit log is itself tamper-evident. Operational
-endpoints `GET /healthz`, `/readyz`, and `/metrics` (Prometheus) need no auth and
-expose no tenant data.
-
-Pull a central policy into a repo, and run the hub in Docker:
+Or run the whole thing (including the built dashboard) in a container:
 
 ```bash
-tellur policy pull --org <org-id> --hub http://hub:4920 --token <token>
 docker compose -f dist/docker/docker-compose.yml up --build
 ```
 
-Implemented through milestone B5 (identity/tenancy, ingest, read/report, policy &
-export, metrics, packaging, `policy pull`). Storage runs on the embedded SQLite
-backend by default (zero-config, single-node) or on **Postgres** for horizontal
-scale — set `TELLUR_DATABASE_URL` (e.g. `postgres://user:pass@host:5432/tellur`)
-to switch. Postgres is reached over NoTls, so keep it on a private network or
-front it with a TLS-terminating proxy. A background **retention** loop keeps the
-store tidy: expired sessions and stale login transactions are always pruned;
-finished export/compliance jobs are pruned after `TELLUR_RETENTION_DAYS`; and the
-audit log can be minimised after `TELLUR_AUDIT_RETENTION_DAYS` via a **sealed
-checkpoint** — old entries are deleted but the pruned prefix's tip hash is kept,
-so the chain still verifies and truncation stays detectable (both default `0` =
-keep forever). The event provenance log is never pruned.
-Authorization is RBAC (`viewer` /
-`contributor` / `admin`) with **fine-grained, additive per-repo grants**: an org
-admin can elevate a member on a specific repo (e.g. make an org viewer a
-contributor or admin on one repo) via
-`PUT /v1/orgs/{org}/repos/{repo}/roles/{member}` or the
-`tellur-server admin grant-repo-role` CLI; grants only elevate, never restrict.
-**Enterprise SSO** is supported via OIDC (Authorization Code + PKCE): set
-`TELLUR_OIDC_ISSUER` / `TELLUR_OIDC_CLIENT_ID` / `TELLUR_OIDC_CLIENT_SECRET` /
-`TELLUR_OIDC_REDIRECT_URI` to enable `/auth/login`, `/auth/callback`, and
-`/auth/logout`. A successful login issues an opaque, server-stored session cookie
-(`HttpOnly`/`Secure`/`SameSite=Lax`). There is no open self-registration —
-pre-provision who may sign in with `tellur-server admin add-member --org <id>
---name <name> --email <email> --role <role>`; the member is matched by verified
-email on first login and bound to their stable OIDC subject thereafter.
+A CLI client can pull a central policy into a repo:
 
-**SCIM 2.0 provisioning** lets an IdP manage users and groups automatically.
-Mint an org-scoped token with `tellur-server admin create-scim-token --org <id>`
-and point your IdP at `/scim/v2/Users` and `/scim/v2/Groups` with it as the
-bearer token. Creating a user provisions a member (userName→email, optional
-`roles`→org role, default `viewer`); deprovisioning (`DELETE` or
-`PATCH active=false`) deactivates the member so every credential type — API
-token, dashboard session, and SSO — is revoked immediately. **Group-based role
-sync**: a group whose `displayName` is `tellur-admin`, `tellur-contributor`, or
-`tellur-viewer` sets its members' org role (recomputed when membership changes).
+```bash
+tellur policy pull --org <org-id> --hub http://hub:4920 --token <token>
+```
 
-**Durable exports & dashboard.** Large org exports run as background jobs:
-`POST /v1/orgs/{org}/export/events` (or `/audit`) returns `202` with a `job_id`;
-poll `GET /v1/orgs/{org}/jobs/{id}` until `completed` to fetch the result, or list
-an org's job history with `GET /v1/orgs/{org}/jobs` (admin). Per-repo SLSA/SPDX
-can also run as jobs for large repos (`POST .../repos/{repo}/export/slsa|spdx`),
-and `POST /v1/orgs/{org}/export/evidence` produces a full **evidence pack** (every
-repo's SLSA provenance + latest policy compliance + audit-chain status) in one
-downloadable bundle. Admins can also read the tamper-evident audit log directly
-with `GET /v1/orgs/{org}/audit[?actor=&action=&range=&before=&limit=]` (paginated,
-newest-first; the first page reports `chain_intact` for the hash chain).
+### API
 
-**Policy compliance & People/Access** (admin): `POST /v1/orgs/{org}/policies/compliance`
-enqueues a durable job that evaluates the org's `default` policy against every
-repo's attribution and stores timestamped snapshots; read the latest per repo
-with `GET .../policies/compliance`. `GET .../members`, `GET .../groups` (a
-session-auth mirror of `/scim/v2/Groups`), and `GET .../sso-status` back the
-People & Access screen — counts and health only, never secrets. An admin can
-optionally set per-repo **source templates** (`PUT .../repos/{repo}/source`,
-`https://` only): a `template` deep-links each range to your provider's web view,
-and a `raw_template` lets the file view's opt-in **Show source** gutter fetch the
-actual lines **in the browser, straight from the provider** (`raw.githubusercontent.com`,
-`gitlab.com`, `bitbucket.org`). Either way the hub stores and serves **no source
-code**. The
-hub ships a built-in **team dashboard** at **`/app`** (Svelte SPA embedded in the
-binary, served same-origin so it uses your first-party SSO session): sign in at
-`/auth/login`, then open `/app`. The SPA is compiled into the server binary at
-build time, so build it before building the server (otherwise `/app` serves a
-placeholder):
+All `/v1` routes are org-scoped and authenticated with a Bearer token (or, in
+the browser, an SSO session cookie). Cross-org access is denied and audited.
+
+- **Ingest** — `POST /v1/orgs/{org}/repos/{repo}/events` (secret redaction +
+  re-verified per-repo hash chain) and `POST .../attributions`.
+- **Read** — `GET .../repos`, `.../events`, `.../report`, `.../overview`,
+  `.../sessions[/{id}]`, `.../audit`.
+- **Policy** — `PUT/GET .../policies[/{name}]`; `POST/GET .../policies/compliance`
+  (durable evaluation + snapshots).
+- **Exports** — `POST .../export/events|audit|evidence` enqueue durable jobs
+  (`GET .../jobs[/{id}]` to poll); per-repo `GET/POST .../export/slsa|spdx`
+  produce SLSA v1.0 / SPDX SBOM attestations.
+- **Operational** — `GET /healthz`, `/readyz`, `/metrics` (Prometheus); no auth,
+  no tenant data.
+
+### Storage & retention
+
+The default backend is embedded **SQLite** (zero-config, single-node). For
+horizontal scale set `TELLUR_DATABASE_URL` to a **Postgres** DSN; Postgres is
+reached over NoTls, so keep it on a private network or behind a TLS-terminating
+proxy. A background retention loop minimises data-at-rest: expired sessions and
+stale login transactions are always pruned, finished jobs after
+`TELLUR_RETENTION_DAYS`, and audit entries after `TELLUR_AUDIT_RETENTION_DAYS`
+via a **sealed checkpoint** (old entries are deleted but the pruned prefix's tip
+hash is kept, so the chain still verifies). Both windows default to `0` = keep
+forever; the event provenance log is never pruned.
+
+### Authentication & authorization
+
+- **RBAC** — `viewer` / `contributor` / `admin`, plus **additive per-repo
+  grants** (`PUT/DELETE .../repos/{repo}/roles/{member}` or
+  `tellur-server admin grant-repo-role`). Effective role is `max(org role, grant)`;
+  grants only elevate, never restrict.
+- **SSO (OIDC)** — Authorization Code + PKCE. Set `TELLUR_OIDC_ISSUER`,
+  `TELLUR_OIDC_CLIENT_ID`, `TELLUR_OIDC_CLIENT_SECRET`, `TELLUR_OIDC_REDIRECT_URI`
+  to enable `/auth/login|callback|logout`. Login issues an opaque, server-stored
+  session cookie (`HttpOnly` / `Secure` / `SameSite=Lax`). There is no open
+  self-registration: pre-provision members with `tellur-server admin add-member`,
+  matched by verified email on first login and bound to their OIDC subject.
+- **SCIM 2.0** — mint an org-scoped token (`create-scim-token`) and point your
+  IdP at `/scim/v2/Users` + `/scim/v2/Groups`. Deprovisioning (`DELETE` or
+  `PATCH active=false`) revokes every credential type at once. A group named
+  `tellur-admin` / `tellur-contributor` / `tellur-viewer` drives its members'
+  role, recomputed on membership change.
+
+### Team dashboard
+
+The hub serves a built-in dashboard at **`/app`** — a Svelte SPA embedded in the
+binary and served same-origin, so it reuses your first-party SSO session. Sign in
+at `/auth/login`, then open `/app`. It is compiled into the binary at build time,
+so build the SPA before the server (otherwise `/app` serves a placeholder; the
+Docker image does this for you):
 
 ```bash
 pnpm --dir crates/server/ui install
@@ -555,18 +547,21 @@ pnpm --dir crates/server/ui build      # → crates/server/ui/dist (embedded)
 cargo run -p tellur-server             # /app now serves the real dashboard
 ```
 
-The Docker image (`dist/docker/`) does this automatically. The dashboard is
-built out in phases per
-[`docs/proposals/TEAM_DASHBOARD_UI.md`](docs/proposals/TEAM_DASHBOARD_UI.md):
-Overview (org rollup + activity trend), Repositories + per-file provenance,
-Sessions + replay, and — for admins — a **Policies** compliance view (per-repo
-violations by severity + one-click re-evaluation), a **People & Access** view
-(members, SCIM groups, SSO/SCIM health), an **Audit log** browser, and an
-**Exports** console (start exports, watch job status, download results). The Overview
-loads in a single round-trip from `GET /v1/orgs/{org}/overview` (org totals,
-AI-share + review-coverage rollups, activity trend, and repos ranked by review
-gap). A command palette (**⌘K** / **Ctrl-K**) jumps between screens, and topbar
-controls switch the theme (system / light / dark), density (cozy / compact), and
+Screens (per [`docs/proposals/TEAM_DASHBOARD_UI.md`](docs/proposals/TEAM_DASHBOARD_UI.md)):
+
+- **Overview** — org totals, AI-share + review-coverage rollups, activity trend,
+  and repos ranked by review gap, in one round-trip (`GET .../overview`).
+- **Repositories & file provenance** — per-repo stats and a metadata-first
+  attribution gutter; an admin can opt in to per-repo `source` templates that
+  deep-link or inline source **fetched in the browser from the provider** — the
+  hub stores and serves no source code.
+- **Sessions & replay** — session list and an event-by-event timeline.
+- **Admin** — **Policies** compliance (violations by severity + one-click
+  re-evaluation), **People & Access** (members, SCIM groups, SSO/SCIM health),
+  an **Audit log** browser, and an **Exports** console.
+
+A command palette (**⌘K** / **Ctrl-K**) jumps between screens, and topbar
+controls switch theme (system / light / dark), density (cozy / compact), and
 language (English / Dutch).
 
 ## Development
@@ -609,11 +604,15 @@ metadata, not the raw prompt text.
 
 ## Roadmap
 
-- A richer team/server web dashboard UI (the hub API, SSO login, durable
-  exports, and SCIM user+group provisioning are implemented)
-- Live lifecycle-hook capture (beyond import) for editors that expose it
-- Richer policy templates for security-sensitive repositories
-- Packaged releases for npm, Homebrew, and GitHub Releases
+The local pipeline, the multi-agent adapters, and the self-hosted hub (API, OIDC
+SSO, SCIM user + group provisioning, durable exports, compliance snapshots,
+retention, and the full team dashboard) are implemented. Active and upcoming work:
+
+- **Packaged releases** for npm, Homebrew, and GitHub Releases.
+- **Server-side source proxy** so the dashboard's inline source view also works
+  for private repos without provider CORS (SSRF allow-listed, secret-redacted).
+- **Richer policy templates** for security-sensitive repositories.
+- **Broader agent coverage** as more tools expose stable local lifecycle hooks.
 
 The `tellur-core` binary is an internal diagnostic entrypoint for packaging
 smoke tests. Use the `tellur` binary for normal CLI workflows.
