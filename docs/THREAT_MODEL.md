@@ -72,7 +72,22 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    styles/fonts) applies to `/app`; `connect-src` additionally allows only a
    small all-list of source-host raw origins for the opt-in A12 gutter. **SSO endpoints**
    (`/auth/login`, `/auth/callback`, `/auth/logout`) are unauthenticated entry
-   points for the browser OIDC flow (404 when SSO is not configured). **SCIM
+   points for the browser OIDC flow (404 when SSO is not configured). **Device
+   authorization** for the CLI's `tellur login` (RFC 8628; 404 when SSO is off):
+   `POST /v1/device/authorize` issues a secret `device_code` (polled by the CLI)
+   and a short `user_code` (typed by the human); `POST /v1/device/token` is the
+   CLI's poll — pending/denied/expired return RFC-8628 error codes, and only an
+   **approved** request mints a token. Approval happens at `GET /auth/device`,
+   which **requires a signed-in session** (an unauthenticated visit is bounced
+   through SSO via a validated same-origin return cookie), and `POST
+   /auth/device/decision` records the decision — that POST carries the
+   `SameSite=Lax` session cookie, so a cross-site forgery can't approve. The token
+   is minted only at poll time from the **member's current state** (a member
+   deactivated between approval and poll gets nothing), bound by an
+   advisory-locked transaction so it is **delivered at most once** (the row is
+   consumed), and `user_code` is escaped into the approval HTML. Anonymous
+   `/v1/device/authorize` rows are TTL-pruned (15 min) and hard-capped, like
+   `/auth/login`. **SCIM
    provisioning** (`/scim/v2/Users`) authenticates with a dedicated, org-scoped
    bearer token (separate from member tokens, stored Argon2id-hashed); the org
    is derived from the token (never the URL), so an IdP can only provision into
@@ -133,6 +148,11 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
   command/text fields.
 - **Editor capture** records file changes; origin (AI vs human) is decided by the
   attribution layer, not asserted by the client.
+- **CLI hub credentials** (`tellur login`) are written to
+  `~/.config/tellur/hosts.json` with `0600` perms (owner-only on Unix); a
+  compromised local OS user can read them — the same trust level as `.tellur`
+  data. `tellur push` reaches the hub over HTTPS (rustls); the high-water mark in
+  `.tellur/push_state.json` is non-sensitive (event ids + a count).
 
 ## Key residual risks
 

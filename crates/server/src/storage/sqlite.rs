@@ -11,15 +11,15 @@ use tellur_core::schema::types::FileAttribution;
 
 use super::chain;
 use super::{
-    ActivityBucket, ActivityGroup, AuditEntry, AuditRecord, ComplianceSnapshot, IngestEvent, Job,
-    LoginTx, MemberInfo, Org, OrgReport, PolicyDoc, PolicySummary, Repo, RepoFacts, RepoRoleGrant,
-    RepoSource, RepoSummary, ScimGroup, ScimUser, SessionSummary, Store, StoredEvent,
-    role_from_group_name,
+    ActivityBucket, ActivityGroup, AuditEntry, AuditRecord, ComplianceSnapshot, DeviceAuth,
+    DevicePoll, IngestEvent, Job, LoginTx, MemberInfo, Org, OrgReport, PolicyDoc, PolicySummary,
+    Repo, RepoFacts, RepoRoleGrant, RepoSource, RepoSummary, ScimGroup, ScimUser, SessionSummary,
+    Store, StoredEvent, role_from_group_name,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
-const SCHEMA_VERSION: &str = "17";
+const SCHEMA_VERSION: &str = "18";
 
 /// A SQLite-backed store. The connection is behind a `Mutex` so the store is
 /// `Send + Sync` and usable as `Arc<dyn Store>`.
@@ -292,6 +292,15 @@ impl Store for SqliteStore {
                  expires_at TEXT NOT NULL
              );
              CREATE INDEX IF NOT EXISTS idx_session_member ON session(member_id);
+             -- Device-authorization requests for CLI `tellur login` (RFC 8628).
+             -- Polled by the secret device_code; approved by the typed user_code.
+             CREATE TABLE IF NOT EXISTS device_auth (
+                 device_code TEXT PRIMARY KEY,
+                 user_code   TEXT NOT NULL UNIQUE,
+                 status      TEXT NOT NULL,
+                 member_id   TEXT,
+                 created_at  TEXT NOT NULL
+             );
              -- Durable background jobs (e.g. large org exports).
              CREATE TABLE IF NOT EXISTS job (
                  id         TEXT PRIMARY KEY,
@@ -1676,6 +1685,117 @@ impl Store for SqliteStore {
             .conn()?
             .execute("DELETE FROM session WHERE id = ?1", params![session_id])?;
         Ok(n > 0)
+    }
+
+    fn member_principal(&self, member_id: &str) -> Result<Option<Principal>> {
+        let conn = self.conn()?;
+        principal_row(
+            &conn,
+            "SELECT id, org_id, role FROM member WHERE id = ?1 AND active = 1",
+            member_id,
+        )
+    }
+
+    fn create_device_auth(&self, device_code: &str, user_code: &str) -> Result<()> {
+        self.conn()?.execute(
+            "INSERT INTO device_auth (device_code, user_code, status, created_at)
+             VALUES (?1, ?2, 'pending', ?3)",
+            params![device_code, user_code, chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    fn count_device_auths(&self) -> Result<u64> {
+        let n: i64 = self
+            .conn()?
+            .query_row("SELECT COUNT(*) FROM device_auth", [], |r| r.get(0))?;
+        Ok(n as u64)
+    }
+
+    fn prune_expired_device_auths(&self, ttl_secs: i64) -> Result<u64> {
+        let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(ttl_secs)).to_rfc3339();
+        let n = self.conn()?.execute(
+            "DELETE FROM device_auth WHERE created_at < ?1",
+            params![cutoff],
+        )?;
+        Ok(n as u64)
+    }
+
+    fn find_device_by_user_code(&self, user_code: &str) -> Result<Option<DeviceAuth>> {
+        let conn = self.conn()?;
+        let row = conn
+            .query_row(
+                "SELECT user_code, status, member_id, created_at
+                 FROM device_auth WHERE user_code = ?1",
+                params![user_code],
+                |r| {
+                    Ok(DeviceAuth {
+                        user_code: r.get(0)?,
+                        status: r.get(1)?,
+                        member_id: r.get(2)?,
+                        created_at: r.get(3)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    fn set_device_decision(&self, user_code: &str, member_id: &str, approve: bool) -> Result<bool> {
+        // Only a still-pending request may transition, so a second click (or a
+        // race) cannot flip an already-decided request.
+        let status = if approve { "approved" } else { "denied" };
+        let n = self.conn()?.execute(
+            "UPDATE device_auth SET status = ?2, member_id = ?3
+             WHERE user_code = ?1 AND status = 'pending'",
+            params![user_code, status, member_id],
+        )?;
+        Ok(n > 0)
+    }
+
+    fn poll_device(&self, device_code: &str, ttl_secs: i64) -> Result<DevicePoll> {
+        // Serialize the read + terminal delete so a token is delivered at most
+        // once even if the CLI polls concurrently.
+        let mut guard = self.conn()?;
+        let tx = guard.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let row = tx
+            .query_row(
+                "SELECT status, member_id, created_at FROM device_auth WHERE device_code = ?1",
+                params![device_code],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((status, member_id, created_at)) = row else {
+            return Ok(DevicePoll::NotFound);
+        };
+        if super::device_expired(&created_at, ttl_secs) {
+            tx.execute(
+                "DELETE FROM device_auth WHERE device_code = ?1",
+                params![device_code],
+            )?;
+            tx.commit()?;
+            return Ok(DevicePoll::NotFound);
+        }
+        let outcome = match status.as_str() {
+            "approved" => DevicePoll::Approved(member_id.unwrap_or_default()),
+            "denied" => DevicePoll::Denied,
+            _ => DevicePoll::Pending,
+        };
+        // Terminal outcomes consume the row (deliver-once); pending leaves it.
+        if !matches!(outcome, DevicePoll::Pending) {
+            tx.execute(
+                "DELETE FROM device_auth WHERE device_code = ?1",
+                params![device_code],
+            )?;
+        }
+        tx.commit()?;
+        Ok(outcome)
     }
 
     fn prune_expired_sessions(&self) -> Result<u64> {

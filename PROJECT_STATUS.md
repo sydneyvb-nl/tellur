@@ -1,10 +1,31 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-10 (dashboard E2E: Playwright; on feature branch)
+**Last updated:** 2026-06-11 (CLI hub coupling: `tellur login` + `tellur push`; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
+
+> **2026-06-11 — Seamless hub coupling: `tellur login` + `tellur push`.** On
+> branch `feat/cli-login-push`. Closes the gap between local capture and the hub
+> dashboard. **`tellur login`** runs an RFC 8628 device-authorization grant
+> against the hub (`POST /v1/device/authorize` + `/v1/device/token`, schema v18
+> `device_auth` table on both SQLite + Postgres): the CLI prints a short code,
+> opens the hub's server-rendered approval page (`GET /auth/device`, session-
+> gated, bounces through SSO via a validated return cookie; `POST
+> /auth/device/decision`), and stores the minted member token at
+> `~/.config/tellur/hosts.json` (`0600`). The token is minted at poll time from
+> the member's *current* state and delivered at most once (row consumed under an
+> advisory-locked tx). **`tellur push`** forwards locally-captured events to the
+> ingest API with a per-`(hub, org, repo)` high-water mark in
+> `.tellur/push_state.json` — incremental + idempotent, `--dry-run`/`--reset`,
+> hub/org/token defaulting to the stored login. CLI HTTPS via ureq's `tls`
+> feature (reuses the rustls/webpki crates the server already pulls in). Tests:
+> 6 device integration specs + the Postgres surface test + 5 CLI unit tests
+> (high-water-mark slice logic, actor mapping); full e2e push smoke verified
+> against a live hub. Docs: README (new *Connect a developer* section),
+> THREAT_MODEL (device-auth boundary + CLI credential storage). `tellur logout`
+> added. Requires SSO enabled (device login has no identity otherwise).
 
 > **2026-06-10 — Dashboard E2E (Playwright).** On branch `feat/e2e`. Browser
 > end-to-end tests drive the **real production bundle** in Chromium with the

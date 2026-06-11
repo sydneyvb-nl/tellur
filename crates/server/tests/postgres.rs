@@ -11,7 +11,9 @@
 
 use r2d2_postgres::postgres::{Client, NoTls};
 use tellur_server::auth::Role;
-use tellur_server::storage::{AuditEntry, ComplianceSnapshot, IngestEvent, PostgresStore, Store};
+use tellur_server::storage::{
+    AuditEntry, ComplianceSnapshot, DevicePoll, IngestEvent, PostgresStore, Store,
+};
 
 use tellur_core::schema::types::{
     AttributionRange, AttributionState, EvidenceStrength, FileAttribution, Origin,
@@ -383,6 +385,33 @@ fn full_store_surface() {
     // An already-expired session does not resolve.
     let expired = store.create_session(&sso, -10).unwrap();
     assert!(store.session_principal(&expired).unwrap().is_none());
+
+    // member_principal resolves an active member to its current org + role.
+    let mp = store.member_principal(&sso).unwrap().unwrap();
+    assert_eq!(mp.org_id, org_a.id);
+
+    // ── Device authorization (CLI login) ──────────────────────────────────────
+    store.create_device_auth("dev-1", "AAAA-BBBB").unwrap();
+    assert!(matches!(
+        store.poll_device("dev-1", 900).unwrap(),
+        DevicePoll::Pending
+    ));
+    // Approve, bind the member, then a poll returns Approved once and consumes it.
+    assert!(store.set_device_decision("AAAA-BBBB", &sso, true).unwrap());
+    match store.poll_device("dev-1", 900).unwrap() {
+        DevicePoll::Approved(m) => assert_eq!(m, sso),
+        other => panic!("expected Approved, got {other:?}"),
+    }
+    assert!(matches!(
+        store.poll_device("dev-1", 900).unwrap(),
+        DevicePoll::NotFound
+    ));
+    // Expiry: a request older than the TTL is treated as not found.
+    store.create_device_auth("dev-2", "CCCC-DDDD").unwrap();
+    assert!(matches!(
+        store.poll_device("dev-2", -1).unwrap(),
+        DevicePoll::NotFound
+    ));
 
     // ── SCIM provisioning ─────────────────────────────────────────────────────
     let scim_tok = store.create_scim_token(&org_a.id).unwrap().plaintext;

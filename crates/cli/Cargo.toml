@@ -21,6 +21,8 @@ chrono = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 notify = "6"
 ctrlc = "3"
-# Small blocking HTTP client for `tellur policy pull` (no TLS deps; use http to a
-# loopback/self-hosted hub, or front it with a TLS-terminating proxy).
-ureq = { version = "2", default-features = false }
+# Small blocking HTTP client for the hub commands (`tellur login`, `push`,
+# `policy pull`). The `tls` feature enables HTTPS via rustls + webpki-roots —
+# the same crates the server already pulls in for OIDC — so remote hubs work out
+# of the box; loopback hubs can still use plain http.
+ureq = { version = "2", default-features = false, features = ["tls", "json"] }
