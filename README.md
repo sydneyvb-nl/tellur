@@ -545,7 +545,18 @@ actual lines **in the browser, straight from the provider** (`raw.githubusercont
 code**. The
 hub ships a built-in **team dashboard** at **`/app`** (Svelte SPA embedded in the
 binary, served same-origin so it uses your first-party SSO session): sign in at
-`/auth/login`, then open `/app`. It is being built out in phases per
+`/auth/login`, then open `/app`. The SPA is compiled into the server binary at
+build time, so build it before building the server (otherwise `/app` serves a
+placeholder):
+
+```bash
+pnpm --dir crates/server/ui install
+pnpm --dir crates/server/ui build      # → crates/server/ui/dist (embedded)
+cargo run -p tellur-server             # /app now serves the real dashboard
+```
+
+The Docker image (`dist/docker/`) does this automatically. The dashboard is
+built out in phases per
 [`docs/proposals/TEAM_DASHBOARD_UI.md`](docs/proposals/TEAM_DASHBOARD_UI.md):
 Overview (org rollup + activity trend), Repositories + per-file provenance,
 Sessions + replay, and — for admins — a **Policies** compliance view (per-repo
