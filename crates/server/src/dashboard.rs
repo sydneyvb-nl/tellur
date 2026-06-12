@@ -60,13 +60,15 @@ async fn serve(path: String) -> Response {
     if let Some(resp) = asset_response(path) {
         return resp;
     }
-    // Not a real file. If it looks like an asset request (has a file extension),
-    // it's a genuine 404; otherwise it's a client route → serve the app shell.
-    let last = path.rsplit('/').next().unwrap_or(path);
-    if last.contains('.') {
-        return (StatusCode::NOT_FOUND, "not found").into_response();
+    // Not a real embedded asset. SPA client routes live under `orgs/…` (and the
+    // bare app root), so serve the app shell for those — note a client route can
+    // legitimately end in a filename with a dot (e.g. `…/files/src/api.rs`), so we
+    // must NOT treat a trailing dot as an asset request. Anything else that isn't
+    // a real asset (e.g. a missing hashed bundle under `assets/`) is a true 404.
+    if path.is_empty() || path.starts_with("orgs/") {
+        return index_response();
     }
-    index_response()
+    (StatusCode::NOT_FOUND, "not found").into_response()
 }
 
 /// Serve `index.html`, or the placeholder when the SPA wasn't built.
