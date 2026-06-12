@@ -20,6 +20,12 @@ Last updated: 2026-06-02
 - Prompt-like fields (`message`, `prompt`, `text`, `content`) are hashed rather
   than stored as raw text across all import adapters, including nested `data`/
   `payload` objects.
+- A repo may **opt in** to keeping a redacted, length-bounded prompt *excerpt*
+  (alongside the hash) for live agent-hook capture by setting
+  `redaction.store_prompt_excerpt: true` in `.tellur/config.yml`. It is `false`
+  by default, uses the repo's own redaction rules (plus the built-in secret
+  patterns), and applies only to activity captured after opting in — the hub
+  session timeline then shows the excerpt.
 - Secret-looking strings in retained adapter metadata are redacted with the core
   redaction engine.
 - Codex and Claude Code hooks scope capture to the hook payload's file path when

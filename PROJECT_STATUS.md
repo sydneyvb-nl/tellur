@@ -1,10 +1,57 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-12 (prompt excerpts + dynamic session timeline; on feature branch)
+**Last updated:** 2026-06-12 (handover refresh — all hub/login/push/source/timeline/OIDC work merged to `main`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
-**Branch:** main
+**Branch:** main · **Open PRs:** none · **Working tree:** clean
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
+
+## Handover — current state & open work
+
+**Everything described in the dated changelog below is merged to `main`.** There
+are no open PRs and the working tree is clean. The local pipeline, the team hub
+(`tellur-server`), the CLI hub coupling (`tellur login`/`push`/`logout`), the A12
+source connection + private-repo proxy, prompt excerpts, and the dynamic session
+timeline are all shipped.
+
+**Operational notes for whoever picks this up:**
+- The hub embeds the SPA at build time, so **server or SPA changes need a
+  `tellur-server` rebuild + restart** (or a fresh Docker image) to take effect;
+  reinstall the CLI (`cargo install --path crates/cli --force`) after CLI changes.
+- **Prompt excerpts** are opt-in per repo (`redaction.store_prompt_excerpt: true`
+  in `.tellur/config.yml`) and apply only to activity captured *after* opting in
+  (no backfill — older events are hash-only).
+- An **`http` OIDC issuer on a LAN** (e.g. Keycloak on `192.168.x.x`) needs
+  `TELLUR_OIDC_ALLOW_INSECURE_HTTP=1` on the hub (insecure; trusted networks only).
+- The reference dev/test hub the user runs is on a LAN host; Postgres tests need
+  `TELLUR_TEST_DATABASE_URL` (local: `postgres://postgres@127.0.0.1:5433/tellur_test`).
+
+**Open work (priority order):**
+1. **Zero-touch + GitHub App** — design merged in
+   [`docs/proposals/GITHUB_APP.md`](docs/proposals/GITHUB_APP.md). Build order:
+   **P1 `tellur connect`** (git hooks + background pusher + auto `refs/notes/ai`
+   push — provider-agnostic, the headline "never touch the terminal" goal), then
+   **P2** GitHub App installation tokens for the blob proxy (replacing the stored
+   PAT), **P3** repo discovery + `push`-webhook notes harvester, **P4** PR-check
+   runs. This is the recommended next big item.
+2. **Packaged releases** — GitHub Release automation exists; the **npm wrapper +
+   Homebrew formula** (`dist/`) are not finished.
+3. **`docs/DEPLOYMENT.md`** (Fly.io / Cloud Run + managed Postgres + TLS + OIDC
+   walkthrough) and **`docs/SSO.md`** (Keycloak quickstart + the Entra ID
+   `email_verified` caveat) — offered, not yet written; the missing piece for
+   self-serve "host it as a service".
+4. **Richer policy templates** for security-sensitive repositories.
+5. **Broader agent coverage** as more tools expose stable local lifecycle hooks.
+
+**Smaller follow-ups flagged during recent work (nice-to-have, not blocking):**
+- Surface the **prompt excerpt as a column in the file-provenance view** (per
+  range), not only in the session timeline.
+- Enrich the **Sessions list** with per-session prompt/category indicators.
+
+**Deliberate non-goal:** the hub's `review_coverage` / `reviewed_ai_lines` metric
+has **no marking workflow on purpose** — review marking does not belong in the
+hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
+"mark reviewed" action.
 
 > **2026-06-12 — Prompt excerpts (opt-in) + dynamic session timeline.** On branch
 > `feat/timeline-prompts`. Made the dead `redaction.store_prompt_excerpt` flag
@@ -944,30 +991,32 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-204 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
-- server:    59 tests (B0 config/health/errors + /metrics; B1 Argon2id tokens, org/member
-             auth, hash-chained audit append/verify/tamper/tail-truncation/
-             two-connection, authn + BOLA + auth-denied auditing; B2 repo
-             get-or-create, per-repo event chain verify/tamper, tenant scoping,
-             ingest authz/BOLA/role + empty/oversized caps + rate-limit 429 +
-             recursive payload redaction)
-- core:      72 tests (schema/event-type round-trip, glob matcher, storage,
-             hash-chain verify + reseal, index session/attribution round-trip,
-             capture pipeline end-to-end, block_ai_read, attribution, redaction,
-             policy, export, PR report, team report aggregation, dashboard daemon
-             endpoints + webhook normalization & authenticated POST /webhook route)
-- adapters:  47 tests (Claude Code, Aider, Cursor, Codex, Copilot, Gemini CLI,
-             Antigravity, Windsurf, JetBrains, Devin, Continue, Cline/Roo Code,
-             Generic, and the shared import loop incl. envelope inheritance,
-             content-block extraction, and command-text recovery)
-- cli:       26 integration tests (version/help/init/doctor/status/sessions/verify/import/setup incl. windsurf/hooks ingest/team report/policy pull from a live hub)
-- editor:    VS Code — TypeScript compile, 5 unit tests, extension integration tests.
-             JetBrains — `editor/tellur-jetbrains` (Kotlin/Gradle, committed wrapper
-             pinned to 8.9) builds outside the Rust CI; `./gradlew buildPlugin`
-             verified green on JDK 17 (produces a loadable plugin zip)
+313 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
+(verified 2026-06-12 via `cargo test --workspace` with TELLUR_TEST_DATABASE_URL set)
+- core:      75  (schema/event round-trip, glob, storage, hash-chain verify+reseal,
+             index session/attribution round-trip, capture pipeline, attribution,
+             redaction, policy, export, PR report, team report, daemon/webhook)
+- adapters:  47  (Claude Code, Aider, Cursor, Codex, Copilot, Gemini CLI,
+             Antigravity, Windsurf, JetBrains, Devin, Continue, Cline/Roo, Generic,
+             + shared import loop)
+- cli:       41  (12 unit incl. push high-water-mark/tombstones, prompt-excerpt
+             redaction, host/segment encoding; 29 integration incl. policy pull
+             from a live hub)
+- server:    150 (49 lib unit + 101 integration: auth/BOLA, ingest, repo RBAC,
+             OIDC SSO + device login, SCIM users/groups, jobs, dashboard reads,
+             attribution + tombstones, A12 source/blob proxy, dashboard routes,
+             Postgres surface — Postgres tests run only with TELLUR_TEST_DATABASE_URL)
+- dashboard: 63 vitest (pure helpers: router, source/buildTemplates, timeline,
+             commands, i18n catalog parity) + 5 Playwright E2E (real built bundle
+             in Chromium with the /v1 API mocked — frontend E2E, not full-stack)
+- editor:    VS Code — TS compile + 5 unit + extension tests. JetBrains —
+             `./gradlew buildPlugin` on JDK 17 (built outside the Rust CI).
 ```
 
-Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && cargo test`, then `cd editor/tellur-vscode && npm run compile && npm run test:unit && npm run test:extension`.
+Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && cargo test`
+(set `TELLUR_TEST_DATABASE_URL` to include the Postgres backend tests). Dashboard:
+`pnpm --dir crates/server/ui install && pnpm --dir crates/server/ui {check,test,build,e2e}`.
+VS Code: `cd editor/tellur-vscode && npm run compile && npm run test:unit && npm run test:extension`.
 
 ---
 
@@ -995,11 +1044,12 @@ Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && carg
 ## Git Log (laatste 5 commits)
 
 ```
-3073a75 feat: release workflow, homebrew formula, zero warnings
-19f466e feat: cross-compilation + CLI integration tests
-1db9723 feat: Rust rewrite — core engine, CLI, attribution, policy, redaction
-8cb1d1e feat: initial project scaffold — core schemas, CLI foundation, monorepo setup
-2a20ab8 Initial commit
+5c9af99 Merge #40 fix(oidc): opt-in for http issuers on trusted networks + clear startup error
+57e27be Merge #39 feat(timeline): opt-in prompt excerpts + dynamic session timeline
+ad1131c Merge #38 fix(dashboard): serve app shell for file-provenance deep links (not 404)
+79d8dd7 Merge #32 docs(readme): revise for accuracy and readability
+(earlier: #33 tellur login+push, #34 device-login token, #35 source connection + blob proxy,
+ #36 GitHub App proposal, #37 push line-level attribution)
 ```
 
 ---
