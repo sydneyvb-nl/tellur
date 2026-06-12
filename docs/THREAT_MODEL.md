@@ -27,14 +27,24 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    policy distribution** (`PUT/GET .../policies[/{name}]` — admin write of policy
    bodies, validated before storage), **attribution ingest**
    (`POST .../repos/{repo}/attributions`, contributor+), opt-in per-repo
-   **source templates** (`PUT .../repos/{repo}/source` — admin; stores only
-   `https://` URL templates, never source; validated server-side). The file
-   view's `link` template renders as an external link (non-https/`javascript:`
-   rejected so it can't inject); the optional `raw` template lets the browser
-   fetch raw bytes **directly from the provider** to show an inline gutter — the
-   hub never proxies source, and `/app`'s CSP `connect-src` only permits a small
-   all-list of raw hosts (raw.githubusercontent.com, gitlab.com, bitbucket.org),
-   bounding any exfiltration surface. The
+   **source connection** (`PUT/GET .../repos/{repo}/source` — admin; stores
+   `https://` URL templates + an optional provider token, never source;
+   validated server-side; `GET` and audit log only ever report
+   `token_configured`, never the token). The file view's `link` template renders
+   as an external link (non-https/`javascript:` rejected so it can't inject); the
+   optional `raw` template lets the browser fetch raw bytes **directly from the
+   provider** for **public** repos (`/app`'s CSP `connect-src` only permits a
+   small all-list of raw hosts — raw.githubusercontent.com, gitlab.com,
+   bitbucket.org), bounding that surface. For **private** repos the
+   **blob proxy** (`GET .../repos/{repo}/blob?path=` — viewer+, rate-limited,
+   tenant-scoped) fetches the bytes server-side using the stored token: the
+   resolved URL is rebuilt from the admin-set template and re-checked against a
+   fixed host **allowlist** (SSRF guard — userinfo and explicit ports rejected),
+   restricted to `https`, size-capped (2 MB), and the token is sent only as the
+   provider's auth header and never returned. The bytes are the org's own source
+   served to org members, so they are returned faithfully (not redacted) — keep
+   the configured token least-privilege (read-only, scoped to the connected
+   repo). The
    **export portal**
    — org bundles are **durable jobs**: `POST .../export/events|audit` enqueues
    (admin) and returns a job id, polled at `GET .../jobs/{id}` or listed via
@@ -127,6 +137,16 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    it). The same server-side hash-chain recomputation + head checkpoints apply
    regardless of backend, so a compromised DB cannot silently forge provenance
    without detection by `verify_*_chain`.
+6. **Hub → source provider** (Tier 1, optional) — when a repo's private-source
+   proxy is configured the hub makes an **outbound HTTPS** GET to the provider's
+   raw/contents host. The target host is constrained to a fixed **allowlist** and
+   the URL re-validated on every request (SSRF guard: an admin typo or tampered
+   template can't redirect the hub at an internal host; userinfo/ports rejected),
+   the response is size-capped, and the stored provider token is sent only as
+   that host's auth header. The token at rest is a secret — keep the DB on a
+   private network / encrypted at rest, and scope the token read-only to the
+   connected repo (least privilege bounds the blast radius if the hub or DB is
+   compromised).
 
 ## STRIDE analysis (hub focus)
 

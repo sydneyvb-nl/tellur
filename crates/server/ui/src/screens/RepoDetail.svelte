@@ -3,8 +3,9 @@
   import { count, pct, relativeTime } from "../lib/format";
   import { reposPath, filePath } from "../lib/router";
   import { t } from "../lib/i18n.svelte";
+  import SourceConnection from "../components/SourceConnection.svelte";
 
-  let { org, repo }: { org: string; repo: string } = $props();
+  let { org, repo, role }: { org: string; repo: string; role: string } = $props();
 
   let data = $state<RepoDetail | null>(null);
   let files = $state<AttrFile[]>([]);
@@ -94,6 +95,8 @@
       </ul>
     {/if}
   </section>
+
+  <SourceConnection {org} {repo} {role} />
 
   <section class="panel">
     <h2>{t("repoDetail.contributors")}</h2>

@@ -1,10 +1,33 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-11 (CLI hub coupling: `tellur login` + `tellur push`; on feature branch)
+**Last updated:** 2026-06-12 (A12 source connection: dashboard settings + private-repo blob proxy; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
+
+> **2026-06-12 — A12 source connection: dashboard UX + private-repo blob proxy.**
+> On branch `feat/source-connection`. Two parts. **(1) Settings UX:** an admin
+> **Source connection** card on the repo screen (`SourceConnection.svelte`) —
+> pick GitHub/GitLab/Bitbucket + `owner/repo` + branch and it generates the
+> link/raw templates (pure `buildTemplates`, unit-tested), with a private toggle,
+> token field, and Advanced template editor; backed by `GET .../repos/{repo}/source`
+> (admin; returns `token_configured`, never the token) + the extended `PUT`
+> (token preserve/replace/clear semantics, audited without the value). Also a
+> `tellur-server admin set-repo-source` CLI. **(2) Private-repo blob proxy:**
+> `GET .../repos/{repo}/blob?path=` (viewer+) fetches raw bytes server-side via a
+> new `source` module — SSRF host allowlist (raw.githubusercontent.com,
+> api.github.com, gitlab.com, bitbucket.org, api.bitbucket.org; userinfo/ports
+> rejected), `https`-only, 2 MB cap, per-provider auth header (Bearer /
+> PRIVATE-TOKEN / GitHub raw Accept); token stored (`repo_source.source_token`,
+> schema v19, both backends) and never returned. The FileView gutter routes
+> through the proxy when `source_proxy` is set (private), else fetches the
+> provider directly (public). Token is `#[serde(skip)]` on `RepoSource` so it
+> can't leak. Tests: 5 source integration specs + 4 `source`-module unit tests +
+> Postgres surface (token round-trip) + 4 `buildTemplates` vitest; full suite 185
+> Rust + 55 vitest green; removed two stray ` 2.ts` duplicate files. Docs:
+> README, THREAT_MODEL (proxy = new SSRF-guarded outbound Hub→provider boundary +
+> stored-token posture; roadmap item closed).
 
 > **2026-06-11 — Seamless hub coupling: `tellur login` + `tellur push`.** On
 > branch `feat/cli-login-push`. Closes the gap between local capture and the hub
