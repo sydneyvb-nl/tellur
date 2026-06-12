@@ -101,8 +101,14 @@
       template: link || null,
       raw_template: raw || null,
     };
-    // A non-empty token sets it; otherwise the server preserves the existing one.
-    if (token.trim()) body.token = token.trim();
+    if (isPrivate) {
+      // A non-empty token sets it; otherwise the server preserves the existing one.
+      if (token.trim()) body.token = token.trim();
+    } else {
+      // Switching to (or saving as) public removes any stored token, so the repo
+      // stops being proxied — otherwise a stale token would linger.
+      body.clear_token = true;
+    }
     saving = true;
     try {
       config = await api.setSource(org, repo, body);
