@@ -37,18 +37,31 @@ pub struct OidcConfig {
     pub client_id: String,
     pub client_secret: String,
     pub redirect_uri: String,
+    /// Allow a plaintext `http` issuer/endpoints on **any** host (not just
+    /// loopback). INSECURE — only for a trusted private network or local dev,
+    /// where ID-token integrity can't be MITM'd. Off by default; opt in with
+    /// `TELLUR_OIDC_ALLOW_INSECURE_HTTP=1`.
+    pub allow_insecure_http: bool,
 }
 
 impl OidcConfig {
     /// Build from `TELLUR_OIDC_*`. Returns `None` when SSO is not configured.
     pub fn from_env() -> Option<Self> {
         let get = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+        let flag = |k: &str| matches!(get(k).as_deref(), Some("1" | "true" | "yes"));
         Some(Self {
             issuer: get("TELLUR_OIDC_ISSUER")?,
             client_id: get("TELLUR_OIDC_CLIENT_ID")?,
             client_secret: get("TELLUR_OIDC_CLIENT_SECRET")?,
             redirect_uri: get("TELLUR_OIDC_REDIRECT_URI")?,
+            allow_insecure_http: flag("TELLUR_OIDC_ALLOW_INSECURE_HTTP"),
         })
+    }
+
+    /// Whether the configured issuer would be rejected as non-secure (so the
+    /// caller can warn at startup rather than surface an opaque 500 at login).
+    pub fn issuer_is_secure(&self) -> bool {
+        require_secure("issuer", &self.issuer, self.allow_insecure_http).is_ok()
     }
 }
 
@@ -152,7 +165,8 @@ impl OidcRuntime {
         if let Some(d) = self.cached.lock().unwrap().clone() {
             return Ok(d);
         }
-        require_https("issuer", &self.config.issuer)?;
+        let insecure = self.config.allow_insecure_http;
+        require_secure("issuer", &self.config.issuer, insecure)?;
         let disc = self.client.discover(&self.config.issuer)?;
         // The metadata's `issuer` must exactly match what we configured (OIDC
         // Discovery §4.3). Otherwise a misconfigured/redirected discovery
@@ -165,8 +179,12 @@ impl OidcRuntime {
                 disc.issuer
             );
         }
-        require_https("authorization_endpoint", &disc.authorization_endpoint)?;
-        require_https("token_endpoint", &disc.token_endpoint)?;
+        require_secure(
+            "authorization_endpoint",
+            &disc.authorization_endpoint,
+            insecure,
+        )?;
+        require_secure("token_endpoint", &disc.token_endpoint, insecure)?;
         *self.cached.lock().unwrap() = Some(disc.clone());
         Ok(disc)
     }
@@ -203,20 +221,25 @@ impl Pkce {
     }
 }
 
-/// Reject a non-HTTPS URL. Plaintext `http` is allowed only when the host is
-/// *exactly* a loopback host (`localhost`, `127.0.0.1`, `::1`) — for local dev.
-/// The host is parsed (not prefix-matched) so `http://localhost.evil.example`
-/// and `http://127.0.0.1.evil.example` are correctly rejected.
-fn require_https(what: &str, url: &str) -> Result<()> {
+/// Reject a non-secure URL. `https` always passes. Plaintext `http` passes only
+/// when the host is *exactly* a loopback host (`localhost`, `127.0.0.1`, `::1`)
+/// — or, when `allow_insecure` is set, for any host (an explicit, documented
+/// opt-in for a trusted private network / dev; see `TELLUR_OIDC_ALLOW_INSECURE_HTTP`).
+/// The host is parsed (not prefix-matched) so `http://localhost.evil.example` is
+/// still rejected without the opt-in.
+fn require_secure(what: &str, url: &str, allow_insecure: bool) -> Result<()> {
     if url.starts_with("https://") {
         return Ok(());
     }
     if let Some(rest) = url.strip_prefix("http://")
-        && is_loopback_host(rest)
+        && (allow_insecure || is_loopback_host(rest))
     {
         return Ok(());
     }
-    bail!("OIDC {what} must use https (got {url})");
+    bail!(
+        "OIDC {what} must use https (got {url}) — set TELLUR_OIDC_ALLOW_INSECURE_HTTP=1 \
+         to allow http on a trusted private network"
+    );
 }
 
 /// Extract the host from a URL authority (`host[:port]/...`) and test whether it
@@ -383,6 +406,21 @@ fn percent_encode(value: &str) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn require_secure_https_loopback_and_insecure_optin() {
+        // https always passes.
+        assert!(require_secure("issuer", "https://idp.example/realms/x", false).is_ok());
+        // loopback http passes without the opt-in.
+        assert!(require_secure("issuer", "http://127.0.0.1:8080/x", false).is_ok());
+        assert!(require_secure("issuer", "http://localhost:8080/x", false).is_ok());
+        // a LAN http issuer is rejected by default …
+        assert!(require_secure("issuer", "http://192.168.1.65:8080/realms/x", false).is_err());
+        // … but allowed with the explicit opt-in.
+        assert!(require_secure("issuer", "http://192.168.1.65:8080/realms/x", true).is_ok());
+        // a spoofed loopback host is still rejected without the opt-in.
+        assert!(require_secure("issuer", "http://localhost.evil.example/x", false).is_err());
+    }
+
     fn jwt_with(payload: serde_json::Value) -> String {
         let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"RS256","typ":"JWT"}"#);
         let body = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap());
@@ -410,6 +448,7 @@ mod tests {
             client_id: "client 1".to_string(),
             client_secret: "sec".to_string(),
             redirect_uri: "https://hub.example/auth/callback".to_string(),
+            allow_insecure_http: false,
         };
         let url = build_authorize_url(&disc, &cfg, "st8", "non", "chal");
         assert!(url.starts_with("https://idp.example/authorize?"));
@@ -483,11 +522,11 @@ mod tests {
     }
 
     #[test]
-    fn require_https_rejects_plaintext_endpoints() {
-        assert!(require_https("issuer", "https://idp.example").is_ok());
-        assert!(require_https("issuer", "http://idp.example").is_err());
+    fn require_secure_rejects_plaintext_endpoints() {
+        assert!(require_secure("issuer", "https://idp.example", false).is_ok());
+        assert!(require_secure("issuer", "http://idp.example", false).is_err());
         // Loopback http is allowed for local dev/testing only.
-        assert!(require_https("token", "http://127.0.0.1:8080/token").is_ok());
-        assert!(require_https("token", "http://localhost/token").is_ok());
+        assert!(require_secure("token", "http://127.0.0.1:8080/token", false).is_ok());
+        assert!(require_secure("token", "http://localhost/token", false).is_ok());
     }
 }

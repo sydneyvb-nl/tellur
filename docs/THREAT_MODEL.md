@@ -119,7 +119,10 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    integrity rests on TLS server validation (OIDC Core §3.1.3.7); the hub still
    validates `iss`/`aud`/`exp` and the per-login `nonce`. Because that integrity
    depends on TLS, the hub **rejects non-HTTPS** issuer/authorization/token
-   endpoints (loopback `http` is allowed only for local dev). The client secret
+   endpoints (loopback `http` is allowed only for local dev; a non-loopback `http`
+   issuer requires the explicit, **insecure** opt-in `TELLUR_OIDC_ALLOW_INSECURE_HTTP=1`
+   for a trusted private network / homelab — without it a non-secure issuer is
+   logged at startup and rejected at login, never silently accepted). The client secret
    is a secret (env/secret store). No open self-registration: only
    pre-provisioned members (by verified email) may sign in, and the OIDC subject
    is bound on first login and never silently re-bound (a second IdP account on

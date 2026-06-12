@@ -532,7 +532,12 @@ forever; the event provenance log is never pruned.
   to enable `/auth/login|callback|logout`. Login issues an opaque, server-stored
   session cookie (`HttpOnly` / `Secure` / `SameSite=Lax`). There is no open
   self-registration: pre-provision members with `tellur-server admin add-member`,
-  matched by verified email on first login and bound to their OIDC subject.
+  matched by verified email on first login and bound to their OIDC subject. The
+  issuer/endpoints must be **`https`** (ID-token integrity rests on TLS); `http`
+  is allowed only for loopback, or — for a trusted private network / homelab —
+  with the explicit, **insecure** opt-in `TELLUR_OIDC_ALLOW_INSECURE_HTTP=1`
+  (e.g. a LAN Keycloak at `http://192.168.x.x:8080`). A non-secure issuer without
+  the opt-in is logged loudly at startup and rejected at login.
 - **SCIM 2.0** — mint an org-scoped token (`create-scim-token`) and point your
   IdP at `/scim/v2/Users` + `/scim/v2/Groups`. Deprovisioning (`DELETE` or
   `PATCH active=false`) revokes every credential type at once. A group named

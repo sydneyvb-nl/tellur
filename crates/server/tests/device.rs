@@ -57,6 +57,7 @@ fn setup() -> Setup {
             client_id: "client-1".to_string(),
             client_secret: "secret".to_string(),
             redirect_uri: "https://hub.test/auth/callback".to_string(),
+            allow_insecure_http: false,
         },
         Arc::new(MockIdp),
     );
