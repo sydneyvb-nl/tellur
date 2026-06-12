@@ -76,8 +76,21 @@ async fn client_route_falls_back_to_app_shell() {
 }
 
 #[tokio::test]
+async fn file_provenance_route_with_extension_falls_back_to_app_shell() {
+    // A client route can end in a real filename with a dot (the file provenance
+    // view). It must serve the app shell, not 404 on the trailing extension.
+    let (status, ct) = get(
+        &state(),
+        "/app/orgs/org_123/repos/tellur/files/crates/server/src/api.rs",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(ct.unwrap_or_default().contains("text/html"));
+}
+
+#[tokio::test]
 async fn missing_asset_is_404() {
-    // A path that looks like a real asset (has an extension) must not fall back.
+    // A genuine missing asset (under assets/, not a client route) still 404s.
     let (status, _) = get(&state(), "/app/assets/does-not-exist.js").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
