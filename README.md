@@ -642,6 +642,10 @@ The local pipeline, the multi-agent adapters, and the self-hosted hub (API, OIDC
 SSO, SCIM user + group provisioning, durable exports, compliance snapshots,
 retention, and the full team dashboard) are implemented. Active and upcoming work:
 
+- **Zero-touch provenance + GitHub App** — automatic `refs/notes/ai` push and
+  background hub sync so a developer never runs a command after install, plus an
+  optional GitHub App (installation-token source access, repo discovery,
+  notes harvester, PR checks). Design: [`docs/proposals/GITHUB_APP.md`](docs/proposals/GITHUB_APP.md).
 - **Packaged releases** for npm, Homebrew, and GitHub Releases.
 - **Richer policy templates** for security-sensitive repositories.
 - **Broader agent coverage** as more tools expose stable local lifecycle hooks.
