@@ -190,7 +190,7 @@ tellur policy check                 # Evaluate configured policies
 tellur event --event-type file.write --session <id> --file <path>
 tellur import <adapter> <source>    # Import external AI tool data
 tellur login --hub <url>            # Sign in to a team hub (browser; no token to paste)
-tellur push                         # Send captured events to the hub (incremental)
+tellur push                         # Send captured events + AI attribution to the hub
 tellur logout                       # Forget stored hub credentials
 tellur export --format json         # Export provenance data
 tellur notes export                 # Write Git AI-compatible refs/notes/ai

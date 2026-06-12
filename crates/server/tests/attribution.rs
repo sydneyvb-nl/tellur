@@ -267,3 +267,39 @@ async fn slsa_export_requires_admin_and_existing_repo() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn empty_ranges_tombstone_deletes_the_file_attribution() {
+    // A push that no longer carries a previously-attributed file (e.g. it was
+    // deleted from the repo) sends an empty-ranges tombstone; the hub must drop
+    // the row so it stops counting toward AI-lines — not leave it stale.
+    let s = setup();
+    let repo = s.state.store.ensure_repo(&s.org_a, "app").unwrap();
+    s.state
+        .store
+        .put_attributions(&s.org_a, &repo.id, &[ai_attribution()])
+        .unwrap();
+    assert_eq!(
+        s.state
+            .store
+            .list_attributions(&s.org_a, &repo.id)
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let mut tombstone = ai_attribution();
+    tombstone.ranges.clear();
+    s.state
+        .store
+        .put_attributions(&s.org_a, &repo.id, &[tombstone])
+        .unwrap();
+    assert!(
+        s.state
+            .store
+            .list_attributions(&s.org_a, &repo.id)
+            .unwrap()
+            .is_empty(),
+        "tombstone should delete the file's attribution"
+    );
+}
