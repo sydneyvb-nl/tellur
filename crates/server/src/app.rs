@@ -69,7 +69,11 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/v1/orgs/{org_id}/repos/{repo}/source",
-            put(crate::api::set_repo_source),
+            put(crate::api::set_repo_source).get(crate::api::get_repo_source),
+        )
+        .route(
+            "/v1/orgs/{org_id}/repos/{repo}/blob",
+            get(crate::api::source_blob),
         )
         .route("/v1/orgs/{org_id}/sessions", get(crate::api::list_sessions))
         .route(

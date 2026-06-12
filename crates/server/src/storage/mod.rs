@@ -268,6 +268,11 @@ pub struct RepoRoleGrant {
 pub struct RepoSource {
     pub link: Option<String>,
     pub raw: Option<String>,
+    /// Provider access token for the private-repo blob proxy. A secret — never
+    /// serialized out (the API only ever reports whether one is configured) and
+    /// only read server-side to authenticate the outbound fetch.
+    #[serde(skip)]
+    pub token: Option<String>,
 }
 
 /// A member with the facets the People & Access screen needs (A2). `sso_bound`
@@ -358,15 +363,18 @@ pub trait Store: Send + Sync {
     /// unset. Stores only URL templates — never source code.
     fn get_repo_source(&self, org_id: &str, repo_id: &str) -> Result<RepoSource>;
 
-    /// Set (or clear, with `None`) a repo's source templates. Admin-gated at the
-    /// API; the caller validates each template is an `https://` URL. When both
-    /// are `None` the row is removed.
+    /// Set (or clear, with `None`) a repo's source templates and the optional
+    /// private-repo proxy `token`. Admin-gated at the API; the caller validates
+    /// each template is an `https://` URL. When all three are `None` the row is
+    /// removed. Writes exactly the values given — the API computes the final
+    /// `token` (preserve/replace/clear) before calling.
     fn set_repo_source(
         &self,
         org_id: &str,
         repo_id: &str,
         link: Option<&str>,
         raw: Option<&str>,
+        token: Option<&str>,
     ) -> Result<()>;
 
     // ─── Fine-grained per-repo RBAC (additive grants) ────────────────────────
