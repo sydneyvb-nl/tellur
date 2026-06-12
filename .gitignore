@@ -21,3 +21,4 @@ target/
 .tellur/traces/
 .tellur/index/
 .tellur/daemon.token
+.tellur/push_state.json

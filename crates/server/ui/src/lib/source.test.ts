@@ -1,5 +1,29 @@
 import { describe, it, expect } from "vitest";
-import { sourceLink, rawUrl, sliceLines } from "./source";
+import { sourceLink, rawUrl, sliceLines, buildTemplates } from "./source";
+
+describe("buildTemplates", () => {
+  it("builds public GitHub link + raw templates", () => {
+    const t = buildTemplates("github", "acme/app", "main", false);
+    expect(t.link).toBe("https://github.com/acme/app/blob/main/{path}#L{start}-L{end}");
+    expect(t.raw).toBe("https://raw.githubusercontent.com/acme/app/main/{path}");
+  });
+  it("uses the authenticated contents API for a private GitHub repo", () => {
+    const t = buildTemplates("github", "acme/app", "dev", true);
+    expect(t.raw).toBe("https://api.github.com/repos/acme/app/contents/{path}?ref=dev");
+  });
+  it("defaults the branch to main and trims slashes from the slug", () => {
+    const t = buildTemplates("github", "/acme/app/", "", false);
+    expect(t.link).toBe("https://github.com/acme/app/blob/main/{path}#L{start}-L{end}");
+  });
+  it("builds GitLab and Bitbucket templates", () => {
+    expect(buildTemplates("gitlab", "g/p", "main", false).raw).toBe(
+      "https://gitlab.com/g/p/-/raw/main/{path}",
+    );
+    expect(buildTemplates("bitbucket", "b/r", "main", false).link).toBe(
+      "https://bitbucket.org/b/r/src/main/{path}#lines-{start}:{end}",
+    );
+  });
+});
 
 const ref = { path: "src/auth/session.ts", start: 10, end: 24 };
 

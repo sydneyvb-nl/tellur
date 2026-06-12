@@ -581,9 +581,14 @@ Screens (per [`docs/proposals/TEAM_DASHBOARD_UI.md`](docs/proposals/TEAM_DASHBOA
 - **Overview** — org totals, AI-share + review-coverage rollups, activity trend,
   and repos ranked by review gap, in one round-trip (`GET .../overview`).
 - **Repositories & file provenance** — per-repo stats and a metadata-first
-  attribution gutter; an admin can opt in to per-repo `source` templates that
-  deep-link or inline source **fetched in the browser from the provider** — the
-  hub stores and serves no source code.
+  attribution gutter. An admin connects a repo to its provider from a
+  **Source connection** card (pick GitHub/GitLab/Bitbucket + `owner/repo` +
+  branch — no template syntax to learn), enabling per-range **deep-links** and an
+  inline source view. **Public** repos are fetched in the browser straight from
+  the provider (the hub stores/serves no source); **private** repos use a stored,
+  least-privilege token and are fetched through the hub's **SSRF-guarded blob
+  proxy** (`GET .../blob`) — the token never leaves the hub. Also settable via
+  `tellur-server admin set-repo-source`.
 - **Sessions & replay** — session list and an event-by-event timeline.
 - **Admin** — **Policies** compliance (violations by severity + one-click
   re-evaluation), **People & Access** (members, SCIM groups, SSO/SCIM health),
@@ -638,8 +643,6 @@ SSO, SCIM user + group provisioning, durable exports, compliance snapshots,
 retention, and the full team dashboard) are implemented. Active and upcoming work:
 
 - **Packaged releases** for npm, Homebrew, and GitHub Releases.
-- **Server-side source proxy** so the dashboard's inline source view also works
-  for private repos without provider CORS (SSRF allow-listed, secret-redacted).
 - **Richer policy templates** for security-sensitive repositories.
 - **Broader agent coverage** as more tools expose stable local lifecycle hooks.
 

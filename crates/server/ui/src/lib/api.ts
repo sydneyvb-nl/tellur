@@ -50,6 +50,18 @@ async function post<T>(path: string): Promise<T> {
   );
 }
 
+/** PUT with a JSON body (used for admin settings like the source connection). */
+async function put<T>(path: string, body: unknown): Promise<T> {
+  return handle<T>(
+    await fetch(path, {
+      method: "PUT",
+      credentials: "include",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
 // ── Typed views of the hub payloads we consume in D0 ────────────────────────
 
 export interface Me {
@@ -247,6 +259,22 @@ export interface SsoStatus {
   scim_groups: number;
 }
 
+export interface SourceConfig {
+  repo_id: string;
+  source_template: string | null;
+  source_raw_template: string | null;
+  token_configured: boolean;
+}
+
+export interface SourceUpdate {
+  template?: string | null;
+  raw_template?: string | null;
+  /** Non-empty sets the proxy token; omit to preserve the existing one. */
+  token?: string;
+  /** Remove any stored proxy token. */
+  clear_token?: boolean;
+}
+
 const org = (o: string) => encodeURIComponent(o);
 
 export const api = {
@@ -266,7 +294,24 @@ export const api = {
       files: AttrFile[];
       source_template: string | null;
       source_raw_template: string | null;
+      source_proxy: boolean;
     }>(`/v1/orgs/${org(o)}/repos/${encodeURIComponent(repo)}/attributions`),
+  // Source connection (A12, admin): read the current config (token never
+  // returned — only `token_configured`), set/update it, or fetch a file's raw
+  // bytes through the hub's proxy for private repos.
+  getSource: (o: string, repo: string) =>
+    request<SourceConfig>(
+      `/v1/orgs/${org(o)}/repos/${encodeURIComponent(repo)}/source`,
+    ),
+  setSource: (o: string, repo: string, body: SourceUpdate) =>
+    put<SourceConfig>(
+      `/v1/orgs/${org(o)}/repos/${encodeURIComponent(repo)}/source`,
+      body,
+    ),
+  blob: (o: string, repo: string, path: string) =>
+    request<{ path: string; content: string }>(
+      `/v1/orgs/${org(o)}/repos/${encodeURIComponent(repo)}/blob?path=${encodeURIComponent(path)}`,
+    ),
   sessions: (o: string, repo?: string) =>
     request<{ sessions: SessionSummary[] }>(
       `/v1/orgs/${org(o)}/sessions${repo ? `?repo=${encodeURIComponent(repo)}` : ""}`,

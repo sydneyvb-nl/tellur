@@ -20,6 +20,7 @@ pub mod oidc;
 pub mod ratelimit;
 pub mod review;
 pub mod scim;
+pub mod source;
 pub mod storage;
 
 pub use app::{AppState, build_router};

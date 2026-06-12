@@ -877,12 +877,15 @@ pub async fn list_attributions(
         "files": files,
         "source_template": source.link,
         "source_raw_template": source.raw,
+        // When a proxy token is configured the repo is private: the browser must
+        // fetch raw bytes through the hub's blob endpoint, not direct.
+        "source_proxy": source.token.is_some(),
     }))
     .map(Json)
     .map_err(|e| ServerError::Internal(e.into()))
 }
 
-/// Body for setting a repo's source templates (A12).
+/// Body for setting a repo's source connection (A12).
 #[derive(Debug, Deserialize)]
 pub struct SourceTemplateBody {
     /// Provider web-view template, `https://…` with `{path}`/`{start}`/`{end}`
@@ -894,11 +897,20 @@ pub struct SourceTemplateBody {
     /// clears it. Only templates are stored — never source code.
     #[serde(default)]
     pub raw_template: Option<String>,
+    /// Provider access token for the private-repo proxy. When non-empty it is
+    /// stored; absent/empty preserves the existing token (so editing templates
+    /// doesn't require re-entering the secret). Set `clear_token` to remove it.
+    #[serde(default)]
+    pub token: Option<String>,
+    /// Remove any stored provider token.
+    #[serde(default)]
+    pub clear_token: bool,
 }
 
 /// `PUT /v1/orgs/{org}/repos/{repo}/source` — set or clear the opt-in source
-/// templates (admin only, A12). Each must be an `https://` URL so the file view
-/// can safely render the link / fetch raw bytes client-side.
+/// connection (admin only, A12). Each template must be an `https://` URL so the
+/// file view can safely render the link / fetch raw bytes. The optional token
+/// (for the private-repo proxy) is stored but never returned.
 pub async fn set_repo_source(
     State(state): State<AppState>,
     Path((org_id, repo)): Path<(String, String)>,
@@ -928,9 +940,39 @@ pub async fn set_repo_source(
     };
     let link = validate(&body.template)?;
     let raw = validate(&body.raw_template)?;
+    // Token semantics: clear › set (non-empty) › preserve existing.
+    let token_state;
+    let token: Option<String> = if body.clear_token {
+        token_state = "cleared";
+        None
+    } else if let Some(t) = body
+        .token
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    {
+        if t.len() > 4096 {
+            return Err(ServerError::BadRequest("token too long".into()));
+        }
+        token_state = "set";
+        Some(t.to_string())
+    } else {
+        token_state = "unchanged";
+        state
+            .store
+            .get_repo_source(&org_id, &repo.id)
+            .map_err(ServerError::Internal)?
+            .token
+    };
     state
         .store
-        .set_repo_source(&org_id, &repo.id, link.as_deref(), raw.as_deref())
+        .set_repo_source(
+            &org_id,
+            &repo.id,
+            link.as_deref(),
+            raw.as_deref(),
+            token.as_deref(),
+        )
         .map_err(ServerError::Internal)?;
     state
         .store
@@ -938,8 +980,9 @@ pub async fn set_repo_source(
             org_id: Some(org_id),
             actor_member_id: Some(principal.member_id.clone()),
             action: "repo.source.set".to_string(),
+            // Never log the token value — only its state transition.
             detail: format!(
-                "repo={} link={} raw={}",
+                "repo={} link={} raw={} token={token_state}",
                 repo.id,
                 if link.is_some() { "set" } else { "cleared" },
                 if raw.is_some() { "set" } else { "cleared" }
@@ -950,7 +993,75 @@ pub async fn set_repo_source(
         "repo_id": repo.id,
         "source_template": link,
         "source_raw_template": raw,
+        "token_configured": token.is_some(),
     })))
+}
+
+/// `GET /v1/orgs/{org}/repos/{repo}/source` — read a repo's source connection for
+/// the admin settings form (admin only). Returns the templates and whether a
+/// proxy token is configured — never the token itself.
+pub async fn get_repo_source(
+    State(state): State<AppState>,
+    Path((org_id, repo)): Path<(String, String)>,
+    principal: Principal,
+) -> Result<Json<Value>, ServerError> {
+    ensure_org_role(&state, &principal, &org_id, Role::Admin, "repo.source.get")?;
+    let repo = state
+        .store
+        .find_repo(&org_id, &repo)
+        .map_err(ServerError::Internal)?
+        .ok_or(ServerError::NotFound)?;
+    let source = state
+        .store
+        .get_repo_source(&org_id, &repo.id)
+        .map_err(ServerError::Internal)?;
+    Ok(Json(json!({
+        "repo_id": repo.id,
+        "source_template": source.link,
+        "source_raw_template": source.raw,
+        "token_configured": source.token.is_some(),
+    })))
+}
+
+/// Query for the source blob proxy.
+#[derive(Debug, Deserialize)]
+pub struct BlobQuery {
+    pub path: String,
+}
+
+/// `GET /v1/orgs/{org}/repos/{repo}/blob?path=` — proxy raw file bytes from the
+/// repo's configured provider (viewer+, A12). For **private** repos whose source
+/// the browser can't fetch cross-origin: the hub fetches with the stored token,
+/// SSRF-guarded against a host allowlist, size-capped. The token never leaves the
+/// hub; the bytes are the org's own source returned to org members.
+pub async fn source_blob(
+    State(state): State<AppState>,
+    Path((org_id, repo)): Path<(String, String)>,
+    principal: Principal,
+    Query(q): Query<BlobQuery>,
+) -> Result<Json<Value>, ServerError> {
+    ensure_same_org(&state, &principal, &org_id, "repo.source.blob")?;
+    if !state.rate_limiter.check(&principal.member_id) {
+        return Err(ServerError::TooManyRequests);
+    }
+    let repo = state
+        .store
+        .find_repo(&org_id, &repo)
+        .map_err(ServerError::Internal)?
+        .ok_or(ServerError::NotFound)?;
+    let source = state
+        .store
+        .get_repo_source(&org_id, &repo.id)
+        .map_err(ServerError::Internal)?;
+    let raw_template = source
+        .raw
+        .ok_or_else(|| ServerError::BadRequest("no source raw template configured".into()))?;
+    // Build + allowlist-check the URL before any network call (SSRF guard).
+    let url = crate::source::resolve_raw_url(&raw_template, &q.path)
+        .map_err(|e| ServerError::BadRequest(e.to_string()))?;
+    let content =
+        run_blocking(move || crate::source::fetch_blob(&url, source.token.as_deref())).await?;
+    Ok(Json(json!({ "path": q.path, "content": content })))
 }
 
 /// Query for the sessions list.

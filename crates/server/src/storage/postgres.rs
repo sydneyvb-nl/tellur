@@ -146,7 +146,8 @@ impl Store for PostgresStore {
                  CREATE TABLE IF NOT EXISTS repo_source (
                      repo_id TEXT PRIMARY KEY REFERENCES repo(id),
                      org_id TEXT NOT NULL REFERENCES org(id),
-                     template TEXT, raw_template TEXT, updated_at TEXT NOT NULL
+                     template TEXT, raw_template TEXT, source_token TEXT,
+                     updated_at TEXT NOT NULL
                  );
                  CREATE TABLE IF NOT EXISTS repo_role (
                      org_id TEXT NOT NULL REFERENCES org(id),
@@ -220,6 +221,7 @@ impl Store for PostgresStore {
                 "ALTER TABLE audit_head ADD COLUMN IF NOT EXISTS sealed_hash TEXT NOT NULL DEFAULT '';
                  ALTER TABLE audit_head ADD COLUMN IF NOT EXISTS sealed_count BIGINT NOT NULL DEFAULT 0;
                  ALTER TABLE repo_source ADD COLUMN IF NOT EXISTS raw_template TEXT;
+                 ALTER TABLE repo_source ADD COLUMN IF NOT EXISTS source_token TEXT;
                  ALTER TABLE repo_source ALTER COLUMN template DROP NOT NULL;
                  ALTER TABLE job ADD COLUMN IF NOT EXISTS params TEXT;
                  ALTER TABLE member ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
@@ -365,13 +367,15 @@ impl Store for PostgresStore {
 
     fn get_repo_source(&self, org_id: &str, repo_id: &str) -> Result<RepoSource> {
         let row = self.client()?.query_opt(
-            "SELECT template, raw_template FROM repo_source WHERE org_id = $1 AND repo_id = $2",
+            "SELECT template, raw_template, source_token FROM repo_source
+             WHERE org_id = $1 AND repo_id = $2",
             &[&org_id, &repo_id],
         )?;
         Ok(row
             .map(|r| RepoSource {
                 link: r.get(0),
                 raw: r.get(1),
+                token: r.get(2),
             })
             .unwrap_or_default())
     }
@@ -382,8 +386,9 @@ impl Store for PostgresStore {
         repo_id: &str,
         link: Option<&str>,
         raw: Option<&str>,
+        token: Option<&str>,
     ) -> Result<()> {
-        if link.is_none() && raw.is_none() {
+        if link.is_none() && raw.is_none() && token.is_none() {
             self.client()?.execute(
                 "DELETE FROM repo_source WHERE org_id = $1 AND repo_id = $2",
                 &[&org_id, &repo_id],
@@ -391,12 +396,13 @@ impl Store for PostgresStore {
         } else {
             let now = chrono::Utc::now().to_rfc3339();
             self.client()?.execute(
-                "INSERT INTO repo_source (repo_id, org_id, template, raw_template, updated_at)
-                 VALUES ($1, $2, $3, $4, $5)
+                "INSERT INTO repo_source (repo_id, org_id, template, raw_template, source_token, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6)
                  ON CONFLICT (repo_id) DO UPDATE SET template = excluded.template,
                                                      raw_template = excluded.raw_template,
+                                                     source_token = excluded.source_token,
                                                      updated_at = excluded.updated_at",
-                &[&repo_id, &org_id, &link, &raw, &now],
+                &[&repo_id, &org_id, &link, &raw, &token, &now],
             )?;
         }
         Ok(())

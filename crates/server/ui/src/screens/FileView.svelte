@@ -10,6 +10,9 @@
   let file = $state<AttrFile | null>(null);
   let sourceTemplate = $state<string | null>(null);
   let rawTemplate = $state<string | null>(null);
+  // When set, the repo is private: fetch raw bytes through the hub's proxy
+  // (same-origin, session-authed) instead of directly from the provider.
+  let sourceProxy = $state(false);
   let error = $state<string | null>(null);
   let loading = $state(true);
   let reloadKey = $state(0);
@@ -43,6 +46,7 @@
         file = res.files.find((f) => f.file_path === p) ?? null;
         sourceTemplate = res.source_template;
         rawTemplate = res.source_raw_template;
+        sourceProxy = res.source_proxy;
       })
       .catch((e) => {
         if (!cancelled) error = e instanceof Error ? e.message : t("app.failed");
@@ -62,22 +66,30 @@
   async function toggleSource() {
     showSource = !showSource;
     if (!showSource || sourceText || sourceError || sourceLoading) return;
-    const url = file ? rawUrl(rawTemplate, file.file_path) : null;
-    if (!url) {
-      sourceError = t("fileView.noRawUrl");
-      return;
-    }
+    if (!file) return;
     sourceLoading = true;
     try {
-      // No credentials: this is a plain cross-origin GET to the provider, exactly
-      // as the user's browser would do — nothing flows through the hub.
-      const res = await fetch(url, { credentials: "omit" });
-      if (!res.ok) throw new Error(`provider returned ${res.status}`);
-      const len = Number(res.headers.get("content-length") ?? "0");
-      if (len > MAX_SOURCE_BYTES) throw new Error(t("fileView.tooLarge"));
-      const text = await res.text();
-      if (text.length > MAX_SOURCE_BYTES) throw new Error(t("fileView.tooLarge"));
-      sourceText = text;
+      if (sourceProxy) {
+        // Private repo: the hub fetches the bytes for us (it holds the token).
+        const res = await api.blob(org, repo, file.file_path);
+        if (res.content.length > MAX_SOURCE_BYTES) throw new Error(t("fileView.tooLarge"));
+        sourceText = res.content;
+      } else {
+        const url = rawUrl(rawTemplate, file.file_path);
+        if (!url) {
+          sourceError = t("fileView.noRawUrl");
+          return;
+        }
+        // No credentials: a plain cross-origin GET to the provider, exactly as
+        // the user's browser would do — nothing flows through the hub.
+        const res = await fetch(url, { credentials: "omit" });
+        if (!res.ok) throw new Error(`provider returned ${res.status}`);
+        const len = Number(res.headers.get("content-length") ?? "0");
+        if (len > MAX_SOURCE_BYTES) throw new Error(t("fileView.tooLarge"));
+        const text = await res.text();
+        if (text.length > MAX_SOURCE_BYTES) throw new Error(t("fileView.tooLarge"));
+        sourceText = text;
+      }
     } catch (e) {
       // Cross-origin/private repos may block the fetch — fall back to links.
       sourceError = e instanceof Error ? e.message : t("app.failed");
@@ -120,7 +132,9 @@
       <button class="toggle" onclick={toggleSource}>
         {showSource ? t("fileView.hideSource") : t("fileView.showSource")}
       </button>
-      <span class="muted small">{t("fileView.fetchedNote")}</span>
+      <span class="muted small">
+        {sourceProxy ? t("fileView.fetchedNoteProxy") : t("fileView.fetchedNote")}
+      </span>
     </div>
   {/if}
 

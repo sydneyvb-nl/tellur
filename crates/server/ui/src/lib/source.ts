@@ -8,6 +8,49 @@ export interface RangeRef {
   end: number;
 }
 
+export type Provider = "github" | "gitlab" | "bitbucket";
+
+export interface BuiltTemplates {
+  link: string;
+  raw: string;
+}
+
+/**
+ * Generate `link` + `raw` source templates from a provider + `owner/repo` slug +
+ * branch, so an admin connects a repo without hand-writing template syntax. For
+ * a private GitHub repo the raw template targets the authenticated contents API
+ * (proxied + tokened server-side); the others target the public raw host. The
+ * `{path}`/`{start}`/`{end}` placeholders are filled in later, per range.
+ */
+export function buildTemplates(
+  provider: Provider,
+  slug: string,
+  branch: string,
+  isPrivate: boolean,
+): BuiltTemplates {
+  const s = slug.trim().replace(/^\/+|\/+$/g, "");
+  const b = branch.trim() || "main";
+  switch (provider) {
+    case "github":
+      return {
+        link: `https://github.com/${s}/blob/${b}/{path}#L{start}-L{end}`,
+        raw: isPrivate
+          ? `https://api.github.com/repos/${s}/contents/{path}?ref=${b}`
+          : `https://raw.githubusercontent.com/${s}/${b}/{path}`,
+      };
+    case "gitlab":
+      return {
+        link: `https://gitlab.com/${s}/-/blob/${b}/{path}#L{start}-{end}`,
+        raw: `https://gitlab.com/${s}/-/raw/${b}/{path}`,
+      };
+    case "bitbucket":
+      return {
+        link: `https://bitbucket.org/${s}/src/${b}/{path}#lines-{start}:{end}`,
+        raw: `https://bitbucket.org/${s}/raw/${b}/{path}`,
+      };
+  }
+}
+
 /**
  * Substitute `{path}` / `{start}` / `{end}` in `template`. The path is
  * URL-encoded per segment (slashes preserved) so filenames containing `#`, `?`

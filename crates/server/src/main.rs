@@ -95,6 +95,27 @@ enum AdminAction {
         #[arg(long)]
         repo: String,
     },
+    /// Connect a repo to its source provider (A12) — set deep-link / raw
+    /// templates and an optional token for the private-repo proxy.
+    SetRepoSource {
+        #[arg(long)]
+        org: String,
+        /// Repo id or name.
+        #[arg(long)]
+        repo: String,
+        /// Web-view deep-link template (https://…/{path}#L{start}-L{end}).
+        #[arg(long)]
+        link: Option<String>,
+        /// Raw-bytes template (https://…/{path}) for the inline gutter.
+        #[arg(long)]
+        raw: Option<String>,
+        /// Provider access token for the private-repo proxy (stored, not logged).
+        #[arg(long)]
+        token: Option<String>,
+        /// Remove the entire source connection for this repo.
+        #[arg(long)]
+        clear: bool,
+    },
 }
 
 #[tokio::main]
@@ -251,6 +272,71 @@ fn run_admin(config: Config, action: AdminAction) -> Result<()> {
                     );
                 }
             }
+        }
+        AdminAction::SetRepoSource {
+            org,
+            repo,
+            link,
+            raw,
+            token,
+            clear,
+        } => {
+            let repo = store
+                .find_repo(&org, &repo)?
+                .ok_or_else(|| anyhow::anyhow!("repo {repo} not found in org {org}"))?;
+            let validate = |t: &Option<String>| -> anyhow::Result<Option<String>> {
+                match t.as_deref().map(str::trim) {
+                    Some("") | None => Ok(None),
+                    Some(v) if v.starts_with("https://") && v.len() <= 2048 => {
+                        Ok(Some(v.to_string()))
+                    }
+                    Some(_) => anyhow::bail!("templates must be https:// URLs under 2048 chars"),
+                }
+            };
+            let (link, raw, token) = if clear {
+                (None, None, None)
+            } else {
+                // Preserve an existing token when --token is omitted (matches the
+                // API: editing templates shouldn't require re-entering the secret).
+                let tok = token
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty())
+                    .map(str::to_string)
+                    .or_else(|| {
+                        store
+                            .get_repo_source(&org, &repo.id)
+                            .ok()
+                            .and_then(|s| s.token)
+                    });
+                (validate(&link)?, validate(&raw)?, tok)
+            };
+            store.set_repo_source(
+                &org,
+                &repo.id,
+                link.as_deref(),
+                raw.as_deref(),
+                token.as_deref(),
+            )?;
+            store.append_audit(&AuditEntry {
+                org_id: Some(org),
+                actor_member_id: None,
+                action: "repo.source.set".to_string(),
+                detail: format!(
+                    "repo={} link={} raw={} token={} via=admin-cli",
+                    repo.id,
+                    if link.is_some() { "set" } else { "cleared" },
+                    if raw.is_some() { "set" } else { "cleared" },
+                    if token.is_some() { "set" } else { "cleared" }
+                ),
+            })?;
+            println!(
+                "Source connection for repo {} — link={} raw={} token={}",
+                repo.id,
+                if link.is_some() { "set" } else { "—" },
+                if raw.is_some() { "set" } else { "—" },
+                if token.is_some() { "set" } else { "—" }
+            );
         }
     }
     Ok(())

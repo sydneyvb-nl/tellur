@@ -165,20 +165,23 @@ fn full_store_surface() {
             &repo.id,
             Some("https://h/{path}"),
             Some("https://raw/{path}"),
+            Some("ghp_secret"),
         )
         .unwrap();
     let s1 = store.get_repo_source(&org_a.id, &repo.id).unwrap();
     assert_eq!(s1.link.as_deref(), Some("https://h/{path}"));
     assert_eq!(s1.raw.as_deref(), Some("https://raw/{path}"));
-    // Upsert can set just one field (clearing the other); both None removes.
+    assert_eq!(s1.token.as_deref(), Some("ghp_secret"));
+    // Upsert can set just one field (clearing the others); all None removes.
     store
-        .set_repo_source(&org_a.id, &repo.id, Some("https://h2/{path}"), None)
+        .set_repo_source(&org_a.id, &repo.id, Some("https://h2/{path}"), None, None)
         .unwrap();
     let s2 = store.get_repo_source(&org_a.id, &repo.id).unwrap();
     assert_eq!(s2.link.as_deref(), Some("https://h2/{path}"));
     assert!(s2.raw.is_none());
+    assert!(s2.token.is_none());
     store
-        .set_repo_source(&org_a.id, &repo.id, None, None)
+        .set_repo_source(&org_a.id, &repo.id, None, None, None)
         .unwrap();
     assert!(
         store

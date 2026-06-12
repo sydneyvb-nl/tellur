@@ -19,7 +19,7 @@ use super::{
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
-const SCHEMA_VERSION: &str = "18";
+const SCHEMA_VERSION: &str = "19";
 
 /// A SQLite-backed store. The connection is behind a `Mutex` so the store is
 /// `Send + Sync` and usable as `Arc<dyn Store>`.
@@ -245,6 +245,7 @@ impl Store for SqliteStore {
                  org_id       TEXT NOT NULL REFERENCES org(id),
                  template     TEXT,
                  raw_template TEXT,
+                 source_token TEXT,
                  updated_at   TEXT NOT NULL
              );
              CREATE TABLE IF NOT EXISTS repo_role (
@@ -385,6 +386,9 @@ impl Store for SqliteStore {
                  ALTER TABLE repo_source_new RENAME TO repo_source;",
             )?;
         }
+        // v19: optional provider token for the private-repo blob proxy (A12).
+        // After the rebuild above, so the column survives that narrow upgrade.
+        ensure_column(&conn, "repo_source", "source_token", "TEXT")?;
         ensure_column(
             &conn,
             "audit_head",
@@ -574,13 +578,14 @@ impl Store for SqliteStore {
         let conn = self.conn()?;
         let row = conn
             .query_row(
-                "SELECT template, raw_template FROM repo_source
+                "SELECT template, raw_template, source_token FROM repo_source
                  WHERE org_id = ?1 AND repo_id = ?2",
                 params![org_id, repo_id],
                 |r| {
                     Ok(RepoSource {
                         link: r.get::<_, Option<String>>(0)?,
                         raw: r.get::<_, Option<String>>(1)?,
+                        token: r.get::<_, Option<String>>(2)?,
                     })
                 },
             )
@@ -594,9 +599,10 @@ impl Store for SqliteStore {
         repo_id: &str,
         link: Option<&str>,
         raw: Option<&str>,
+        token: Option<&str>,
     ) -> Result<()> {
         let conn = self.conn()?;
-        if link.is_none() && raw.is_none() {
+        if link.is_none() && raw.is_none() && token.is_none() {
             conn.execute(
                 "DELETE FROM repo_source WHERE org_id = ?1 AND repo_id = ?2",
                 params![org_id, repo_id],
@@ -604,12 +610,13 @@ impl Store for SqliteStore {
         } else {
             let now = chrono::Utc::now().to_rfc3339();
             conn.execute(
-                "INSERT INTO repo_source (repo_id, org_id, template, raw_template, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
+                "INSERT INTO repo_source (repo_id, org_id, template, raw_template, source_token, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                  ON CONFLICT(repo_id) DO UPDATE SET template = excluded.template,
                                                     raw_template = excluded.raw_template,
+                                                    source_token = excluded.source_token,
                                                     updated_at = excluded.updated_at",
-                params![repo_id, org_id, link, raw, now],
+                params![repo_id, org_id, link, raw, token, now],
             )?;
         }
         Ok(())

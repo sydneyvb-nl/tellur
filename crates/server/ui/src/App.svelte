@@ -64,7 +64,7 @@
     {:else if route && route.name === "repos"}
       <Repos org={route.org} />
     {:else if route && route.name === "repo"}
-      <RepoDetail org={route.org} repo={route.repo} />
+      <RepoDetail org={route.org} repo={route.repo} role={me.role} />
     {:else if route && route.name === "file"}
       <FileView org={route.org} repo={route.repo} path={route.path} />
     {:else if route && route.name === "sessions"}
