@@ -216,6 +216,35 @@ pub fn ingest_events(
     Ok(accepted)
 }
 
+/// POST a batch of line-level file attributions to the hub. Returns the number
+/// accepted. The hub upserts per file, so re-pushing the same files is
+/// idempotent (it overwrites with the current attribution state).
+pub fn ingest_attributions(
+    hub: &str,
+    token: &str,
+    org: &str,
+    repo: &str,
+    files: &[serde_json::Value],
+) -> Result<usize> {
+    let url = format!(
+        "{}/v1/orgs/{}/repos/{}/attributions",
+        normalize_host(hub),
+        encode_segment(org),
+        encode_segment(repo)
+    );
+    let resp = ureq::post(&url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .send_json(serde_json::json!({ "attributions": files }))
+        .map_err(map_transport)?;
+    let body: serde_json::Value = resp.into_json().unwrap_or(serde_json::json!({}));
+    let accepted = body
+        .get("files")
+        .and_then(|v| v.as_u64())
+        .map(|n| n as usize)
+        .unwrap_or(files.len());
+    Ok(accepted)
+}
+
 /// Turn a ureq transport/status error into a readable message (ureq embeds the
 /// whole response in its Debug, which is noisy for users).
 fn map_transport(e: ureq::Error) -> anyhow::Error {

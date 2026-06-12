@@ -26,7 +26,9 @@ use tellur_core::capture::{
     CaptureContext, capture_working_changes, capture_working_changes_for_paths,
 };
 use tellur_core::policy::PolicyEngine;
-use tellur_core::schema::types::{Actor, AgentInfo, EventActor, ModelInfo, Session};
+use tellur_core::schema::types::{
+    Actor, AgentInfo, EventActor, FileAttribution, ModelInfo, Session,
+};
 use tellur_core::storage::{EventWriter, RepoStorage, TraceIndex};
 
 #[derive(Parser)]
@@ -832,6 +834,63 @@ mod tests {
         assert_eq!(hub::normalize_host("https://h.test"), "https://h.test");
     }
 
+    #[test]
+    fn read_local_attributions_groups_ranges_and_preserves_ai_origin() {
+        use tellur_core::schema::types::{
+            AttributionRange, AttributionState, EvidenceStrength, Origin,
+        };
+        let tmp = std::env::temp_dir().join(format!(
+            "tellur-attr-test-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(tmp.join(".git")).unwrap();
+        let storage = RepoStorage::from_git_root(&tmp).unwrap();
+        storage.init().unwrap();
+
+        // No index yet → empty (a brand-new repo must not error).
+        std::fs::remove_file(&storage.index_path).ok();
+        assert!(read_local_attributions(&storage).unwrap().is_empty());
+
+        let range = AttributionRange {
+            range_id: "r1".into(),
+            start_line: 1,
+            end_line: 10,
+            origin: Origin::Ai,
+            evidence_strength: EvidenceStrength::Recorded,
+            confidence: 0.9,
+            state: AttributionState::Exact,
+            session_id: "s1".into(),
+            event_ids: vec![],
+            agent_id: "claude".into(),
+            model_id: None,
+            prompt_hash: None,
+            context_set_id: None,
+            policy_tags: vec![],
+            risk_tags: vec![],
+            risk_level: None,
+            tests_run: vec![],
+            tests_passed: false,
+            reviewer: None,
+            reviewed_at: None,
+        };
+        {
+            let index = TraceIndex::open(&storage.index_path).unwrap();
+            index
+                .index_attribution(&range, "src/a.rs", "blob123", "2026-06-12T00:00:00Z")
+                .unwrap();
+        }
+
+        let files = read_local_attributions(&storage).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0]["file_path"], "src/a.rs");
+        assert_eq!(files[0]["git_blob_sha"], "blob123");
+        assert_eq!(files[0]["ranges"][0]["origin"], "ai");
+        assert_eq!(files[0]["ranges"][0]["start_line"], 1);
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
     #[cfg(unix)]
     #[test]
     fn executable_detection_requires_execute_bit_on_unix() {
@@ -1377,23 +1436,24 @@ fn cmd_push(
     let start = push_start_index(&ids, last_pushed, reset)?;
 
     let to_send = &events[start..];
-    if to_send.is_empty() {
-        println!("Already up to date — {} event(s) on the hub.", events.len());
-        return Ok(());
-    }
+
+    // Line-level attribution is a current-state projection (latest ranges per
+    // file), so push the full local snapshot every run — the hub upserts per
+    // file, so it's idempotent. This is what drives the AI-share / AI-lines
+    // metrics; without it the dashboard shows 0 AI even though events arrived.
+    let attr_files = read_local_attributions(&storage)?;
 
     if dry_run {
         println!(
-            "Would push {} event(s) to {hub_url}\n  org {org} · repo {repo}",
-            to_send.len()
+            "Would push {} new event(s) and {} attributed file(s) to {hub_url}\n  org {org} · repo {repo}",
+            to_send.len(),
+            attr_files.len()
         );
-        println!(
-            "  first: {} ({})\n  last:  {} ({})",
-            to_send.first().unwrap().event_type.as_wire(),
-            to_send.first().unwrap().timestamp,
-            to_send.last().unwrap().event_type.as_wire(),
-            to_send.last().unwrap().timestamp,
-        );
+        return Ok(());
+    }
+
+    if to_send.is_empty() && attr_files.is_empty() {
+        println!("Already up to date — nothing to push.");
         return Ok(());
     }
 
@@ -1428,8 +1488,60 @@ fn cmd_push(
         save_push_state(&storage, &state)?;
     }
 
-    println!("✓ Pushed {pushed} event(s) to {hub_url}\n  org {org} · repo {repo}");
+    // Push the attribution snapshot (idempotent upsert; no high-water mark).
+    let mut pushed_files = 0usize;
+    for chunk in attr_files.chunks(CHUNK) {
+        pushed_files += hub::ingest_attributions(&hub_url, &token, &org, &repo, chunk)
+            .with_context(|| format!("failed pushing {} attributed files", chunk.len()))?;
+    }
+
+    println!(
+        "✓ Pushed {pushed} event(s) and {pushed_files} attributed file(s) to {hub_url}\n  org {org} · repo {repo}"
+    );
+    if pushed_files == 0 {
+        println!(
+            "  note: no line-level attribution found locally — AI-share metrics need \
+             attribution, which `tellur watch`/agent hooks produce. Check `tellur blame <file>`."
+        );
+    }
     Ok(())
+}
+
+/// Read the local attribution index and group it into the hub's wire shape
+/// (`FileAttribution` per file). Empty when the index does not exist yet.
+fn read_local_attributions(storage: &RepoStorage) -> Result<Vec<serde_json::Value>> {
+    if !storage.index_path.exists() {
+        return Ok(Vec::new());
+    }
+    let index = TraceIndex::open(&storage.index_path)?;
+    let rows = index.list_attributions()?;
+    // Group ranges by file, keeping the latest blob sha seen for each.
+    let mut by_file: std::collections::BTreeMap<
+        String,
+        (String, Vec<tellur_core::schema::types::AttributionRange>),
+    > = std::collections::BTreeMap::new();
+    for ia in rows {
+        let entry = by_file
+            .entry(ia.file_path)
+            .or_insert_with(|| (ia.git_blob_sha.clone(), Vec::new()));
+        entry.0 = ia.git_blob_sha;
+        entry.1.push(ia.range);
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let files = by_file
+        .into_iter()
+        .map(|(file_path, (git_blob_sha, ranges))| {
+            serde_json::to_value(FileAttribution {
+                schema: "tellur.attribution.v1".to_string(),
+                file_path,
+                git_blob_sha,
+                ranges,
+                updated_at: now.clone(),
+            })
+            .expect("FileAttribution serializes")
+        })
+        .collect();
+    Ok(files)
 }
 
 fn cmd_policy_explain(rule_id: Option<&str>) -> Result<()> {
