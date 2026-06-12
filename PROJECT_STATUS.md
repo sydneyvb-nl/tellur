@@ -1,10 +1,23 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-12 (A12 source connection: dashboard settings + private-repo blob proxy; on feature branch)
+**Last updated:** 2026-06-12 (proposal: zero-touch provenance + GitHub App; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
+
+> **2026-06-12 — Proposal: zero-touch provenance + GitHub App.** On branch
+> `docs/github-app-proposal`. Design doc `docs/proposals/GITHUB_APP.md` (no code).
+> Product principle "after one-time install the developer never touches the
+> terminal": a `tellur connect` umbrella installing git hooks (`post-commit`
+> notes, `pre-push` flush) + a background pusher + auto `refs/notes/ai` push (Part
+> A, provider-agnostic), and an optional GitHub App (Part B: installation-token
+> source access replacing the stored PAT, repo discovery, a `push`-webhook
+> **notes harvester** syncing commit-level attribution GitHub→hub, PR-check runs).
+> Includes the data-location ground truth (traces/index are gitignored → only
+> commit-level notes reach git, so the App harvests that slice + serves source,
+> never the rich stream) and threat-model deltas (inbound webhook HMAC, App
+> key/webhook secret, notes-push privacy). Order: P1 zero-touch client first.
 
 > **2026-06-12 — A12 source connection: dashboard UX + private-repo blob proxy.**
 > On branch `feat/source-connection`. Two parts. **(1) Settings UX:** an admin
