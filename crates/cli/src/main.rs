@@ -830,19 +830,37 @@ mod tests {
 
     #[test]
     fn prompt_excerpt_redacts_secrets_and_truncates() {
-        // Secrets are stripped from the stored preview.
-        let red = prompt_excerpt("deploy with token=ghp_0123456789012345678901234567890123456789");
+        use tellur_core::redaction::RedactionEngine;
+        let engine = RedactionEngine::default_engine();
+        // Default secret patterns are stripped from the stored preview.
+        let red = prompt_excerpt(
+            &engine,
+            "deploy with token=ghp_0123456789012345678901234567890123456789",
+        );
         assert!(!red.contains("ghp_0123456789"), "secret must be redacted");
         // Short prompts pass through (trimmed).
         assert_eq!(
-            prompt_excerpt("  refactor the parser  "),
+            prompt_excerpt(&engine, "  refactor the parser  "),
             "refactor the parser"
         );
         // Long prompts are truncated with an ellipsis.
         let long = "a".repeat(PROMPT_EXCERPT_MAX + 50);
-        let ex = prompt_excerpt(&long);
+        let ex = prompt_excerpt(&engine, &long);
         assert!(ex.ends_with('…'));
         assert_eq!(ex.chars().count(), PROMPT_EXCERPT_MAX + 1);
+    }
+
+    #[test]
+    fn prompt_excerpt_honours_repo_custom_redact_patterns() {
+        use tellur_core::redaction::{RedactionConfig, RedactionEngine};
+        // A project-specific pattern (not in the defaults) must still be applied.
+        let cfg = RedactionConfig {
+            redact_patterns: vec![r"ACME-[0-9]{4}".to_string()],
+            ..RedactionConfig::default()
+        };
+        let engine = RedactionEngine::new(cfg);
+        let red = prompt_excerpt(&engine, "the deploy key is ACME-4242 keep it safe");
+        assert!(!red.contains("ACME-4242"), "custom secret must be redacted");
     }
 
     #[test]
@@ -2080,30 +2098,45 @@ fn cmd_gc(dry_run: bool) -> Result<()> {
     Ok(())
 }
 
-/// Read `redaction.store_prompt_excerpt` from `.tellur/config.yml` (default
-/// `false` — prompts are hashed, not stored, unless a repo opts in).
-fn read_store_prompt_excerpt(storage: &RepoStorage) -> bool {
-    let Ok(content) = std::fs::read_to_string(&storage.config_path) else {
-        return false;
-    };
-    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&content) else {
-        return false;
-    };
-    value
-        .get("redaction")
-        .and_then(|r| r.get("store_prompt_excerpt"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
+/// Read the `redaction:` block from `.tellur/config.yml`, falling back to the
+/// defaults when it is absent or unparseable.
+fn read_redaction_config(storage: &RepoStorage) -> tellur_core::redaction::RedactionConfig {
+    std::fs::read_to_string(&storage.config_path)
+        .ok()
+        .and_then(|c| serde_yaml::from_str::<serde_yaml::Value>(&c).ok())
+        .and_then(|v| v.get("redaction").cloned())
+        .and_then(|r| serde_yaml::from_value(r).ok())
+        .unwrap_or_default()
+}
+
+/// A redaction engine for prompt excerpts built from the repo's own config — or
+/// `None` when the repo hasn't opted into `store_prompt_excerpt`. The repo's
+/// project-specific `redact_patterns` are honoured, **and** the built-in default
+/// secret patterns are always added, so a custom secret in a prompt is stripped
+/// before it is ever stored or pushed.
+fn prompt_redaction_engine(
+    storage: &RepoStorage,
+) -> Option<tellur_core::redaction::RedactionEngine> {
+    use tellur_core::redaction::{RedactionConfig, RedactionEngine};
+    let mut cfg = read_redaction_config(storage);
+    if !cfg.store_prompt_excerpt {
+        return None;
+    }
+    for p in RedactionConfig::default().redact_patterns {
+        if !cfg.redact_patterns.contains(&p) {
+            cfg.redact_patterns.push(p);
+        }
+    }
+    Some(RedactionEngine::new(cfg))
 }
 
 /// Maximum characters kept of a prompt excerpt (the rest is elided).
 const PROMPT_EXCERPT_MAX: usize = 600;
 
-/// Build a secret-redacted, length-bounded excerpt of a prompt for storage when
-/// the repo has opted in. Secrets are stripped first, then it is truncated on a
-/// char boundary with an ellipsis so it stays a safe, compact preview.
-fn prompt_excerpt(text: &str) -> String {
-    let engine = tellur_core::redaction::RedactionEngine::default_engine();
+/// Build a secret-redacted, length-bounded excerpt of a prompt for storage.
+/// Secrets are stripped first (using the repo's redaction rules), then it is
+/// truncated on a char boundary with an ellipsis so it stays a compact preview.
+fn prompt_excerpt(engine: &tellur_core::redaction::RedactionEngine, text: &str) -> String {
     let cleaned = engine
         .scan_and_redact(text)
         .redacted_content
@@ -4319,9 +4352,10 @@ fn cmd_hooks_ingest(source: &str, auto_init: bool, json_response: bool) -> Resul
                     serde_json::Value::String(tellur_core::schema::ids::hash_content(prompt));
                 // Opt-in (`redaction.store_prompt_excerpt`): keep a redacted,
                 // length-bounded preview so the timeline can show what was asked.
-                if read_store_prompt_excerpt(&storage) {
+                // Redaction uses the repo's own rules (+ defaults).
+                if let Some(engine) = prompt_redaction_engine(&storage) {
                     event_payload["prompt_excerpt"] =
-                        serde_json::Value::String(prompt_excerpt(prompt));
+                        serde_json::Value::String(prompt_excerpt(&engine, prompt));
                 }
             }
             let event =
