@@ -21,11 +21,15 @@
 > `.tellur/push_state.json` — incremental + idempotent, `--dry-run`/`--reset`,
 > hub/org/token defaulting to the stored login. CLI HTTPS via ureq's `tls`
 > feature (reuses the rustls/webpki crates the server already pulls in). Tests:
-> 6 device integration specs + the Postgres surface test + 5 CLI unit tests
-> (high-water-mark slice logic, actor mapping); full e2e push smoke verified
-> against a live hub. Docs: README (new *Connect a developer* section),
+> 6 device integration specs + the Postgres surface test + 8 CLI unit tests
+> (high-water-mark slice logic, actor/host mapping, path-segment encoding, and
+> the device-token `access_token`→`token` round-trip); full e2e push smoke
+> verified against a live hub. Docs: README (new *Connect a developer* section),
 > THREAT_MODEL (device-auth boundary + CLI credential storage). `tellur logout`
 > added. Requires SSO enabled (device login has no identity otherwise).
+> Post-merge fixes (own PRs off main): percent-encode org/repo push path
+> segments (#33, Codex P2); accept RFC 8628 `access_token` in the login response
+> so `tellur login` completes (#34).
 
 > **2026-06-10 — Dashboard E2E (Playwright).** On branch `feat/e2e`. Browser
 > end-to-end tests drive the **real production bundle** in Chromium with the
