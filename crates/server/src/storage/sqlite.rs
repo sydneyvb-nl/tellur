@@ -864,6 +864,18 @@ impl Store for SqliteStore {
         }
         let now = chrono::Utc::now().to_rfc3339();
         for file in files {
+            // An empty-ranges file is a tombstone: the file no longer has
+            // attribution (e.g. it was deleted from the repo), so drop the row
+            // rather than leaving stale ranges that keep counting toward metrics.
+            if file.ranges.is_empty() {
+                tx.execute(
+                    "DELETE FROM attribution
+                     WHERE org_id = ?1 AND repo_id = ?2 AND file_path = ?3",
+                    params![org_id, repo_id, file.file_path],
+                )
+                .context("failed to delete attribution")?;
+                continue;
+            }
             let ranges_json = serde_json::to_string(&file.ranges)?;
             tx.execute(
                 "INSERT INTO attribution

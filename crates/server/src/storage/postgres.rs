@@ -635,6 +635,17 @@ impl Store for PostgresStore {
         }
         let now = chrono::Utc::now().to_rfc3339();
         for file in files {
+            // Empty ranges = tombstone: drop the row (file lost its attribution,
+            // e.g. deleted from the repo) instead of leaving stale ranges.
+            if file.ranges.is_empty() {
+                tx.execute(
+                    "DELETE FROM attribution
+                     WHERE org_id = $1 AND repo_id = $2 AND file_path = $3",
+                    &[&org_id, &repo_id, &file.file_path],
+                )
+                .context("failed to delete attribution")?;
+                continue;
+            }
             let ranges_json = serde_json::to_string(&file.ranges)?;
             tx.execute(
                 "INSERT INTO attribution
