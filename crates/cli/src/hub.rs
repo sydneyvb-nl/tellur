@@ -15,9 +15,14 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 /// Credentials and identity stored for a single hub host after `tellur login`.
+///
+/// Doubles as the device-token response shape: the hub returns the bearer token
+/// as `access_token` (RFC 8628), so the field accepts that name as an alias
+/// while still being stored on disk as `token`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostCredentials {
     /// Bearer token (a member API token minted by the hub on approval).
+    #[serde(alias = "access_token")]
     pub token: String,
     pub org_id: String,
     pub member_id: String,
@@ -238,7 +243,27 @@ fn map_transport(e: ureq::Error) -> anyhow::Error {
 
 #[cfg(test)]
 mod tests {
-    use super::encode_segment;
+    use super::{HostCredentials, encode_segment};
+
+    #[test]
+    fn device_token_response_deserializes_into_credentials() {
+        // The exact shape the hub returns from POST /v1/device/token (RFC 8628
+        // `access_token`); it must map onto the stored `token` field.
+        let body = serde_json::json!({
+            "access_token": "tlr_abc123",
+            "token_type": "Bearer",
+            "org_id": "org_1",
+            "member_id": "mbr_1",
+            "role": "admin",
+        });
+        let creds: HostCredentials = serde_json::from_value(body).unwrap();
+        assert_eq!(creds.token, "tlr_abc123");
+        assert_eq!(creds.org_id, "org_1");
+        // Round-trips to disk as `token` (not `access_token`).
+        let json = serde_json::to_string(&creds).unwrap();
+        assert!(json.contains("\"token\":\"tlr_abc123\""));
+        assert!(!json.contains("access_token"));
+    }
 
     #[test]
     fn encode_segment_escapes_reserved_chars() {
