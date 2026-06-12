@@ -57,6 +57,16 @@ pub fn build_state(config: Config) -> Result<AppState> {
     // OIDC SSO is enabled only when fully configured (TELLUR_OIDC_*).
     let oidc = oidc::OidcConfig::from_env().map(|cfg| {
         tracing::info!(issuer = %cfg.issuer, "OIDC SSO enabled");
+        // Warn loudly at startup if the issuer would be rejected at login, so a
+        // misconfiguration surfaces here instead of as an opaque 500.
+        if !cfg.issuer_is_secure() {
+            tracing::error!(
+                issuer = %cfg.issuer,
+                "OIDC issuer is not https and not loopback — login will fail. \
+                 Use an https issuer, or set TELLUR_OIDC_ALLOW_INSECURE_HTTP=1 to \
+                 allow http on a trusted private network (insecure)."
+            );
+        }
         Arc::new(oidc::OidcRuntime::new(cfg, Arc::new(oidc::HttpOidcClient)))
     });
 
