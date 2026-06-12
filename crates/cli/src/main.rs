@@ -829,6 +829,23 @@ mod tests {
     }
 
     #[test]
+    fn prompt_excerpt_redacts_secrets_and_truncates() {
+        // Secrets are stripped from the stored preview.
+        let red = prompt_excerpt("deploy with token=ghp_0123456789012345678901234567890123456789");
+        assert!(!red.contains("ghp_0123456789"), "secret must be redacted");
+        // Short prompts pass through (trimmed).
+        assert_eq!(
+            prompt_excerpt("  refactor the parser  "),
+            "refactor the parser"
+        );
+        // Long prompts are truncated with an ellipsis.
+        let long = "a".repeat(PROMPT_EXCERPT_MAX + 50);
+        let ex = prompt_excerpt(&long);
+        assert!(ex.ends_with('…'));
+        assert_eq!(ex.chars().count(), PROMPT_EXCERPT_MAX + 1);
+    }
+
+    #[test]
     fn normalize_host_strips_trailing_slash() {
         assert_eq!(hub::normalize_host("https://h.test/"), "https://h.test");
         assert_eq!(hub::normalize_host("https://h.test"), "https://h.test");
@@ -2061,6 +2078,42 @@ fn cmd_gc(dry_run: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Read `redaction.store_prompt_excerpt` from `.tellur/config.yml` (default
+/// `false` — prompts are hashed, not stored, unless a repo opts in).
+fn read_store_prompt_excerpt(storage: &RepoStorage) -> bool {
+    let Ok(content) = std::fs::read_to_string(&storage.config_path) else {
+        return false;
+    };
+    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&content) else {
+        return false;
+    };
+    value
+        .get("redaction")
+        .and_then(|r| r.get("store_prompt_excerpt"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// Maximum characters kept of a prompt excerpt (the rest is elided).
+const PROMPT_EXCERPT_MAX: usize = 600;
+
+/// Build a secret-redacted, length-bounded excerpt of a prompt for storage when
+/// the repo has opted in. Secrets are stripped first, then it is truncated on a
+/// char boundary with an ellipsis so it stays a safe, compact preview.
+fn prompt_excerpt(text: &str) -> String {
+    let engine = tellur_core::redaction::RedactionEngine::default_engine();
+    let cleaned = engine
+        .scan_and_redact(text)
+        .redacted_content
+        .unwrap_or_else(|| text.to_string());
+    let cleaned = cleaned.trim();
+    if cleaned.chars().count() <= PROMPT_EXCERPT_MAX {
+        return cleaned.to_string();
+    }
+    let truncated: String = cleaned.chars().take(PROMPT_EXCERPT_MAX).collect();
+    format!("{truncated}…")
 }
 
 /// Read `retention.keep_days` from `.tellur/config.yml`.
@@ -4264,6 +4317,12 @@ fn cmd_hooks_ingest(source: &str, auto_init: bool, json_response: bool) -> Resul
             if let Some(prompt) = payload.prompt_text() {
                 event_payload["prompt_hash"] =
                     serde_json::Value::String(tellur_core::schema::ids::hash_content(prompt));
+                // Opt-in (`redaction.store_prompt_excerpt`): keep a redacted,
+                // length-bounded preview so the timeline can show what was asked.
+                if read_store_prompt_excerpt(&storage) {
+                    event_payload["prompt_excerpt"] =
+                        serde_json::Value::String(prompt_excerpt(prompt));
+                }
             }
             let event =
                 writer.write_event(&session_id, "user.prompt", "agent", event_payload, None)?;

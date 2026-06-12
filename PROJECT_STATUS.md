@@ -1,10 +1,27 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-12 (proposal: zero-touch provenance + GitHub App; on feature branch)
+**Last updated:** 2026-06-12 (prompt excerpts + dynamic session timeline; on feature branch)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
+
+> **2026-06-12 — Prompt excerpts (opt-in) + dynamic session timeline.** On branch
+> `feat/timeline-prompts`. Made the dead `redaction.store_prompt_excerpt` flag
+> real: when a repo opts in, the `UserPromptSubmit` hook stores a **secret-redacted,
+> length-bounded (`PROMPT_EXCERPT_MAX=600`) `prompt_excerpt`** in the `user.prompt`
+> event payload (alongside the existing hash); it rides through `tellur push` →
+> hub (re-redacted on ingest) → the session timeline. **Default stays `false`**
+> (privacy); excerpts only apply to activity captured after opting in. Redesigned
+> the hub **session timeline** (`SessionDetail.svelte`) from a flat list into a
+> dynamic vertical timeline: sticky summary (events / duration / files / prompts +
+> actor filter chips), category filter chips + text search, per-event nodes
+> color-coded by category (prompt/file/command/tool/test/git/session/policy) with
+> a prompt bubble, command exit badges, and an expandable raw-payload `<details>`.
+> Pure helpers in `lib/timeline.ts` (eventCategory / eventDetail / sessionStats /
+> formatDuration), unit-tested. Tests: CLI prompt-excerpt unit + 8 timeline vitest;
+> full suite 148 server + 11 CLI + 63 vitest + 5 E2E green. Review-coverage left as
+> a no-op metric by design (review marking does not belong in the hub).
 
 > **2026-06-12 — Proposal: zero-touch provenance + GitHub App.** On branch
 > `docs/github-app-proposal`. Design doc `docs/proposals/GITHUB_APP.md` (no code).
