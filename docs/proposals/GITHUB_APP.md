@@ -52,11 +52,20 @@ captured at the source and pushed to the hub.
 
 - **Rich path** — line-level, sessions, prompts-hashed; from machines running the
   agent. Forwarded by the background pusher (idempotent high-water mark, #33).
-- **Git-native path** — commit-level; travels with the repo, so it also covers
-  commits made on machines *without* the agent (other contributors, CI). The
-  GitHub App mirrors notes GitHub → hub on push.
+- **Git-native path** — commit-level; the note is written **locally from the
+  attribution index**, then travels with the repo. Once pushed, any clone (and the
+  harvester) can read it without a hub account, and the GitHub App mirrors notes
+  GitHub → hub on push.
 
-They are complementary, not redundant: depth vs. breadth.
+  **Caveat — it does not cover uninstrumented machines.** A commit made where
+  Tellur isn't installed has no local index and no `post-commit` hook, so it
+  produces **no `refs/notes/ai`** to harvest. The git-native path broadens
+  *distribution* of provenance that was captured somewhere with Tellur; it does
+  not *generate* provenance for commits made without it (CI, a contributor without
+  Tellur). Closing that gap would need a separate note source — out of scope here.
+
+They are complementary, not redundant: depth (rich, per-session) vs. portable
+distribution (commit-level notes that ride along with git).
 
 ## 4. Part A — Zero-touch client (provider-agnostic, no GitHub App)
 
