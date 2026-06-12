@@ -162,6 +162,25 @@ const en: Record<string, string> = {
   "sessionDetail.events": "{n} events",
   "sessionDetail.truncated": "showing the first {n} (truncated)",
 
+  // Session timeline
+  "timeline.events": "events",
+  "timeline.duration": "duration",
+  "timeline.files": "files",
+  "timeline.prompts": "prompts",
+  "timeline.search": "Filter the timeline…",
+  "timeline.noMatch": "No events match the current filters.",
+  "timeline.raw": "Raw event",
+  "timeline.promptHashed": "Prompt captured as a hash only — enable store_prompt_excerpt to preview it.",
+  "timeline.cat.prompt": "Prompts",
+  "timeline.cat.file": "Files",
+  "timeline.cat.command": "Commands",
+  "timeline.cat.tool": "Tools",
+  "timeline.cat.test": "Tests",
+  "timeline.cat.git": "Git",
+  "timeline.cat.session": "Session",
+  "timeline.cat.policy": "Policy",
+  "timeline.cat.other": "Other",
+
   // Audit
   "audit.title": "Audit log",
   "audit.chainOk": "Chain verified",
@@ -406,6 +425,25 @@ const nl: Record<string, string> = {
   // Session detail
   "sessionDetail.events": "{n} events",
   "sessionDetail.truncated": "eerste {n} getoond (afgekapt)",
+
+  // Session timeline
+  "timeline.events": "events",
+  "timeline.duration": "duur",
+  "timeline.files": "bestanden",
+  "timeline.prompts": "prompts",
+  "timeline.search": "Filter de tijdlijn…",
+  "timeline.noMatch": "Geen events komen overeen met de huidige filters.",
+  "timeline.raw": "Ruw event",
+  "timeline.promptHashed": "Prompt alleen als hash vastgelegd — zet store_prompt_excerpt aan voor een preview.",
+  "timeline.cat.prompt": "Prompts",
+  "timeline.cat.file": "Bestanden",
+  "timeline.cat.command": "Commando's",
+  "timeline.cat.tool": "Tools",
+  "timeline.cat.test": "Tests",
+  "timeline.cat.git": "Git",
+  "timeline.cat.session": "Sessie",
+  "timeline.cat.policy": "Beleid",
+  "timeline.cat.other": "Overig",
 
   // Audit
   "audit.title": "Auditlog",

@@ -589,7 +589,13 @@ Screens (per [`docs/proposals/TEAM_DASHBOARD_UI.md`](docs/proposals/TEAM_DASHBOA
   least-privilege token and are fetched through the hub's **SSRF-guarded blob
   proxy** (`GET .../blob`) — the token never leaves the hub. Also settable via
   `tellur-server admin set-repo-source`.
-- **Sessions & replay** — session list and an event-by-event timeline.
+- **Sessions & replay** — a dynamic per-session timeline: summary stats
+  (events / duration / files / prompts), category + actor filters and search, and
+  per-event nodes color-coded by kind (prompt / file / command / tool / test /
+  git). Prompts appear inline **when prompt-excerpt capture is enabled** — by
+  default Tellur stores only a prompt *hash*; set `redaction.store_prompt_excerpt:
+  true` in `.tellur/config.yml` to also keep a secret-redacted, length-bounded
+  excerpt (applies to activity captured after opting in).
 - **Admin** — **Policies** compliance (violations by severity + one-click
   re-evaluation), **People & Access** (members, SCIM groups, SSO/SCIM health),
   an **Audit log** browser, and an **Exports** console.
