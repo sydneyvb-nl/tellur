@@ -1014,9 +1014,11 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ```
 
 Run: `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && cargo test`
-(set `TELLUR_TEST_DATABASE_URL` to include the Postgres backend tests). Dashboard:
-`pnpm --dir crates/server/ui install && pnpm --dir crates/server/ui {check,test,build,e2e}`.
-VS Code: `cd editor/tellur-vscode && npm run compile && npm run test:unit && npm run test:extension`.
+(set `TELLUR_TEST_DATABASE_URL` to include the Postgres backend tests). Dashboard
+(from `crates/server/ui`, **one script per command** — `pnpm run` treats extra
+words as args, not multiple scripts): `pnpm install`, then `pnpm check`,
+`pnpm test`, `pnpm build`, `pnpm e2e`. VS Code:
+`cd editor/tellur-vscode && npm run compile && npm run test:unit && npm run test:extension`.
 
 ---
 
