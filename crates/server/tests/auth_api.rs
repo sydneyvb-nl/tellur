@@ -47,6 +47,7 @@ fn setup() -> Setup {
         )),
         metrics: Arc::new(tellur_server::Metrics::new()),
         oidc: None,
+        github_app: None,
     };
     Setup {
         state,

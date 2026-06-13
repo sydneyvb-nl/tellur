@@ -544,6 +544,12 @@ forever; the event provenance log is never pruned.
   `PATCH active=false`) revokes every credential type at once. A group named
   `tellur-admin` / `tellur-contributor` / `tellur-viewer` drives its members'
   role, recomputed on membership change.
+- **GitHub App (source access)** — optional, GitHub-only. Set
+  `TELLUR_GITHUB_APP_ID` + `TELLUR_GITHUB_APP_PRIVATE_KEY` (or
+  `TELLUR_GITHUB_APP_PRIVATE_KEY_FILE`) so the private-repo blob proxy authenticates
+  with short-lived, per-repo `Contents:read` **installation tokens** instead of a
+  stored PAT (`TELLUR_GITHUB_API_BASE` overrides the API base for GitHub
+  Enterprise). The App needs **Contents: read** + **Metadata: read**.
 
 ### Zero-touch setup (`tellur connect`)
 
@@ -649,7 +655,14 @@ Screens (per [`docs/proposals/TEAM_DASHBOARD_UI.md`](docs/proposals/TEAM_DASHBOA
   the provider (the hub stores/serves no source); **private** repos use a stored,
   least-privilege token and are fetched through the hub's **SSRF-guarded blob
   proxy** (`GET .../blob`) — the token never leaves the hub. Also settable via
-  `tellur-server admin set-repo-source`.
+  `tellur-server admin set-repo-source`. For **GitHub** repos you can skip the
+  stored PAT entirely: configure a **GitHub App** (`TELLUR_GITHUB_APP_ID` +
+  `TELLUR_GITHUB_APP_PRIVATE_KEY` / `…_PRIVATE_KEY_FILE`, optional
+  `TELLUR_GITHUB_API_BASE` for GitHub Enterprise) and the proxy mints a
+  short-lived, per-repo, `Contents:read` **installation token** per fetch instead
+  — auto-rotating, revoked by uninstalling the App, no human-managed secret in the
+  DB. The PAT path stays as the fallback for GitLab/Bitbucket/self-managed (and
+  GitHub when the App isn't installed).
 - **Sessions & replay** — a dynamic per-session timeline: summary stats
   (events / duration / files / prompts), category + actor filters and search, and
   per-event nodes color-coded by kind (prompt / file / command / tool / test /

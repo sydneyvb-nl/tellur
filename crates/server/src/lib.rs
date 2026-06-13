@@ -14,6 +14,7 @@ pub mod config;
 #[cfg(feature = "dashboard")]
 pub mod dashboard;
 pub mod error;
+pub mod github_app;
 pub mod jobs;
 pub mod metrics;
 pub mod oidc;
@@ -70,6 +71,15 @@ pub fn build_state(config: Config) -> Result<AppState> {
         Arc::new(oidc::OidcRuntime::new(cfg, Arc::new(oidc::HttpOidcClient)))
     });
 
+    // GitHub App source access is enabled only when TELLUR_GITHUB_APP_* is set.
+    let github_app = github_app::GithubAppConfig::from_env().map(|cfg| {
+        tracing::info!(app_id = %cfg.app_id, "GitHub App source access enabled");
+        Arc::new(github_app::GithubAppRuntime::new(
+            cfg,
+            Arc::new(github_app::HttpGithubAppApi),
+        ))
+    });
+
     Ok(AppState {
         store,
         config: Arc::new(config),
@@ -79,6 +89,7 @@ pub fn build_state(config: Config) -> Result<AppState> {
         )),
         metrics: Arc::new(metrics::Metrics::new()),
         oidc,
+        github_app,
     })
 }
 

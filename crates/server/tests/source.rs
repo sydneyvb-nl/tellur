@@ -48,6 +48,7 @@ fn setup() -> Setup {
         rate_limiter: Arc::new(RateLimiter::new(10_000, Duration::from_secs(60))),
         metrics: Arc::new(tellur_server::Metrics::new()),
         oidc: None,
+        github_app: None,
     };
     Setup {
         state,
@@ -238,4 +239,87 @@ async fn attributions_reports_source_proxy_when_token_set() {
     .await;
     let (_st, body) = req(&s.state, "GET", &attr, &s.viewer, None).await;
     assert_eq!(body["source_proxy"], true);
+}
+
+// --- B1: GitHub App installation tokens for the source proxy --------------
+
+// Base64-wrapped RSA test key (keeps the PEM header out of secret scanning).
+const TEST_KEY_B64: &str = include_str!("data/github_app_test_key.pem.b64");
+
+fn test_key() -> String {
+    use base64::Engine;
+    String::from_utf8(
+        base64::engine::general_purpose::STANDARD
+            .decode(TEST_KEY_B64.trim())
+            .unwrap(),
+    )
+    .unwrap()
+}
+
+struct MockGithubApi;
+impl tellur_server::github_app::GithubAppApi for MockGithubApi {
+    fn installation_id(&self, _: &str, _: &str, _: &str, _: &str) -> anyhow::Result<u64> {
+        Ok(7)
+    }
+    fn installation_token(
+        &self,
+        _: &str,
+        _: &str,
+        _id: u64,
+        repo: &str,
+    ) -> anyhow::Result<tellur_server::github_app::InstallationToken> {
+        Ok(tellur_server::github_app::InstallationToken {
+            token: format!("ghs_install_{repo}"),
+            expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+        })
+    }
+}
+
+fn with_github_app(state: &mut AppState) {
+    let cfg = tellur_server::github_app::GithubAppConfig {
+        app_id: "12345".into(),
+        private_key_pem: test_key(),
+        api_base: "https://api.github.com".into(),
+    };
+    state.github_app = Some(Arc::new(tellur_server::github_app::GithubAppRuntime::new(
+        cfg,
+        Arc::new(MockGithubApi),
+    )));
+}
+
+#[test]
+fn github_app_token_replaces_stored_pat_for_github_repos() {
+    let mut s = setup();
+    with_github_app(&mut s.state);
+    // GitHub raw template → App installation token wins over the stored PAT.
+    let token = tellur_server::api::resolve_source_token(
+        &s.state,
+        "https://raw.githubusercontent.com/acme/app/main/{path}",
+        Some("ghp_stored_pat".into()),
+    );
+    assert_eq!(token.as_deref(), Some("ghs_install_app"));
+}
+
+#[test]
+fn non_github_provider_keeps_the_stored_pat() {
+    let mut s = setup();
+    with_github_app(&mut s.state);
+    // GitLab template → App does not apply; fall back to the stored PAT.
+    let token = tellur_server::api::resolve_source_token(
+        &s.state,
+        "https://gitlab.com/acme/app/-/raw/main/{path}",
+        Some("glpat_stored".into()),
+    );
+    assert_eq!(token.as_deref(), Some("glpat_stored"));
+}
+
+#[test]
+fn without_app_configured_uses_the_stored_pat() {
+    let s = setup(); // github_app: None
+    let token = tellur_server::api::resolve_source_token(
+        &s.state,
+        "https://raw.githubusercontent.com/acme/app/main/{path}",
+        Some("ghp_stored_pat".into()),
+    );
+    assert_eq!(token.as_deref(), Some("ghp_stored_pat"));
 }

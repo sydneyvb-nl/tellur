@@ -72,6 +72,7 @@ fn setup() -> Setup {
         rate_limiter: Arc::new(RateLimiter::new(10_000, Duration::from_secs(60))),
         metrics: Arc::new(tellur_server::Metrics::new()),
         oidc: Some(Arc::new(runtime)),
+        github_app: None,
     };
     Setup { state, store, org }
 }
