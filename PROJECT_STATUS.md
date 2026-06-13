@@ -64,8 +64,11 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > `fix/review-hardening`. Acted on an external full-codebase review — but most of
 > its P1/P2 findings did **not** survive verification against the code, so only the
 > genuinely valid items were fixed. **Fixed:** (1) `save_push_state` now writes to a
-> sibling temp file then `rename`s (atomic; a crash mid-write can no longer truncate
-> `push_state.json` and silently reset the high-water mark); (2) `resolve_hub` no
+> per-process temp file (`push_state.<pid>.<nanos>.tmp`) then `rename`s (atomic; a
+> crash mid-write can no longer truncate `push_state.json` and silently reset the
+> high-water mark — and a per-process name keeps two concurrent pushes, e.g. the
+> `connect --background` timer overlapping a pre-push, from clobbering each other's
+> temp and failing `rename`; **Codex P2 on PR #45**); (2) `resolve_hub` no
 > longer indexes-then-`unwrap()`s the single saved host (uses a two-`next()` match so
 > a future refactor can't make it panic); (3) the OIDC discovery-cache `Mutex` locks
 > are now poison-resilient (`unwrap_or_else(PoisonError::into_inner)`); (4) added the

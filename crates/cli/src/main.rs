@@ -1440,11 +1440,23 @@ fn load_push_state(storage: &RepoStorage) -> Result<PushState> {
 
 fn save_push_state(storage: &RepoStorage, state: &PushState) -> Result<()> {
     let path = push_state_path(storage);
-    // Write to a sibling temp file then rename, so a crash mid-write can't leave a
+    // Write to a temp file then rename, so a crash mid-write can't leave a
     // truncated push_state.json (which would silently reset the high-water mark).
-    let tmp = path.with_extension("json.tmp");
+    // The temp name is per-process (pid + nanos) so two concurrent `tellur push`
+    // runs — e.g. the `connect --background` timer overlapping a pre-push — don't
+    // share one temp and make each other's `rename` fail. `rename` is atomic;
+    // concurrent renames are last-writer-wins on the final file, which is safe
+    // because hub ingest is idempotent.
+    let tmp = storage.tellur_dir.join(format!(
+        "push_state.{}.{}.tmp",
+        std::process::id(),
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    ));
     std::fs::write(&tmp, serde_json::to_string_pretty(state)?)?;
-    std::fs::rename(&tmp, &path)?;
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
+    }
     Ok(())
 }
 
