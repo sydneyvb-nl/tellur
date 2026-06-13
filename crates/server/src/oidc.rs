@@ -162,7 +162,12 @@ impl OidcRuntime {
     /// TLS channel (we don't verify the JWT signature locally), so a plaintext
     /// issuer/endpoint would let a network attacker forge a login.
     pub fn discovery(&self) -> Result<Discovery> {
-        if let Some(d) = self.cached.lock().unwrap().clone() {
+        if let Some(d) = self
+            .cached
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        {
             return Ok(d);
         }
         let insecure = self.config.allow_insecure_http;
@@ -185,7 +190,10 @@ impl OidcRuntime {
             insecure,
         )?;
         require_secure("token_endpoint", &disc.token_endpoint, insecure)?;
-        *self.cached.lock().unwrap() = Some(disc.clone());
+        *self
+            .cached
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(disc.clone());
         Ok(disc)
     }
 

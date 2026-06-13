@@ -1283,9 +1283,14 @@ fn resolve_hub(explicit: Option<&str>, creds: &hub::Credentials) -> Result<Strin
     if let Ok(h) = std::env::var("TELLUR_HUB_URL") {
         return Ok(hub::normalize_host(&h));
     }
-    match creds.hosts.len() {
-        1 => Ok(creds.hosts.keys().next().unwrap().clone()),
-        0 => bail!("no hub configured — pass --hub or set TELLUR_HUB_URL (or run `tellur login`)"),
+    // Resolve the single saved host without indexing-then-unwrapping, so a future
+    // refactor of the match condition can't turn this into a panic.
+    let mut hosts = creds.hosts.keys();
+    match (hosts.next(), hosts.next()) {
+        (Some(only), None) => Ok(only.clone()),
+        (None, _) => {
+            bail!("no hub configured — pass --hub or set TELLUR_HUB_URL (or run `tellur login`)")
+        }
         _ => bail!("multiple hubs are saved — pass --hub to choose one"),
     }
 }
@@ -1435,7 +1440,23 @@ fn load_push_state(storage: &RepoStorage) -> Result<PushState> {
 
 fn save_push_state(storage: &RepoStorage, state: &PushState) -> Result<()> {
     let path = push_state_path(storage);
-    std::fs::write(&path, serde_json::to_string_pretty(state)?)?;
+    // Write to a temp file then rename, so a crash mid-write can't leave a
+    // truncated push_state.json (which would silently reset the high-water mark).
+    // The temp name is per-process (pid + nanos) so two concurrent `tellur push`
+    // runs — e.g. the `connect --background` timer overlapping a pre-push — don't
+    // share one temp and make each other's `rename` fail. `rename` is atomic;
+    // concurrent renames are last-writer-wins on the final file, which is safe
+    // because hub ingest is idempotent.
+    let tmp = storage.tellur_dir.join(format!(
+        "push_state.{}.{}.tmp",
+        std::process::id(),
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    ));
+    std::fs::write(&tmp, serde_json::to_string_pretty(state)?)?;
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
+    }
     Ok(())
 }
 

@@ -58,3 +58,54 @@ fn sanitize_with_key(key: Option<&str>, value: &serde_json::Value) -> serde_json
         other => other.clone(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn prompt_like_keys_are_hashed_not_stored_raw() {
+        let out = sanitized_value(&json!({ "prompt": "secret design notes" }));
+        let prompt = &out["prompt"];
+        assert_eq!(prompt["redacted"], json!(true));
+        assert!(prompt["hash"].as_str().is_some());
+        // The raw text must never survive.
+        assert!(!out.to_string().contains("secret design notes"));
+    }
+
+    #[test]
+    fn non_prompt_strings_are_secret_redacted_but_clean_text_passes_through() {
+        // A clean (no-secret) non-prompt string is preserved verbatim.
+        assert_eq!(
+            sanitized_value(&json!({ "label": "const x = 42;" })),
+            json!({ "label": "const x = 42;" })
+        );
+        // A secret in a non-prompt string is redacted in place.
+        let out = sanitized_value(&json!({ "cmd": "api_key=sk-abclongkeyvalue12345" }));
+        let cmd = out["cmd"].as_str().unwrap();
+        assert!(cmd.contains("[REDACTED]"), "secret not redacted: {cmd}");
+        assert!(!cmd.contains("sk-abclongkeyvalue12345"));
+    }
+
+    #[test]
+    fn sanitize_recurses_arrays_and_preserves_scalars() {
+        let out = sanitized_value(&json!({
+            "items": [{ "message": "hi there" }],
+            "count": 3,
+            "ok": true,
+        }));
+        assert_eq!(out["items"][0]["message"]["redacted"], json!(true));
+        assert_eq!(out["count"], json!(3));
+        assert_eq!(out["ok"], json!(true));
+    }
+
+    #[test]
+    fn first_prompt_hash_picks_a_text_key_or_none() {
+        let h = first_prompt_hash(&json!({ "irrelevant": 1, "text": "ask" }));
+        assert_eq!(h, prompt_hash(&json!("ask")));
+        assert!(first_prompt_hash(&json!({ "irrelevant": 1 })).is_none());
+        // Non-string prompt-like values do not produce a hash.
+        assert!(prompt_hash(&json!(42)).is_none());
+    }
+}
