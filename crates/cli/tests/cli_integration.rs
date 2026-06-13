@@ -1365,6 +1365,12 @@ fn test_policy_pull_from_hub() {
 #[test]
 fn test_connect_installs_hooks_and_notes_config() {
     let dir = temp_repo();
+    // A remote must exist for the notes fetch refspec to be configured.
+    Command::new("git")
+        .args(["remote", "add", "origin", "https://example.com/repo.git"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
     let output = tellur()
         .args(["connect", "--no-login", "--no-agents"])
         .current_dir(&dir)
@@ -1405,6 +1411,49 @@ fn test_connect_installs_hooks_and_notes_config() {
         .output()
         .unwrap();
     assert!(String::from_utf8_lossy(&cfg.stdout).contains("refs/notes/ai"));
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_connect_without_remote_does_not_create_phantom_remote() {
+    // A fresh repo with no `origin`: connect must not write remote.origin.fetch,
+    // otherwise a later `git remote add origin` fails with "already exists".
+    let dir = temp_repo();
+    let output = tellur()
+        .args(["connect", "--no-login", "--no-agents"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Hooks are still installed; notes config is skipped.
+    assert!(dir.join(".git/hooks/pre-push").exists());
+    let cfg = Command::new("git")
+        .args(["config", "--get-all", "remote.origin.fetch"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&cfg.stdout).trim().is_empty(),
+        "phantom remote.origin.fetch was written"
+    );
+
+    // The user can still add origin cleanly.
+    let add = Command::new("git")
+        .args(["remote", "add", "origin", "https://example.com/repo.git"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        add.status.success(),
+        "git remote add failed: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
 
     let _ = fs::remove_dir_all(&dir);
 }

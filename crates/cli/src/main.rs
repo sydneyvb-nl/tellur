@@ -2723,8 +2723,21 @@ fn cmd_connect(opts: ConnectOptions) -> Result<()> {
         hooks_dir.display()
     );
 
-    // 4. Notes fetch + rewrite config so notes travel with the repo.
-    cmd_notes_install_config(opts.remote, tellur_core::notes::GIT_AI_NOTES_REF)?;
+    // 4. Notes fetch + rewrite config so notes travel with the repo. Only when
+    //    the remote actually exists — writing `remote.<remote>.fetch` otherwise
+    //    materialises a phantom remote that breaks a later `git remote add`.
+    if git_remote_exists(&storage.root, opts.remote) {
+        cmd_notes_install_config(opts.remote, tellur_core::notes::GIT_AI_NOTES_REF)?;
+    } else {
+        println!(
+            "• Skipped notes fetch config: remote '{}' does not exist yet.",
+            opts.remote
+        );
+        println!(
+            "  After `git remote add {} <url>`, run `tellur notes install-config {}` (or `tellur connect` again).",
+            opts.remote, opts.remote
+        );
+    }
 
     // 5. Optional always-on background push service.
     if opts.background {
@@ -2782,6 +2795,13 @@ fn git_config_get_all(repo_root: &std::path::Path, key: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Whether a git remote of this name is configured in the repo.
+fn git_remote_exists(repo_root: &std::path::Path, remote: &str) -> bool {
+    git_output(repo_root, &["remote"])
+        .map(|out| out.lines().any(|l| l.trim() == remote))
+        .unwrap_or(false)
 }
 
 /// Resolve this repo's hooks directory (honours `core.hooksPath` and worktrees).

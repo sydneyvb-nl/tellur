@@ -79,14 +79,18 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > own hooks, unsets the notes fetch config, and tears down the service.
 > **Deliberate deviation from the proposal:** no `remote.<remote>.push` refspec — it
 > would override git's default of pushing the current branch and push *only* notes;
-> the pre-push hook covers notes-push instead. Tests: 3 new CLI integration tests
+> the pre-push hook covers notes-push instead. Tests: 4 new CLI integration tests
 > (hook+notes-config install incl. exec bit; chaining + idempotent re-install +
 > `--remove` restores the user's hook; `--background` writes+removes the service
-> file under a sandboxed `HOME`); full CLI suite 32 green; workspace clippy
-> `-D warnings` + cargo-deny green. Docs: README (*Zero-touch setup* section + CLI
-> reference), AGENTS architecture map, this file. Remaining GitHub-App work: P2
-> installation tokens for the blob proxy, P3 repo discovery + notes-harvester
-> webhook, P4 PR-check runs.
+> file under a sandboxed `HOME`; no-remote run does not create a phantom remote);
+> full CLI suite 33 green; workspace clippy `-D warnings` + cargo-deny green.
+> **Codex review (PR #43):** the notes fetch refspec is now written only when the
+> target remote already exists — writing `remote.<remote>.fetch` in a freshly
+> `git init`'d repo materialised a phantom `origin` that broke a later `git remote
+> add origin`. Docs: README (*Zero-touch setup* section + CLI reference), AGENTS
+> architecture map, this file. Remaining GitHub-App work: P2 installation tokens
+> for the blob proxy, P3 repo discovery + notes-harvester webhook, P4 PR-check
+> runs.
 >
 > **2026-06-12 — Prompt excerpts (opt-in) + dynamic session timeline.** On branch
 > `feat/timeline-prompts`. Made the dead `redaction.store_prompt_excerpt` flag

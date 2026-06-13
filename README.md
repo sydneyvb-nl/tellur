@@ -564,7 +564,9 @@ integrations (`tellur setup agents`), and (3) installs two **git hooks**:
   ref alongside whatever remote you push to.
 
 It also configures the repo to fetch notes (`remote.<remote>.fetch`) so notes
-travel with `git fetch`. The hooks are **chained** — a pre-existing hook of yours
+travel with `git fetch` — but only if that remote already exists (otherwise it's
+skipped with a hint, so it never creates a phantom `origin` that would break a
+later `git remote add`). The hooks are **chained** — a pre-existing hook of yours
 is preserved (Tellur's commands are added in a clearly marked block), and every
 hub-touching step is **best-effort**: an unreachable hub never blocks a commit or
 push (the high-water mark means the next push catches up).
