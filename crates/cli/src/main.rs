@@ -1283,9 +1283,14 @@ fn resolve_hub(explicit: Option<&str>, creds: &hub::Credentials) -> Result<Strin
     if let Ok(h) = std::env::var("TELLUR_HUB_URL") {
         return Ok(hub::normalize_host(&h));
     }
-    match creds.hosts.len() {
-        1 => Ok(creds.hosts.keys().next().unwrap().clone()),
-        0 => bail!("no hub configured — pass --hub or set TELLUR_HUB_URL (or run `tellur login`)"),
+    // Resolve the single saved host without indexing-then-unwrapping, so a future
+    // refactor of the match condition can't turn this into a panic.
+    let mut hosts = creds.hosts.keys();
+    match (hosts.next(), hosts.next()) {
+        (Some(only), None) => Ok(only.clone()),
+        (None, _) => {
+            bail!("no hub configured — pass --hub or set TELLUR_HUB_URL (or run `tellur login`)")
+        }
         _ => bail!("multiple hubs are saved — pass --hub to choose one"),
     }
 }
@@ -1435,7 +1440,11 @@ fn load_push_state(storage: &RepoStorage) -> Result<PushState> {
 
 fn save_push_state(storage: &RepoStorage, state: &PushState) -> Result<()> {
     let path = push_state_path(storage);
-    std::fs::write(&path, serde_json::to_string_pretty(state)?)?;
+    // Write to a sibling temp file then rename, so a crash mid-write can't leave a
+    // truncated push_state.json (which would silently reset the high-water mark).
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(state)?)?;
+    std::fs::rename(&tmp, &path)?;
     Ok(())
 }
 

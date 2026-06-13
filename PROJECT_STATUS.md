@@ -1,6 +1,6 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-13 (GitHub App installation tokens for the source proxy — P2 — on `feat/github-app-tokens`)
+**Last updated:** 2026-06-13 (external-review hardening triage on `fix/review-hardening`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main · **Open PRs:** none · **Working tree:** clean
@@ -60,6 +60,33 @@ has **no marking workflow on purpose** — review marking does not belong in the
 hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 "mark reviewed" action.
 
+> **2026-06-13 — External code-review hardening (triaged).** On branch
+> `fix/review-hardening`. Acted on an external full-codebase review — but most of
+> its P1/P2 findings did **not** survive verification against the code, so only the
+> genuinely valid items were fixed. **Fixed:** (1) `save_push_state` now writes to a
+> sibling temp file then `rename`s (atomic; a crash mid-write can no longer truncate
+> `push_state.json` and silently reset the high-water mark); (2) `resolve_hub` no
+> longer indexes-then-`unwrap()`s the single saved host (uses a two-`next()` match so
+> a future refactor can't make it panic); (3) the OIDC discovery-cache `Mutex` locks
+> are now poison-resilient (`unwrap_or_else(PoisonError::into_inner)`); (4) added the
+> missing unit tests for `crates/adapters/src/sanitize.rs` (prompt-key hashing,
+> secret redaction vs clean-text passthrough, recursion, `first_prompt_hash`). 333
+> workspace tests, clippy `-D warnings` + cargo-deny green. **Rejected as false
+> positives** (verified against the code): the "cookie prefix-matching" bug
+> (`strip_prefix("name=")` already anchors on the `=`, so `tellur_session_evil=`
+> does not match `tellur_session=`); the CLI setup `as_object_mut().unwrap()`
+> "panics" (every call is guarded by a preceding `is_object()`/`is_array()` check
+> that rewrites a non-object to empty, or runs on a freshly-built value); and the
+> "missing tests" claims for `import.rs` (12 tests), `claude_code/codex/cursor.rs`,
+> `remap`, and `webhook.rs` (all already have `#[cfg(test)]`). **Rejected as
+> documented design tradeoffs / out-of-scope** (not bugs): Postgres `NoTls` (run
+> behind a TLS proxy — threat-model documented; configurable TLS is a follow-up),
+> OIDC ID-token signature not locally verified (deliberate per OIDC Core §3.1.3.7,
+> documented), in-memory rate limiter + `Mutex<Connection>` SQLite (single-node
+> zero-config design; multi-replica needs Redis/PG — large follow-ups), no SQLite
+> migration framework, and splitting the CLI monolith. `auth_denied_total` is **not**
+> dead — it's exposed at `/metrics` by design.
+>
 > **2026-06-13 — GitHub App installation tokens for the source proxy (proposal
 > P2).** On branch `feat/github-app-tokens`. The private-repo blob proxy can now
 > authenticate to **GitHub** with short-lived **App installation tokens** instead
