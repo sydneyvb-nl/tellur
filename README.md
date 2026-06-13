@@ -549,7 +549,8 @@ forever; the event provenance log is never pruned.
   `TELLUR_GITHUB_APP_PRIVATE_KEY_FILE`) so the private-repo blob proxy authenticates
   with short-lived, per-repo `Contents:read` **installation tokens** instead of a
   stored PAT (`TELLUR_GITHUB_API_BASE` overrides the API base for GitHub
-  Enterprise). The App needs **Contents: read** + **Metadata: read**.
+  Enterprise). The App needs **Contents: read** + **Metadata: read**. Full
+  step-by-step setup: [`docs/GITHUB_APP_SETUP.md`](docs/GITHUB_APP_SETUP.md).
 
 ### Zero-touch setup (`tellur connect`)
 

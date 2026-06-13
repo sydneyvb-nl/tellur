@@ -40,6 +40,7 @@ timeline are all shipped.
    risk-report **Check Run**. P3 is the recommended next item. **Note:** P2 is
    verified by unit + mock-client integration tests; a maintainer must verify it
    against a real GitHub App (App id + private key) — there is no live App in CI.
+   Live setup walkthrough: [`docs/GITHUB_APP_SETUP.md`](docs/GITHUB_APP_SETUP.md).
 2. **Packaged releases** — GitHub Release automation exists; the **npm wrapper +
    Homebrew formula** (`dist/`) are not finished.
 3. **`docs/DEPLOYMENT.md`** (Fly.io / Cloud Run + managed Postgres + TLS + OIDC
@@ -83,8 +84,10 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > cargo-deny (jsonwebtoken/simple_asn1 licenses) green. **Not E2E-tested against a
 > real GitHub App** (no App credentials in CI) — verify with a live App. Docs:
 > README (source connection + hub env vars), AGENTS map, THREAT_MODEL (new outbound
-> App-authed Hub→GitHub boundary + App-key secret), this file. Remaining: P3 repo
-> discovery + notes-harvester webhook, P4 PR-check runs.
+> App-authed Hub→GitHub boundary + App-key secret), the operator walkthrough
+> [`docs/GITHUB_APP_SETUP.md`](docs/GITHUB_APP_SETUP.md) (register → install →
+> configure → verify), this file. Remaining: P3 repo discovery + notes-harvester
+> webhook, P4 PR-check runs.
 >
 > **2026-06-13 — Zero-touch `tellur connect` (GitHub App proposal P1, complete).**
 > On branch `feat/connect-zero-touch`. New top-level CLI command that bundles the
