@@ -30,6 +30,17 @@ pub struct GithubAppConfig {
 }
 
 impl GithubAppConfig {
+    /// The host of `api_base` (e.g. `api.github.com`, or a GitHub Enterprise host
+    /// like `ghe.example.com`). Used to allowlist + recognise GHES source URLs.
+    pub fn api_host(&self) -> Option<String> {
+        let rest = self.api_base.strip_prefix("https://")?;
+        let host = rest.split('/').next().unwrap_or("");
+        if host.is_empty() || host.contains('@') || host.contains(':') {
+            return None;
+        }
+        Some(host.to_ascii_lowercase())
+    }
+
     /// Read config from `TELLUR_GITHUB_APP_*`. Returns `None` (App disabled) unless
     /// both the app id and a private key (inline or via a file path) are set.
     pub fn from_env() -> Option<Self> {
@@ -94,18 +105,31 @@ pub fn build_app_jwt(app_id: &str, private_key_pem: &str, now: DateTime<Utc>) ->
 }
 
 /// Parse `(owner, repo)` from a GitHub source template (raw-host or contents API).
-/// Returns `None` for non-GitHub hosts or templates with unsubstituted owner/repo,
-/// which is the signal that the App path does not apply (use the PAT fallback).
-pub fn github_owner_repo(template: &str) -> Option<(String, String)> {
+/// `enterprise_host` is the configured GitHub Enterprise API host (from
+/// `TELLUR_GITHUB_API_BASE`), if any — a GHES repo must use a **Contents API**
+/// template (`https://<host>/api/v3/repos/{owner}/{repo}/contents/{path}`) on that
+/// host. Returns `None` for non-GitHub hosts or unsubstituted owner/repo, the
+/// signal that the App path does not apply (use the PAT fallback).
+pub fn github_owner_repo(
+    template: &str,
+    enterprise_host: Option<&str>,
+) -> Option<(String, String)> {
     let rest = template.strip_prefix("https://")?;
     let (host, path) = rest.split_once('/')?;
+    let host = host.to_ascii_lowercase();
     let segs: Vec<&str> = path.split('/').collect();
-    let (owner, repo) = match host.to_ascii_lowercase().as_str() {
+    let (owner, repo) = if host == "raw.githubusercontent.com" {
         // {owner}/{repo}/{branch}/{path...}
-        "raw.githubusercontent.com" => (*segs.first()?, *segs.get(1)?),
+        (*segs.first()?, *segs.get(1)?)
+    } else if host == "api.github.com" && segs.first() == Some(&"repos") {
         // repos/{owner}/{repo}/contents/{path...}
-        "api.github.com" if segs.first() == Some(&"repos") => (*segs.get(1)?, *segs.get(2)?),
-        _ => return None,
+        (*segs.get(1)?, *segs.get(2)?)
+    } else if enterprise_host.is_some_and(|h| h == host) {
+        // GHES Contents API: .../repos/{owner}/{repo}/contents/{path...}
+        let i = segs.iter().position(|s| *s == "repos")?;
+        (*segs.get(i + 1)?, *segs.get(i + 2)?)
+    } else {
+        return None;
     };
     if owner.is_empty() || repo.is_empty() || owner.contains('{') || repo.contains('{') {
         return None;
@@ -271,26 +295,65 @@ mod tests {
     #[test]
     fn parses_owner_repo_from_github_templates() {
         assert_eq!(
-            github_owner_repo("https://raw.githubusercontent.com/acme/app/main/{path}"),
+            github_owner_repo(
+                "https://raw.githubusercontent.com/acme/app/main/{path}",
+                None
+            ),
             Some(("acme".to_string(), "app".to_string()))
         );
         assert_eq!(
-            github_owner_repo("https://api.github.com/repos/acme/app/contents/{path}"),
+            github_owner_repo(
+                "https://api.github.com/repos/acme/app/contents/{path}",
+                None
+            ),
             Some(("acme".to_string(), "app".to_string()))
+        );
+    }
+
+    #[test]
+    fn parses_owner_repo_from_enterprise_contents_template() {
+        // GHES Contents API on the configured enterprise host.
+        assert_eq!(
+            github_owner_repo(
+                "https://ghe.example.com/api/v3/repos/acme/app/contents/{path}?ref=main",
+                Some("ghe.example.com"),
+            ),
+            Some(("acme".to_string(), "app".to_string()))
+        );
+        // Same host but no App configured (enterprise_host None) → not recognised.
+        assert_eq!(
+            github_owner_repo(
+                "https://ghe.example.com/api/v3/repos/acme/app/contents/{path}",
+                None,
+            ),
+            None
         );
     }
 
     #[test]
     fn skips_non_github_or_templated_owner_repo() {
         assert_eq!(
-            github_owner_repo("https://gitlab.com/acme/app/-/raw/main/{path}"),
+            github_owner_repo("https://gitlab.com/acme/app/-/raw/main/{path}", None),
             None
         );
         // Unsubstituted owner placeholder → not a concrete GitHub repo.
         assert_eq!(
-            github_owner_repo("https://raw.githubusercontent.com/{owner}/{repo}/main/{path}"),
+            github_owner_repo(
+                "https://raw.githubusercontent.com/{owner}/{repo}/main/{path}",
+                None
+            ),
             None
         );
+    }
+
+    #[test]
+    fn api_host_extracts_configured_base() {
+        let cfg = GithubAppConfig {
+            app_id: "1".into(),
+            private_key_pem: String::new(),
+            api_base: "https://ghe.example.com/api/v3".into(),
+        };
+        assert_eq!(cfg.api_host().as_deref(), Some("ghe.example.com"));
     }
 
     struct MockApi;

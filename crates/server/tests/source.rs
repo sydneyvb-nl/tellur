@@ -275,11 +275,11 @@ impl tellur_server::github_app::GithubAppApi for MockGithubApi {
     }
 }
 
-fn with_github_app(state: &mut AppState) {
+fn with_github_app_base(state: &mut AppState, api_base: &str) {
     let cfg = tellur_server::github_app::GithubAppConfig {
         app_id: "12345".into(),
         private_key_pem: test_key(),
-        api_base: "https://api.github.com".into(),
+        api_base: api_base.into(),
     };
     state.github_app = Some(Arc::new(tellur_server::github_app::GithubAppRuntime::new(
         cfg,
@@ -290,7 +290,7 @@ fn with_github_app(state: &mut AppState) {
 #[test]
 fn github_app_token_replaces_stored_pat_for_github_repos() {
     let mut s = setup();
-    with_github_app(&mut s.state);
+    with_github_app_base(&mut s.state, "https://api.github.com");
     // GitHub raw template → App installation token wins over the stored PAT.
     let token = tellur_server::api::resolve_source_token(
         &s.state,
@@ -301,9 +301,22 @@ fn github_app_token_replaces_stored_pat_for_github_repos() {
 }
 
 #[test]
+fn github_app_token_used_for_enterprise_contents_template() {
+    let mut s = setup();
+    with_github_app_base(&mut s.state, "https://ghe.example.com/api/v3");
+    // GHES Contents API template on the configured host → App token, not the PAT.
+    let token = tellur_server::api::resolve_source_token(
+        &s.state,
+        "https://ghe.example.com/api/v3/repos/acme/app/contents/{path}?ref=main",
+        Some("ghp_stored_pat".into()),
+    );
+    assert_eq!(token.as_deref(), Some("ghs_install_app"));
+}
+
+#[test]
 fn non_github_provider_keeps_the_stored_pat() {
     let mut s = setup();
-    with_github_app(&mut s.state);
+    with_github_app_base(&mut s.state, "https://api.github.com");
     // GitLab template → App does not apply; fall back to the stored PAT.
     let token = tellur_server::api::resolve_source_token(
         &s.state,

@@ -111,7 +111,10 @@ Notes:
 - For **private** GitHub repos use the **Contents API** raw template
   (`https://api.github.com/repos/OWNER/REPO/contents/{path}?ref=BRANCH`). The hub
   sends `Accept: application/vnd.github.raw` so it gets raw bytes. `raw.githubusercontent.com`
-  is best for **public** repos.
+  is best for **public** repos. On **GitHub Enterprise** use the Contents API on
+  your configured host
+  (`https://<ghe-host>/api/v3/repos/OWNER/REPO/contents/{path}?ref=BRANCH`); that
+  host is auto-allowlisted from `TELLUR_GITHUB_API_BASE`.
 - With the App enabled you do **not** need to store a token for GitHub repos — the
   hub mints an installation token per fetch. A stored PAT, if present, is ignored
   for GitHub repos while the App is configured (and used as the fallback if minting
@@ -143,8 +146,8 @@ Notes:
 | Log: `invalid GitHub App private key (expected an RSA PEM)` | The key isn't an RSA PEM, or `_PRIVATE_KEY` got truncated (newlines lost). Use `_PRIVATE_KEY_FILE`. |
 | Log: `GitHub App installation lookup failed` / token mint failed | The App isn't installed on that repo, or the repo wasn't selected in the installation; the proxy falls back to the stored PAT (often none → next row). |
 | Proxy returns `404`/empty for a private repo | No usable token (App not installed there and no PAT), or the `OWNER/REPO`/branch in the raw template is wrong. |
-| `source host '…' is not in the allowed provider list` | The raw template host isn't on the SSRF allowlist — use `api.github.com` or `raw.githubusercontent.com`. |
-| GitHub Enterprise Server | Set `TELLUR_GITHUB_API_BASE` to your `…/api/v3` base and use your GHES host in the templates. |
+| `source host '…' is not in the allowed provider list` | The raw template host isn't on the SSRF allowlist — use `api.github.com` / `raw.githubusercontent.com` (or, on GHES, the host of `TELLUR_GITHUB_API_BASE`). |
+| GitHub Enterprise Server | Set `TELLUR_GITHUB_API_BASE` to your `…/api/v3` base. The hub then allowlists that host and recognises **Contents API** templates on it — connect GHES repos with `--raw 'https://<ghe-host>/api/v3/repos/OWNER/REPO/contents/{path}?ref=BRANCH'` (a `raw.<host>` subdomain is **not** supported). |
 
 ## Security notes
 

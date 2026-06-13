@@ -80,14 +80,20 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > raw + contents hosts, non-GitHub/templated skip, token cache) + 3 `source`
 > integration tests (App token replaces the PAT for GitHub; non-GitHub keeps the
 > PAT; no-App keeps the PAT) via a mock `GithubAppApi`; all 13 server test
-> AppState constructors updated. Workspace 325 tests, clippy `-D warnings` +
+> AppState constructors updated. Workspace 329 tests, clippy `-D warnings` +
 > cargo-deny (jsonwebtoken/simple_asn1 licenses) green. **Not E2E-tested against a
 > real GitHub App** (no App credentials in CI) — verify with a live App. Docs:
 > README (source connection + hub env vars), AGENTS map, THREAT_MODEL (new outbound
 > App-authed Hub→GitHub boundary + App-key secret), the operator walkthrough
 > [`docs/GITHUB_APP_SETUP.md`](docs/GITHUB_APP_SETUP.md) (register → install →
-> configure → verify), this file. Remaining: P3 repo discovery + notes-harvester
-> webhook, P4 PR-check runs.
+> configure → verify), this file. **Codex review (PR #44):** (1) token minting
+> (JWT sign + 2 sync GitHub calls on the uncached path) now runs inside the
+> `run_blocking` closure alongside the fetch, so a slow GitHub response can't block
+> a Tokio worker; (2) **GitHub Enterprise** is now actually supported — the host of
+> `TELLUR_GITHUB_API_BASE` is threaded through `github_owner_repo`, the source SSRF
+> allowlist, and the auth-header classifier, so a GHES **Contents API** template is
+> recognised + fetched (a `raw.<host>` subdomain is out of scope). Remaining: P3
+> repo discovery + notes-harvester webhook, P4 PR-check runs.
 >
 > **2026-06-13 — Zero-touch `tellur connect` (GitHub App proposal P1, complete).**
 > On branch `feat/connect-zero-touch`. New top-level CLI command that bundles the
