@@ -60,13 +60,16 @@ fn host_of(url: &str) -> Option<String> {
 
 /// Build and validate the raw-bytes URL for `path` from the template. Substitutes
 /// `{path}`, requires `https`, and requires an allowlisted host (SSRF guard).
-pub fn resolve_raw_url(raw_template: &str, path: &str) -> Result<String> {
+/// `extra_host` is an operator-configured GitHub Enterprise host (from
+/// `TELLUR_GITHUB_API_BASE`) that is additionally permitted when present.
+pub fn resolve_raw_url(raw_template: &str, path: &str, extra_host: Option<&str>) -> Result<String> {
     let url = raw_template.replace("{path}", &encode_path(path));
     if !url.starts_with("https://") {
         bail!("source template must be an https:// URL");
     }
     let host = host_of(&url).ok_or_else(|| anyhow::anyhow!("source URL has no valid host"))?;
-    if !ALLOWED_HOSTS.contains(&host.as_str()) {
+    let allowed = ALLOWED_HOSTS.contains(&host.as_str()) || extra_host == Some(host.as_str());
+    if !allowed {
         bail!("source host '{host}' is not in the allowed provider list");
     }
     Ok(url)
@@ -74,8 +77,19 @@ pub fn resolve_raw_url(raw_template: &str, path: &str) -> Result<String> {
 
 /// Provider auth headers for an allowlisted host (only when a token is set).
 /// GitHub/Bitbucket use `Authorization: Bearer`; GitLab uses `PRIVATE-TOKEN`. The
-/// GitHub contents API additionally needs an `Accept` for raw bytes.
-pub fn provider_auth_headers(host: &str, token: &str) -> Vec<(String, String)> {
+/// GitHub contents API additionally needs an `Accept` for raw bytes. `extra_host`
+/// (the configured GitHub Enterprise host) is treated like the GitHub contents API.
+pub fn provider_auth_headers(
+    host: &str,
+    token: &str,
+    extra_host: Option<&str>,
+) -> Vec<(String, String)> {
+    if extra_host == Some(host) {
+        return vec![
+            ("Authorization".into(), format!("Bearer {token}")),
+            ("Accept".into(), "application/vnd.github.raw".into()),
+        ];
+    }
     match host {
         "api.github.com" => vec![
             ("Authorization".into(), format!("Bearer {token}")),
@@ -91,12 +105,13 @@ pub fn provider_auth_headers(host: &str, token: &str) -> Vec<(String, String)> {
 
 /// Fetch the (validated) URL over HTTPS with the optional provider token, capped
 /// at [`MAX_SOURCE_BYTES`]. Network call — thin by design; the validation above
-/// is what's unit-tested. Returns the file text.
-pub fn fetch_blob(url: &str, token: Option<&str>) -> Result<String> {
+/// is what's unit-tested. `extra_host` classifies an enterprise host for auth.
+/// Returns the file text.
+pub fn fetch_blob(url: &str, token: Option<&str>, extra_host: Option<&str>) -> Result<String> {
     let host = host_of(url).ok_or_else(|| anyhow::anyhow!("invalid source URL"))?;
     let mut req = ureq::get(url);
     if let Some(tok) = token {
-        for (k, v) in provider_auth_headers(&host, tok) {
+        for (k, v) in provider_auth_headers(&host, tok, extra_host) {
             req = req.set(&k, &v);
         }
     }
@@ -131,6 +146,7 @@ mod tests {
         let url = resolve_raw_url(
             "https://raw.githubusercontent.com/acme/app/main/{path}",
             "src/a b#c.rs",
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -141,19 +157,27 @@ mod tests {
 
     #[test]
     fn rejects_non_allowlisted_host() {
-        let err = resolve_raw_url("https://evil.example.com/{path}", "x").unwrap_err();
+        let err = resolve_raw_url("https://evil.example.com/{path}", "x", None).unwrap_err();
         assert!(err.to_string().contains("not in the allowed"));
     }
 
     #[test]
+    fn allows_configured_enterprise_host() {
+        // A GHES host is rejected by default but permitted when configured.
+        let tmpl = "https://ghe.example.com/api/v3/repos/acme/app/contents/{path}";
+        assert!(resolve_raw_url(tmpl, "src/a.rs", None).is_err());
+        assert!(resolve_raw_url(tmpl, "src/a.rs", Some("ghe.example.com")).is_ok());
+    }
+
+    #[test]
     fn rejects_non_https_and_userinfo_and_port() {
-        assert!(resolve_raw_url("http://raw.githubusercontent.com/{path}", "x").is_err());
+        assert!(resolve_raw_url("http://raw.githubusercontent.com/{path}", "x", None).is_err());
         assert!(
-            resolve_raw_url("https://user@raw.githubusercontent.com/{path}", "x").is_err(),
+            resolve_raw_url("https://user@raw.githubusercontent.com/{path}", "x", None).is_err(),
             "userinfo must be rejected (SSRF)"
         );
         assert!(
-            resolve_raw_url("https://raw.githubusercontent.com:8080/{path}", "x").is_err(),
+            resolve_raw_url("https://raw.githubusercontent.com:8080/{path}", "x", None).is_err(),
             "explicit port must be rejected"
         );
     }
@@ -161,15 +185,19 @@ mod tests {
     #[test]
     fn provider_auth_headers_per_host() {
         assert_eq!(
-            provider_auth_headers("gitlab.com", "T"),
+            provider_auth_headers("gitlab.com", "T", None),
             vec![("PRIVATE-TOKEN".to_string(), "T".to_string())]
         );
-        let gh = provider_auth_headers("api.github.com", "T");
+        let gh = provider_auth_headers("api.github.com", "T", None);
         assert!(gh.contains(&("Authorization".into(), "Bearer T".into())));
         assert!(gh.contains(&("Accept".into(), "application/vnd.github.raw".into())));
         assert_eq!(
-            provider_auth_headers("raw.githubusercontent.com", "T"),
+            provider_auth_headers("raw.githubusercontent.com", "T", None),
             vec![("Authorization".to_string(), "Bearer T".to_string())]
         );
+        // A configured enterprise host is treated like the GitHub contents API.
+        let ghe = provider_auth_headers("ghe.example.com", "T", Some("ghe.example.com"));
+        assert!(ghe.contains(&("Authorization".into(), "Bearer T".into())));
+        assert!(ghe.contains(&("Accept".into(), "application/vnd.github.raw".into())));
     }
 }

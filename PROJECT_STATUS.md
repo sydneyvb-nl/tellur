@@ -1,6 +1,6 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-13 (zero-touch `tellur connect` shipped on `feat/connect-zero-touch`)
+**Last updated:** 2026-06-13 (GitHub App installation tokens for the source proxy — P2 — on `feat/github-app-tokens`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main · **Open PRs:** none · **Working tree:** clean
@@ -29,13 +29,18 @@ timeline are all shipped.
 **Open work (priority order):**
 1. **Zero-touch + GitHub App** — design merged in
    [`docs/proposals/GITHUB_APP.md`](docs/proposals/GITHUB_APP.md). **P1 `tellur
-   connect`** is **complete** (see 2026-06-13 below): git hooks (auto
-   `refs/notes/ai` refresh + auto `tellur push`/notes-push on `git push`) **plus**
-   the opt-in `--background` always-on launchd/systemd push service —
-   provider-agnostic, the headline "never touch the terminal" goal. Remaining
-   build order (all GitHub-specific): **P2** GitHub App installation tokens for the
-   blob proxy (replacing the stored PAT), **P3** repo discovery + `push`-webhook
-   notes harvester, **P4** PR-check runs. P2 is the recommended next big item.
+   connect`** is **complete** (git hooks + opt-in `--background` push service).
+   **P2 GitHub App installation tokens** for the blob proxy is **complete** (see
+   2026-06-13 below): the proxy mints short-lived per-repo `Contents:read`
+   installation tokens for GitHub repos, with the PAT as the fallback. Remaining
+   build order (all GitHub-specific, need a live App to fully E2E): **P3** repo
+   discovery + auto-provision + the `push`-webhook **notes harvester** (HMAC-verified
+   inbound webhook → fetch `refs/notes/ai` via the installation token → ingest
+   commit-level attribution, idempotent per `(repo, commit)`), then **P4** the PR
+   risk-report **Check Run**. P3 is the recommended next item. **Note:** P2 is
+   verified by unit + mock-client integration tests; a maintainer must verify it
+   against a real GitHub App (App id + private key) — there is no live App in CI.
+   Live setup walkthrough: [`docs/GITHUB_APP_SETUP.md`](docs/GITHUB_APP_SETUP.md).
 2. **Packaged releases** — GitHub Release automation exists; the **npm wrapper +
    Homebrew formula** (`dist/`) are not finished.
 3. **`docs/DEPLOYMENT.md`** (Fly.io / Cloud Run + managed Postgres + TLS + OIDC
@@ -55,6 +60,41 @@ has **no marking workflow on purpose** — review marking does not belong in the
 hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 "mark reviewed" action.
 
+> **2026-06-13 — GitHub App installation tokens for the source proxy (proposal
+> P2).** On branch `feat/github-app-tokens`. The private-repo blob proxy can now
+> authenticate to **GitHub** with short-lived **App installation tokens** instead
+> of a stored PAT. New `crates/server/src/github_app.rs`: `GithubAppConfig::from_env`
+> (`TELLUR_GITHUB_APP_ID` + `TELLUR_GITHUB_APP_PRIVATE_KEY` or `…_PRIVATE_KEY_FILE`,
+> optional `TELLUR_GITHUB_API_BASE` for GHES) enables the App only when fully set;
+> `build_app_jwt` signs the App JWT (RS256, `iat`-60s/`exp`+9min) via the new
+> `jsonwebtoken` dep; `GithubAppApi` trait (mockable; `HttpGithubAppApi` over
+> ureq/rustls) resolves the installation (`GET /repos/{o}/{r}/installation`) and
+> mints a per-repo `Contents:read` token (`POST /app/installations/{id}/access_tokens`);
+> `GithubAppRuntime` caches tokens per `(owner,repo)` until ~5 min before expiry.
+> `api::resolve_source_token` prefers the App token for GitHub repos (parsed from
+> the raw/contents template by `github_owner_repo`) and falls back to the stored
+> PAT for GitLab/Bitbucket/self-managed, or if minting fails. `AppState.github_app`
+> wired in `build_state`. The SSRF allowlist, https-only, 2 MB cap, and
+> token-never-returned contract are unchanged (only the token *source* changes).
+> Tests: 5 `github_app` unit tests (JWT build/sign + bad-key, owner/repo parse for
+> raw + contents hosts, non-GitHub/templated skip, token cache) + 3 `source`
+> integration tests (App token replaces the PAT for GitHub; non-GitHub keeps the
+> PAT; no-App keeps the PAT) via a mock `GithubAppApi`; all 13 server test
+> AppState constructors updated. Workspace 329 tests, clippy `-D warnings` +
+> cargo-deny (jsonwebtoken/simple_asn1 licenses) green. **Not E2E-tested against a
+> real GitHub App** (no App credentials in CI) — verify with a live App. Docs:
+> README (source connection + hub env vars), AGENTS map, THREAT_MODEL (new outbound
+> App-authed Hub→GitHub boundary + App-key secret), the operator walkthrough
+> [`docs/GITHUB_APP_SETUP.md`](docs/GITHUB_APP_SETUP.md) (register → install →
+> configure → verify), this file. **Codex review (PR #44):** (1) token minting
+> (JWT sign + 2 sync GitHub calls on the uncached path) now runs inside the
+> `run_blocking` closure alongside the fetch, so a slow GitHub response can't block
+> a Tokio worker; (2) **GitHub Enterprise** is now actually supported — the host of
+> `TELLUR_GITHUB_API_BASE` is threaded through `github_owner_repo`, the source SSRF
+> allowlist, and the auth-header classifier, so a GHES **Contents API** template is
+> recognised + fetched (a `raw.<host>` subdomain is out of scope). Remaining: P3
+> repo discovery + notes-harvester webhook, P4 PR-check runs.
+>
 > **2026-06-13 — Zero-touch `tellur connect` (GitHub App proposal P1, complete).**
 > On branch `feat/connect-zero-touch`. New top-level CLI command that bundles the
 > one-time setup so a developer never runs a `tellur` command again. `tellur

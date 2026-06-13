@@ -1056,12 +1056,48 @@ pub async fn source_blob(
     let raw_template = source
         .raw
         .ok_or_else(|| ServerError::BadRequest("no source raw template configured".into()))?;
+    // A configured GitHub Enterprise host is additionally allowlisted + recognised.
+    let enterprise_host = state.github_app.as_ref().and_then(|a| a.config.api_host());
     // Build + allowlist-check the URL before any network call (SSRF guard).
-    let url = crate::source::resolve_raw_url(&raw_template, &q.path)
+    let url = crate::source::resolve_raw_url(&raw_template, &q.path, enterprise_host.as_deref())
         .map_err(|e| ServerError::BadRequest(e.to_string()))?;
-    let content =
-        run_blocking(move || crate::source::fetch_blob(&url, source.token.as_deref())).await?;
+    // Token minting signs a JWT + makes synchronous GitHub calls on the uncached
+    // path, so resolve it inside the blocking closure alongside the fetch (never
+    // block a Tokio worker on a slow GitHub response).
+    let state = state.clone();
+    let stored = source.token.clone();
+    let content = run_blocking(move || {
+        let token = resolve_source_token(&state, &raw_template, stored);
+        crate::source::fetch_blob(&url, token.as_deref(), enterprise_host.as_deref())
+    })
+    .await?;
     Ok(Json(json!({ "path": q.path, "content": content })))
+}
+
+/// Choose the source-proxy auth token. For a GitHub repo with the App configured,
+/// mint a short-lived installation token (replacing the stored PAT); for any other
+/// provider, or if minting fails, fall back to the stored PAT (`stored`).
+pub fn resolve_source_token(
+    state: &AppState,
+    raw_template: &str,
+    stored: Option<String>,
+) -> Option<String> {
+    let Some(app) = &state.github_app else {
+        return stored;
+    };
+    let enterprise_host = app.config.api_host();
+    let Some((owner, repo)) =
+        crate::github_app::github_owner_repo(raw_template, enterprise_host.as_deref())
+    else {
+        return stored; // non-GitHub provider — PAT fallback
+    };
+    match app.token_for(&owner, &repo) {
+        Ok(token) => Some(token),
+        Err(e) => {
+            tracing::warn!(error = %e, "GitHub App token mint failed; falling back to stored token");
+            stored
+        }
+    }
 }
 
 /// Query for the sessions list.

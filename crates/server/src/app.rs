@@ -25,6 +25,9 @@ pub struct AppState {
     pub metrics: Arc<Metrics>,
     /// OIDC SSO runtime, present only when SSO is configured.
     pub oidc: Option<Arc<crate::oidc::OidcRuntime>>,
+    /// GitHub App runtime for installation-token source access, present only when
+    /// `TELLUR_GITHUB_APP_*` is configured.
+    pub github_app: Option<Arc<crate::github_app::GithubAppRuntime>>,
 }
 
 /// Maximum accepted request body size (1 MiB).

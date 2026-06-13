@@ -31,6 +31,7 @@ fn state_with_store(store: SqliteStore) -> AppState {
         )),
         metrics: Arc::new(tellur_server::Metrics::new()),
         oidc: None,
+        github_app: None,
     }
 }
 

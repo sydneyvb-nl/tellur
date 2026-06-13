@@ -44,7 +44,16 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    provider's auth header and never returned. The bytes are the org's own source
    served to org members, so they are returned faithfully (not redacted) — keep
    the configured token least-privilege (read-only, scoped to the connected
-   repo). The
+   repo). For GitHub repos the proxy can instead use a **GitHub App** installation
+   token (B1): a new **outbound, App-authenticated Hub → GitHub boundary** —
+   the hub signs an App JWT (RS256) with the App private key and exchanges it for a
+   short-lived (≈1h), per-repo `Contents:read` installation token, cached
+   in-process and never returned to any client. Wins over the stored PAT:
+   short-lived + auto-rotating, least privilege (one repo, read-only), and revoked
+   by uninstalling the App. The **App private key** (`TELLUR_GITHUB_APP_PRIVATE_KEY`
+   / `…_FILE`) is a new high-value secret — env/secret-store only, never committed;
+   its compromise is equivalent to read access on every installed repo. The
+   outbound fetch is still bounded by the same SSRF host allowlist. The
    **export portal**
    — org bundles are **durable jobs**: `POST .../export/events|audit` enqueues
    (admin) and returns a job id, polled at `GET .../jobs/{id}` or listed via
