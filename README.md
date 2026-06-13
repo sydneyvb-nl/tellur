@@ -189,6 +189,7 @@ tellur pr-report --base main        # Generate a PR risk report
 tellur policy check                 # Evaluate configured policies
 tellur event --event-type file.write --session <id> --file <path>
 tellur import <adapter> <source>    # Import external AI tool data
+tellur connect --hub <url>          # One-time zero-touch setup (login + capture + git hooks)
 tellur login --hub <url>            # Sign in to a team hub (browser; no token to paste)
 tellur push                         # Send captured events + AI attribution to the hub
 tellur logout                       # Forget stored hub credentials
@@ -543,6 +544,61 @@ forever; the event provenance log is never pruned.
   `PATCH active=false`) revokes every credential type at once. A group named
   `tellur-admin` / `tellur-contributor` / `tellur-viewer` drives its members'
   role, recomputed on membership change.
+
+### Zero-touch setup (`tellur connect`)
+
+`tellur connect` is the one-time umbrella that makes capture and sync automatic —
+after running it once, a developer never has to run a `tellur` command again. From
+inside a repository:
+
+```bash
+tellur connect --hub https://hub.example.com
+```
+
+it (1) runs `tellur login`, (2) installs the global editor/agent capture
+integrations (`tellur setup agents`), and (3) installs two **git hooks**:
+
+- **`post-commit`** refreshes `refs/notes/ai` for the new commit from the local
+  attribution index.
+- **`pre-push`** flushes events to the hub (`tellur push`) and pushes the notes
+  ref alongside whatever remote you push to.
+
+It also configures the repo to fetch notes (`remote.<remote>.fetch`) so notes
+travel with `git fetch` — but only if that remote already exists (otherwise it's
+skipped with a hint, so it never creates a phantom `origin` that would break a
+later `git remote add`). The hooks are **chained** — a pre-existing hook of yours
+is preserved (Tellur's commands are added in a clearly marked block), and every
+hub-touching step is **best-effort**: an unreachable hub never blocks a commit or
+push (the high-water mark means the next push catches up).
+
+For an **always-on** push (sync even on an idle machine that isn't committing or
+pushing), add `--background`:
+
+```bash
+tellur connect --hub https://hub.example.com --background --push-interval 900
+```
+
+This installs a per-user, per-repository OS service that runs `tellur push` on an
+interval — **launchd** (`~/Library/LaunchAgents/dev.tellur.push.<id>.plist`) on
+macOS, **systemd `--user`** (`~/.config/systemd/user/tellur-push-<id>.{service,timer}`)
+on Linux. It is **opt-in**: without `--background`, capture and sync still happen
+on every commit and `git push` via the hooks above — the service only adds the
+between-pushes catch-up. (Other platforms report it as unsupported.)
+
+```bash
+tellur connect --status   # show what's installed in this repo (hooks, notes, service)
+tellur connect --remove   # remove the hooks, notes config, and background service
+```
+
+Flags: `--no-login` / `--no-agents` skip those steps, `--no-browser` prints the
+login URL instead of opening it, `--remote <name>` selects the remote used for
+notes fetch config (default `origin`), and `--push-interval <secs>` sets the
+background push cadence (default 900s, used with `--background`).
+
+> **Privacy:** the `pre-push` hook publishes commit-level AI attribution
+> (`refs/notes/ai`) to anyone with repo read access. This is deliberate and
+> reversible with `tellur connect --remove`. The rich line-level/session data in
+> `.tellur/traces/` stays gitignored and only ever flows to the hub.
 
 ### Connect a developer (`tellur login` + `tellur push`)
 

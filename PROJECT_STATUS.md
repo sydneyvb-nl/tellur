@@ -1,6 +1,6 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-12 (handover refresh — all hub/login/push/source/timeline/OIDC work merged to `main`)
+**Last updated:** 2026-06-13 (zero-touch `tellur connect` shipped on `feat/connect-zero-touch`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main · **Open PRs:** none · **Working tree:** clean
@@ -28,12 +28,14 @@ timeline are all shipped.
 
 **Open work (priority order):**
 1. **Zero-touch + GitHub App** — design merged in
-   [`docs/proposals/GITHUB_APP.md`](docs/proposals/GITHUB_APP.md). Build order:
-   **P1 `tellur connect`** (git hooks + background pusher + auto `refs/notes/ai`
-   push — provider-agnostic, the headline "never touch the terminal" goal), then
-   **P2** GitHub App installation tokens for the blob proxy (replacing the stored
-   PAT), **P3** repo discovery + `push`-webhook notes harvester, **P4** PR-check
-   runs. This is the recommended next big item.
+   [`docs/proposals/GITHUB_APP.md`](docs/proposals/GITHUB_APP.md). **P1 `tellur
+   connect`** is **complete** (see 2026-06-13 below): git hooks (auto
+   `refs/notes/ai` refresh + auto `tellur push`/notes-push on `git push`) **plus**
+   the opt-in `--background` always-on launchd/systemd push service —
+   provider-agnostic, the headline "never touch the terminal" goal. Remaining
+   build order (all GitHub-specific): **P2** GitHub App installation tokens for the
+   blob proxy (replacing the stored PAT), **P3** repo discovery + `push`-webhook
+   notes harvester, **P4** PR-check runs. P2 is the recommended next big item.
 2. **Packaged releases** — GitHub Release automation exists; the **npm wrapper +
    Homebrew formula** (`dist/`) are not finished.
 3. **`docs/DEPLOYMENT.md`** (Fly.io / Cloud Run + managed Postgres + TLS + OIDC
@@ -53,6 +55,43 @@ has **no marking workflow on purpose** — review marking does not belong in the
 hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 "mark reviewed" action.
 
+> **2026-06-13 — Zero-touch `tellur connect` (GitHub App proposal P1, complete).**
+> On branch `feat/connect-zero-touch`. New top-level CLI command that bundles the
+> one-time setup so a developer never runs a `tellur` command again. `tellur
+> connect [--hub <url>]` (1) runs `tellur login` (best-effort — an unreachable hub
+> downgrades to a warning, never aborts), (2) runs `tellur setup agents`, and (3)
+> installs two **chained, non-clobbering git hooks**: `post-commit` → `tellur notes
+> export` (refresh `refs/notes/ai` from the local index) and `pre-push` → `tellur
+> push` (events → hub) + `tellur notes push "${1:-origin}"` (notes ride the push),
+> with a `TELLUR_CONNECT_PREPUSH` recursion guard (the nested notes-push `git push`
+> re-enters pre-push) and `|| true` everywhere so the hub never blocks a commit or
+> push. Also reuses `notes install-config` for the fetch refspec. Hooks are spliced
+> into a marker-delimited block (`# >>> tellur connect (managed) >>>`) so a
+> pre-existing user hook is preserved; re-install is idempotent. (4) **`--background`
+> installs an always-on per-user push service** (new `crates/cli/src/service.rs`):
+> launchd `~/Library/LaunchAgents/dev.tellur.push.<id>.plist` (macOS) or systemd
+> `--user` `tellur-push-<id>.{service,timer}` (Linux) that runs `tellur push` every
+> `--push-interval` secs (default 900) so idle machines sync between git pushes;
+> opt-in (a login-start service is intrusive); unsupported platforms error clearly.
+> Activation (`launchctl`/`systemctl`) is best-effort and skipped under
+> `TELLUR_CONNECT_NO_ACTIVATE` (test-only). `--status` shows hooks + notes config +
+> service; `--remove` excises our hook block (keeping the user's hook), deletes our
+> own hooks, unsets the notes fetch config, and tears down the service.
+> **Deliberate deviation from the proposal:** no `remote.<remote>.push` refspec — it
+> would override git's default of pushing the current branch and push *only* notes;
+> the pre-push hook covers notes-push instead. Tests: 4 new CLI integration tests
+> (hook+notes-config install incl. exec bit; chaining + idempotent re-install +
+> `--remove` restores the user's hook; `--background` writes+removes the service
+> file under a sandboxed `HOME`; no-remote run does not create a phantom remote);
+> full CLI suite 33 green; workspace clippy `-D warnings` + cargo-deny green.
+> **Codex review (PR #43):** the notes fetch refspec is now written only when the
+> target remote already exists — writing `remote.<remote>.fetch` in a freshly
+> `git init`'d repo materialised a phantom `origin` that broke a later `git remote
+> add origin`. Docs: README (*Zero-touch setup* section + CLI reference), AGENTS
+> architecture map, this file. Remaining GitHub-App work: P2 installation tokens
+> for the blob proxy, P3 repo discovery + notes-harvester webhook, P4 PR-check
+> runs.
+>
 > **2026-06-12 — Prompt excerpts (opt-in) + dynamic session timeline.** On branch
 > `feat/timeline-prompts`. Made the dead `redaction.store_prompt_excerpt` flag
 > real: when a repo opts in, the `UserPromptSubmit` hook stores a **secret-redacted,

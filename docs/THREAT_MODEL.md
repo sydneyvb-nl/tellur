@@ -176,6 +176,16 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
   compromised local OS user can read them — the same trust level as `.tellur`
   data. `tellur push` reaches the hub over HTTPS (rustls); the high-water mark in
   `.tellur/push_state.json` is non-sensitive (event ids + a count).
+- **`tellur connect` setup** installs git hooks and (opt-in `--background`) a
+  per-user push service. The hooks shell out to the resolved `tellur` binary and
+  are chained into a marked block that never clobbers a pre-existing hook; every
+  hub-touching step is best-effort (`|| true`) so an unreachable hub never blocks
+  a commit or push. The background launchd/systemd service runs `tellur push` as
+  the logged-in user — same trust level as the stored credentials it uses, no new
+  privilege. **Auto-pushing `refs/notes/ai` publishes commit-level AI attribution**
+  to anyone with read access on the git remote: a deliberate, consent-surfaced,
+  `--remove`-reversible publication (the rich line-level/session data in
+  `.tellur/traces/` stays gitignored and only flows to the hub).
 
 ## Key residual risks
 

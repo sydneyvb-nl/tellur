@@ -1361,3 +1361,212 @@ fn test_policy_pull_from_hub() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn test_connect_installs_hooks_and_notes_config() {
+    let dir = temp_repo();
+    // A remote must exist for the notes fetch refspec to be configured.
+    Command::new("git")
+        .args(["remote", "add", "origin", "https://example.com/repo.git"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let output = tellur()
+        .args(["connect", "--no-login", "--no-agents"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let post_commit = fs::read_to_string(dir.join(".git/hooks/post-commit")).unwrap();
+    assert!(post_commit.contains("tellur connect (managed)"));
+    assert!(post_commit.contains("notes export"));
+
+    let pre_push = fs::read_to_string(dir.join(".git/hooks/pre-push")).unwrap();
+    assert!(pre_push.contains("tellur connect (managed)"));
+    assert!(pre_push.contains("push"));
+    assert!(
+        pre_push.contains("TELLUR_CONNECT_PREPUSH"),
+        "recursion guard missing"
+    );
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(dir.join(".git/hooks/pre-push"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o111, 0o111, "pre-push hook is not executable");
+    }
+
+    // Notes fetch refspec is configured so notes travel with the repo.
+    let cfg = Command::new("git")
+        .args(["config", "--get-all", "remote.origin.fetch"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&cfg.stdout).contains("refs/notes/ai"));
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_connect_without_remote_does_not_create_phantom_remote() {
+    // A fresh repo with no `origin`: connect must not write remote.origin.fetch,
+    // otherwise a later `git remote add origin` fails with "already exists".
+    let dir = temp_repo();
+    let output = tellur()
+        .args(["connect", "--no-login", "--no-agents"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Hooks are still installed; notes config is skipped.
+    assert!(dir.join(".git/hooks/pre-push").exists());
+    let cfg = Command::new("git")
+        .args(["config", "--get-all", "remote.origin.fetch"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&cfg.stdout).trim().is_empty(),
+        "phantom remote.origin.fetch was written"
+    );
+
+    // The user can still add origin cleanly.
+    let add = Command::new("git")
+        .args(["remote", "add", "origin", "https://example.com/repo.git"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        add.status.success(),
+        "git remote add failed: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_connect_preserves_existing_hook_and_remove_restores_it() {
+    let dir = temp_repo();
+    fs::create_dir_all(dir.join(".git/hooks")).unwrap();
+    fs::write(
+        dir.join(".git/hooks/pre-push"),
+        "#!/bin/sh\necho \"my existing hook\"\n",
+    )
+    .unwrap();
+
+    let installed = tellur()
+        .args(["connect", "--no-login", "--no-agents"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(installed.status.success());
+
+    let pre_push = fs::read_to_string(dir.join(".git/hooks/pre-push")).unwrap();
+    assert!(pre_push.contains("my existing hook"), "user hook clobbered");
+    assert!(pre_push.contains("tellur connect (managed)"));
+
+    // Re-install is idempotent: exactly one managed block (one begin + one end).
+    tellur()
+        .args(["connect", "--no-login", "--no-agents"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let pre_push = fs::read_to_string(dir.join(".git/hooks/pre-push")).unwrap();
+    assert_eq!(
+        pre_push.matches("tellur connect (managed)").count(),
+        2,
+        "managed block duplicated on re-install"
+    );
+
+    // Remove drops our block but keeps the user's hook and deletes our own hook.
+    let removed = tellur()
+        .args(["connect", "--remove"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(removed.status.success());
+
+    let pre_push = fs::read_to_string(dir.join(".git/hooks/pre-push")).unwrap();
+    assert!(pre_push.contains("my existing hook"));
+    assert!(!pre_push.contains("tellur connect (managed)"));
+    assert!(
+        !dir.join(".git/hooks/post-commit").exists(),
+        "our post-commit hook should be removed"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn connect_service_dir(home: &std::path::Path) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        home.join("Library/LaunchAgents")
+    } else {
+        home.join(".config/systemd/user")
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn test_connect_background_installs_and_removes_service() {
+    let dir = temp_repo();
+    let home = std::env::temp_dir().join(format!("tellur-home-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&home);
+    fs::create_dir_all(&home).unwrap();
+
+    // TELLUR_CONNECT_NO_ACTIVATE keeps the test from touching the real launchd/
+    // systemd session; HOME redirects the per-user service dir into the sandbox.
+    let installed = tellur()
+        .args(["connect", "--no-login", "--no-agents", "--background"])
+        .current_dir(&dir)
+        .env("HOME", &home)
+        .env_remove("XDG_CONFIG_HOME")
+        .env("TELLUR_CONNECT_NO_ACTIVATE", "1")
+        .output()
+        .unwrap();
+    assert!(
+        installed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&installed.stderr)
+    );
+
+    let svc_dir = connect_service_dir(&home);
+    let count = fs::read_dir(&svc_dir)
+        .map(|rd| rd.filter_map(|e| e.ok()).count())
+        .unwrap_or(0);
+    assert!(
+        count >= 1,
+        "no background service file written in {svc_dir:?}"
+    );
+
+    let removed = tellur()
+        .args(["connect", "--remove"])
+        .current_dir(&dir)
+        .env("HOME", &home)
+        .env_remove("XDG_CONFIG_HOME")
+        .env("TELLUR_CONNECT_NO_ACTIVATE", "1")
+        .output()
+        .unwrap();
+    assert!(removed.status.success());
+    let count_after = fs::read_dir(&svc_dir)
+        .map(|rd| rd.filter_map(|e| e.ok()).count())
+        .unwrap_or(0);
+    assert_eq!(count_after, 0, "service file not removed from {svc_dir:?}");
+
+    let _ = fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(&home);
+}
