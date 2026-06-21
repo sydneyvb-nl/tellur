@@ -116,6 +116,15 @@ enum AdminAction {
         #[arg(long)]
         clear: bool,
     },
+    /// Map a GitHub App installation id to an org for webhook ingestion.
+    SetGithubInstallation {
+        #[arg(long)]
+        org: String,
+        #[arg(long)]
+        installation_id: i64,
+        #[arg(long)]
+        account: String,
+    },
 }
 
 #[tokio::main]
@@ -337,6 +346,22 @@ fn run_admin(config: Config, action: AdminAction) -> Result<()> {
                 if raw.is_some() { "set" } else { "—" },
                 if token.is_some() { "set" } else { "—" }
             );
+        }
+        AdminAction::SetGithubInstallation {
+            org,
+            installation_id,
+            account,
+        } => {
+            store.set_github_installation(&org, installation_id, &account)?;
+            store.append_audit(&AuditEntry {
+                org_id: Some(org),
+                actor_member_id: None,
+                action: "github_installation.set".to_string(),
+                detail: format!(
+                    "installation_id={installation_id} account={account} via=admin-cli"
+                ),
+            })?;
+            println!("Mapped GitHub installation {installation_id} ({account})");
         }
     }
     Ok(())

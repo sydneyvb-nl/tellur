@@ -275,6 +275,17 @@ pub struct RepoSource {
     pub token: Option<String>,
 }
 
+/// A GitHub App installation mapped to one Tellur org. Inbound GitHub webhooks
+/// resolve tenancy through this table before they can provision repos or ingest
+/// harvested notes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubInstallation {
+    pub org_id: String,
+    pub installation_id: i64,
+    pub account_login: String,
+    pub updated_at: String,
+}
+
 /// A member with the facets the People & Access screen needs (A2). `sso_bound`
 /// is whether the member has a bound OIDC subject (can sign in via SSO).
 #[derive(Debug, Clone, serde::Serialize)]
@@ -376,6 +387,29 @@ pub trait Store: Send + Sync {
         raw: Option<&str>,
         token: Option<&str>,
     ) -> Result<()>;
+
+    /// Associate a GitHub App installation with an org. The server admin CLI is
+    /// the current setup path; webhook handlers use this mapping to stay
+    /// tenant-scoped.
+    fn set_github_installation(
+        &self,
+        org_id: &str,
+        installation_id: i64,
+        account_login: &str,
+    ) -> Result<()>;
+
+    /// Resolve a GitHub App installation to its org mapping.
+    fn github_installation(&self, installation_id: i64) -> Result<Option<GithubInstallation>>;
+
+    /// Mark a commit's Git note as harvested. Returns `true` for the first
+    /// harvest and `false` for redelivered webhooks / already-seen commits.
+    fn mark_github_note_harvested(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        commit_sha: &str,
+        note_sha: &str,
+    ) -> Result<bool>;
 
     // ─── Fine-grained per-repo RBAC (additive grants) ────────────────────────
 

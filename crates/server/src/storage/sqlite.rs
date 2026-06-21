@@ -12,14 +12,14 @@ use tellur_core::schema::types::FileAttribution;
 use super::chain;
 use super::{
     ActivityBucket, ActivityGroup, AuditEntry, AuditRecord, ComplianceSnapshot, DeviceAuth,
-    DevicePoll, IngestEvent, Job, LoginTx, MemberInfo, Org, OrgReport, PolicyDoc, PolicySummary,
-    Repo, RepoFacts, RepoRoleGrant, RepoSource, RepoSummary, ScimGroup, ScimUser, SessionSummary,
-    Store, StoredEvent, role_from_group_name,
+    DevicePoll, GithubInstallation, IngestEvent, Job, LoginTx, MemberInfo, Org, OrgReport,
+    PolicyDoc, PolicySummary, Repo, RepoFacts, RepoRoleGrant, RepoSource, RepoSummary, ScimGroup,
+    ScimUser, SessionSummary, Store, StoredEvent, role_from_group_name,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
 /// Current schema version. Bumped as migrations are added in later phases.
-const SCHEMA_VERSION: &str = "19";
+const SCHEMA_VERSION: &str = "20";
 
 /// A SQLite-backed store. The connection is behind a `Mutex` so the store is
 /// `Send + Sync` and usable as `Arc<dyn Store>`.
@@ -248,6 +248,20 @@ impl Store for SqliteStore {
                  source_token TEXT,
                  updated_at   TEXT NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS github_installation (
+                 installation_id INTEGER PRIMARY KEY,
+                 org_id          TEXT NOT NULL REFERENCES org(id),
+                 account_login   TEXT NOT NULL,
+                 updated_at      TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS github_note_harvest (
+                 org_id      TEXT NOT NULL,
+                 repo_id     TEXT NOT NULL REFERENCES repo(id),
+                 commit_sha  TEXT NOT NULL,
+                 note_sha    TEXT NOT NULL,
+                 harvested_at TEXT NOT NULL,
+                 PRIMARY KEY (org_id, repo_id, commit_sha)
+             );
              CREATE TABLE IF NOT EXISTS repo_role (
                  org_id     TEXT NOT NULL REFERENCES org(id),
                  repo_id    TEXT NOT NULL REFERENCES repo(id),
@@ -389,6 +403,22 @@ impl Store for SqliteStore {
         // v19: optional provider token for the private-repo blob proxy (A12).
         // After the rebuild above, so the column survives that narrow upgrade.
         ensure_column(&conn, "repo_source", "source_token", "TEXT")?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS github_installation (
+                 installation_id INTEGER PRIMARY KEY,
+                 org_id          TEXT NOT NULL REFERENCES org(id),
+                 account_login   TEXT NOT NULL,
+                 updated_at      TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS github_note_harvest (
+                 org_id      TEXT NOT NULL,
+                 repo_id     TEXT NOT NULL REFERENCES repo(id),
+                 commit_sha  TEXT NOT NULL,
+                 note_sha    TEXT NOT NULL,
+                 harvested_at TEXT NOT NULL,
+                 PRIMARY KEY (org_id, repo_id, commit_sha)
+             );",
+        )?;
         ensure_column(
             &conn,
             "audit_head",
@@ -620,6 +650,82 @@ impl Store for SqliteStore {
             )?;
         }
         Ok(())
+    }
+
+    fn set_github_installation(
+        &self,
+        org_id: &str,
+        installation_id: i64,
+        account_login: &str,
+    ) -> Result<()> {
+        let conn = self.conn()?;
+        let org_exists = conn
+            .query_row("SELECT 1 FROM org WHERE id = ?1", params![org_id], |_| {
+                Ok(())
+            })
+            .optional()?
+            .is_some();
+        if !org_exists {
+            bail!("org {org_id} not found");
+        }
+        conn.execute(
+            "INSERT INTO github_installation
+                 (installation_id, org_id, account_login, updated_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(installation_id) DO UPDATE SET
+                 org_id = excluded.org_id,
+                 account_login = excluded.account_login,
+                 updated_at = excluded.updated_at",
+            params![
+                installation_id,
+                org_id,
+                account_login,
+                chrono::Utc::now().to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn github_installation(&self, installation_id: i64) -> Result<Option<GithubInstallation>> {
+        let conn = self.conn()?;
+        conn.query_row(
+            "SELECT org_id, installation_id, account_login, updated_at
+             FROM github_installation WHERE installation_id = ?1",
+            params![installation_id],
+            |r| {
+                Ok(GithubInstallation {
+                    org_id: r.get(0)?,
+                    installation_id: r.get(1)?,
+                    account_login: r.get(2)?,
+                    updated_at: r.get(3)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    fn mark_github_note_harvested(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        commit_sha: &str,
+        note_sha: &str,
+    ) -> Result<bool> {
+        let conn = self.conn()?;
+        let n = conn.execute(
+            "INSERT OR IGNORE INTO github_note_harvest
+                 (org_id, repo_id, commit_sha, note_sha, harvested_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                org_id,
+                repo_id,
+                commit_sha,
+                note_sha,
+                chrono::Utc::now().to_rfc3339()
+            ],
+        )?;
+        Ok(n == 1)
     }
 
     fn set_repo_role(

@@ -1,6 +1,6 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-13 (external-review hardening triage on `fix/review-hardening`)
+**Last updated:** 2026-06-16 (GitHub App P3 notes harvester on `codex/github-app-notes-harvester`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main · **Open PRs:** none · **Working tree:** clean
@@ -32,14 +32,15 @@ timeline are all shipped.
    connect`** is **complete** (git hooks + opt-in `--background` push service).
    **P2 GitHub App installation tokens** for the blob proxy is **complete** (see
    2026-06-13 below): the proxy mints short-lived per-repo `Contents:read`
-   installation tokens for GitHub repos, with the PAT as the fallback. Remaining
-   build order (all GitHub-specific, need a live App to fully E2E): **P3** repo
-   discovery + auto-provision + the `push`-webhook **notes harvester** (HMAC-verified
-   inbound webhook → fetch `refs/notes/ai` via the installation token → ingest
-   commit-level attribution, idempotent per `(repo, commit)`), then **P4** the PR
-   risk-report **Check Run**. P3 is the recommended next item. **Note:** P2 is
-   verified by unit + mock-client integration tests; a maintainer must verify it
-   against a real GitHub App (App id + private key) — there is no live App in CI.
+   installation tokens for GitHub repos, with the PAT as the fallback. **P3 repo
+   discovery + auto-provision + the `push`-webhook notes harvester** is complete:
+   HMAC-verified inbound webhooks resolve a mapped installation id to one org,
+   sync installed repos/source templates, fetch `refs/notes/ai` through the
+   installation token, and ingest one commit-level event idempotently per
+   `(repo, commit)`. Remaining GitHub-specific work: **P4** the PR risk-report
+   **Check Run**. **Note:** P2/P3 are verified by unit + mock-client integration
+   tests; a maintainer must verify them against a real GitHub App (App id +
+   private key + webhook secret) — there is no live App in CI.
    Live setup walkthrough: [`docs/GITHUB_APP_SETUP.md`](docs/GITHUB_APP_SETUP.md).
 2. **Packaged releases** — GitHub Release automation exists; the **npm wrapper +
    Homebrew formula** (`dist/`) are not finished.
@@ -60,6 +61,25 @@ has **no marking workflow on purpose** — review marking does not belong in the
 hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 "mark reviewed" action.
 
+> **2026-06-16 — GitHub App repo discovery + notes harvester (proposal P3).** On
+> branch `codex/github-app-notes-harvester`. Added `POST /webhook/github` for
+> GitHub App webhooks. The endpoint requires `TELLUR_GITHUB_WEBHOOK_SECRET` and
+> verifies `X-Hub-Signature-256` before parsing the body. Tenant binding is
+> explicit: `tellur-server admin set-github-installation --org <org>
+> --installation-id <id> --account <login>` writes `github_installation`, and
+> unsigned/unmapped deliveries cannot create repos. `installation_repositories`
+> refreshes installed repo discovery; `push` syncs installed repos and source
+> templates, fetches the current `refs/notes/ai` tree through a GitHub App
+> installation token, finds the note blob for each pushed commit, parses the Git
+> AI authorship note, and appends a compact `github.note.harvest` event to the
+> repo chain. `github_note_harvest` enforces idempotency per
+> `(org, repo, commit)`, so webhook redelivery does not double-count. New schema
+> v20 tables exist in SQLite + Postgres. Tests: targeted
+> `cargo test -p tellur-server --test github_webhook` covers valid HMAC,
+> auto-provision/source sync, note import, redelivery idempotency, and invalid
+> signature rejection. Remaining: P4 PR risk-report Check Runs; live GitHub App
+> E2E with real webhook delivery.
+>
 > **2026-06-13 — External code-review hardening (triaged).** On branch
 > `fix/review-hardening`. Acted on an external full-codebase review — but most of
 > its P1/P2 findings did **not** survive verification against the code, so only the
@@ -122,8 +142,9 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > a Tokio worker; (2) **GitHub Enterprise** is now actually supported — the host of
 > `TELLUR_GITHUB_API_BASE` is threaded through `github_owner_repo`, the source SSRF
 > allowlist, and the auth-header classifier, so a GHES **Contents API** template is
-> recognised + fetched (a `raw.<host>` subdomain is out of scope). Remaining: P3
-> repo discovery + notes-harvester webhook, P4 PR-check runs.
+> recognised + fetched (a `raw.<host>` subdomain is out of scope). Superseded:
+> P3 repo discovery + notes-harvester webhook is now shipped; remaining P4
+> PR-check runs.
 >
 > **2026-06-13 — Zero-touch `tellur connect` (GitHub App proposal P1, complete).**
 > On branch `feat/connect-zero-touch`. New top-level CLI command that bundles the
@@ -158,9 +179,8 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > target remote already exists — writing `remote.<remote>.fetch` in a freshly
 > `git init`'d repo materialised a phantom `origin` that broke a later `git remote
 > add origin`. Docs: README (*Zero-touch setup* section + CLI reference), AGENTS
-> architecture map, this file. Remaining GitHub-App work: P2 installation tokens
-> for the blob proxy, P3 repo discovery + notes-harvester webhook, P4 PR-check
-> runs.
+> architecture map, this file. Superseded: P2 installation tokens and P3 repo
+> discovery + notes-harvester webhook are now shipped; remaining P4 PR-check runs.
 >
 > **2026-06-12 — Prompt excerpts (opt-in) + dynamic session timeline.** On branch
 > `feat/timeline-prompts`. Made the dead `redaction.store_prompt_excerpt` flag

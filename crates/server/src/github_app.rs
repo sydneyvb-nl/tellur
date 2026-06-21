@@ -27,6 +27,8 @@ pub struct GithubAppConfig {
     pub private_key_pem: String,
     /// API base (default `https://api.github.com`; override for GitHub Enterprise).
     pub api_base: String,
+    /// Optional webhook secret for HMAC verification of inbound GitHub webhooks.
+    pub webhook_secret: Option<String>,
 }
 
 impl GithubAppConfig {
@@ -60,10 +62,12 @@ impl GithubAppConfig {
         };
         let api_base = non_empty_env("TELLUR_GITHUB_API_BASE")
             .unwrap_or_else(|| "https://api.github.com".to_string());
+        let webhook_secret = non_empty_env("TELLUR_GITHUB_WEBHOOK_SECRET");
         Some(Self {
             app_id,
             private_key_pem,
             api_base,
+            webhook_secret,
         })
     }
 }
@@ -149,6 +153,66 @@ pub trait GithubAppApi: Send + Sync {
         installation_id: u64,
         repo: &str,
     ) -> Result<InstallationToken>;
+
+    /// List repositories visible to an installation. P3 uses this for repo
+    /// discovery / auto-provision; defaulted so older unit-test mocks only need
+    /// the source-proxy methods they exercise.
+    fn installation_repositories(
+        &self,
+        _api_base: &str,
+        _installation_token: &str,
+    ) -> Result<Vec<GithubRepository>> {
+        anyhow::bail!("GitHub repository discovery is not implemented by this client")
+    }
+
+    /// Read the current object at a Git ref, e.g. `notes/ai`.
+    fn ref_object(
+        &self,
+        _api_base: &str,
+        _installation_token: &str,
+        _owner: &str,
+        _repo: &str,
+        _git_ref: &str,
+    ) -> Result<Option<GitObjectRef>> {
+        anyhow::bail!("GitHub ref lookup is not implemented by this client")
+    }
+
+    /// Read a Git commit object.
+    fn commit_object(
+        &self,
+        _api_base: &str,
+        _installation_token: &str,
+        _owner: &str,
+        _repo: &str,
+        _sha: &str,
+    ) -> Result<GitCommitObject> {
+        anyhow::bail!("GitHub commit lookup is not implemented by this client")
+    }
+
+    /// Read a Git tree recursively.
+    fn tree(
+        &self,
+        _api_base: &str,
+        _installation_token: &str,
+        _owner: &str,
+        _repo: &str,
+        _sha: &str,
+    ) -> Result<GitTreeObject> {
+        anyhow::bail!("GitHub tree lookup is not implemented by this client")
+    }
+
+    /// Read a Git blob as text. GitHub returns base64 for the standard JSON
+    /// response; implementations should decode it before returning.
+    fn blob_text(
+        &self,
+        _api_base: &str,
+        _installation_token: &str,
+        _owner: &str,
+        _repo: &str,
+        _sha: &str,
+    ) -> Result<String> {
+        anyhow::bail!("GitHub blob lookup is not implemented by this client")
+    }
 }
 
 /// Real client over ureq/rustls.
@@ -163,6 +227,95 @@ struct InstallationResponse {
 struct TokenResponse {
     token: String,
     expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GithubRepository {
+    pub full_name: String,
+    pub name: String,
+    pub owner_login: String,
+    pub default_branch: String,
+    #[serde(default)]
+    pub private: bool,
+}
+
+#[derive(Deserialize)]
+struct RepositoriesResponse {
+    repositories: Vec<GithubRepositoryWire>,
+}
+
+#[derive(Deserialize)]
+struct GithubRepositoryWire {
+    full_name: String,
+    name: String,
+    owner: GithubOwnerWire,
+    default_branch: String,
+    #[serde(default)]
+    private: bool,
+}
+
+#[derive(Deserialize)]
+struct GithubOwnerWire {
+    login: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitObjectRef {
+    pub sha: String,
+}
+
+#[derive(Deserialize)]
+struct RefResponse {
+    object: RefObjectWire,
+}
+
+#[derive(Deserialize)]
+struct RefObjectWire {
+    sha: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitCommitObject {
+    pub tree_sha: String,
+}
+
+#[derive(Deserialize)]
+struct CommitResponse {
+    tree: RefObjectWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitTreeObject {
+    pub entries: Vec<GitTreeEntry>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitTreeEntry {
+    pub path: String,
+    pub kind: String,
+    pub sha: String,
+}
+
+#[derive(Deserialize)]
+struct TreeResponse {
+    tree: Vec<TreeEntryWire>,
+    #[serde(default)]
+    truncated: bool,
+}
+
+#[derive(Deserialize)]
+struct TreeEntryWire {
+    path: String,
+    #[serde(rename = "type")]
+    kind: String,
+    sha: String,
+}
+
+#[derive(Deserialize)]
+struct BlobResponse {
+    content: String,
+    encoding: String,
 }
 
 impl GithubAppApi for HttpGithubAppApi {
@@ -193,11 +346,16 @@ impl GithubAppApi for HttpGithubAppApi {
             "{}/app/installations/{installation_id}/access_tokens",
             api_base.trim_end_matches('/')
         );
-        // Scope the token to the single repo, read-only contents.
-        let body = serde_json::json!({
-            "repositories": [repo],
-            "permissions": { "contents": "read" },
-        });
+        // Scope source/blob fetches to one repo. Repository discovery may need
+        // an installation-wide token; callers pass an empty repo hint for that.
+        let body = if repo.is_empty() {
+            serde_json::json!({ "permissions": { "contents": "read" } })
+        } else {
+            serde_json::json!({
+                "repositories": [repo],
+                "permissions": { "contents": "read" },
+            })
+        };
         let resp: TokenResponse = ureq::post(&url)
             .set("Authorization", &format!("Bearer {jwt}"))
             .set("Accept", "application/vnd.github+json")
@@ -210,6 +368,158 @@ impl GithubAppApi for HttpGithubAppApi {
             token: resp.token,
             expires_at: resp.expires_at,
         })
+    }
+
+    fn installation_repositories(
+        &self,
+        api_base: &str,
+        installation_token: &str,
+    ) -> Result<Vec<GithubRepository>> {
+        let url = format!(
+            "{}/installation/repositories",
+            api_base.trim_end_matches('/')
+        );
+        let resp: RepositoriesResponse = ureq::get(&url)
+            .set("Authorization", &format!("Bearer {installation_token}"))
+            .set("Accept", "application/vnd.github+json")
+            .set("User-Agent", "tellur-server")
+            .call()
+            .context("GitHub App repository discovery failed")?
+            .into_json()
+            .context("invalid GitHub App repositories response")?;
+        Ok(resp
+            .repositories
+            .into_iter()
+            .map(|r| GithubRepository {
+                full_name: r.full_name,
+                name: r.name,
+                owner_login: r.owner.login,
+                default_branch: r.default_branch,
+                private: r.private,
+            })
+            .collect())
+    }
+
+    fn ref_object(
+        &self,
+        api_base: &str,
+        installation_token: &str,
+        owner: &str,
+        repo: &str,
+        git_ref: &str,
+    ) -> Result<Option<GitObjectRef>> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/git/ref/{}",
+            api_base.trim_end_matches('/'),
+            git_ref.trim_start_matches("refs/")
+        );
+        match ureq::get(&url)
+            .set("Authorization", &format!("Bearer {installation_token}"))
+            .set("Accept", "application/vnd.github+json")
+            .set("User-Agent", "tellur-server")
+            .call()
+        {
+            Ok(resp) => {
+                let parsed: RefResponse = resp
+                    .into_json()
+                    .context("invalid GitHub ref lookup response")?;
+                Ok(Some(GitObjectRef {
+                    sha: parsed.object.sha,
+                }))
+            }
+            Err(ureq::Error::Status(404, _)) => Ok(None),
+            Err(e) => Err(anyhow::anyhow!("GitHub ref lookup failed: {e}")),
+        }
+    }
+
+    fn commit_object(
+        &self,
+        api_base: &str,
+        installation_token: &str,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+    ) -> Result<GitCommitObject> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/git/commits/{sha}",
+            api_base.trim_end_matches('/')
+        );
+        let resp: CommitResponse = ureq::get(&url)
+            .set("Authorization", &format!("Bearer {installation_token}"))
+            .set("Accept", "application/vnd.github+json")
+            .set("User-Agent", "tellur-server")
+            .call()
+            .context("GitHub commit lookup failed")?
+            .into_json()
+            .context("invalid GitHub commit response")?;
+        Ok(GitCommitObject {
+            tree_sha: resp.tree.sha,
+        })
+    }
+
+    fn tree(
+        &self,
+        api_base: &str,
+        installation_token: &str,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+    ) -> Result<GitTreeObject> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/git/trees/{sha}?recursive=1",
+            api_base.trim_end_matches('/')
+        );
+        let resp: TreeResponse = ureq::get(&url)
+            .set("Authorization", &format!("Bearer {installation_token}"))
+            .set("Accept", "application/vnd.github+json")
+            .set("User-Agent", "tellur-server")
+            .call()
+            .context("GitHub tree lookup failed")?
+            .into_json()
+            .context("invalid GitHub tree response")?;
+        Ok(GitTreeObject {
+            entries: resp
+                .tree
+                .into_iter()
+                .map(|e| GitTreeEntry {
+                    path: e.path,
+                    kind: e.kind,
+                    sha: e.sha,
+                })
+                .collect(),
+            truncated: resp.truncated,
+        })
+    }
+
+    fn blob_text(
+        &self,
+        api_base: &str,
+        installation_token: &str,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+    ) -> Result<String> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/git/blobs/{sha}",
+            api_base.trim_end_matches('/')
+        );
+        let resp: BlobResponse = ureq::get(&url)
+            .set("Authorization", &format!("Bearer {installation_token}"))
+            .set("Accept", "application/vnd.github+json")
+            .set("User-Agent", "tellur-server")
+            .call()
+            .context("GitHub blob lookup failed")?
+            .into_json()
+            .context("invalid GitHub blob response")?;
+        if resp.encoding != "base64" {
+            anyhow::bail!("unsupported GitHub blob encoding '{}'", resp.encoding);
+        }
+        use base64::Engine;
+        let compact = resp.content.lines().collect::<String>();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(compact)
+            .context("invalid GitHub blob base64")?;
+        String::from_utf8(bytes).context("GitHub note blob is not UTF-8")
     }
 }
 
@@ -253,6 +563,81 @@ impl GithubAppRuntime {
         let token = minted.token.clone();
         self.cache.lock().unwrap().insert(key, minted);
         Ok(token)
+    }
+
+    /// An installation token for a known installation id. Used by inbound
+    /// webhooks, where GitHub already tells us which installation delivered the
+    /// event.
+    pub fn token_for_installation(&self, installation_id: u64, repo: &str) -> Result<String> {
+        let owner_key = format!("installation:{installation_id}");
+        let key = (owner_key, repo.to_string());
+        if let Some(tok) = self.cache.lock().unwrap().get(&key)
+            && tok.expires_at > Utc::now() + Duration::minutes(5)
+        {
+            return Ok(tok.token.clone());
+        }
+        let jwt = build_app_jwt(
+            &self.config.app_id,
+            &self.config.private_key_pem,
+            Utc::now(),
+        )?;
+        let minted =
+            self.api
+                .installation_token(&self.config.api_base, &jwt, installation_id, repo)?;
+        let token = minted.token.clone();
+        self.cache.lock().unwrap().insert(key, minted);
+        Ok(token)
+    }
+
+    pub fn repositories_for_installation(
+        &self,
+        installation_id: u64,
+        repo_hint: &str,
+    ) -> Result<Vec<GithubRepository>> {
+        let token = self.token_for_installation(installation_id, repo_hint)?;
+        self.api
+            .installation_repositories(&self.config.api_base, &token)
+    }
+
+    pub fn note_blob_for_commit(
+        &self,
+        installation_id: u64,
+        owner: &str,
+        repo: &str,
+        commit_sha: &str,
+    ) -> Result<Option<(String, String)>> {
+        let token = self.token_for_installation(installation_id, repo)?;
+        let Some(notes_ref) =
+            self.api
+                .ref_object(&self.config.api_base, &token, owner, repo, "notes/ai")?
+        else {
+            return Ok(None);
+        };
+        let notes_commit =
+            self.api
+                .commit_object(&self.config.api_base, &token, owner, repo, &notes_ref.sha)?;
+        let tree = self.api.tree(
+            &self.config.api_base,
+            &token,
+            owner,
+            repo,
+            &notes_commit.tree_sha,
+        )?;
+        if tree.truncated {
+            anyhow::bail!("GitHub notes tree is truncated");
+        }
+        let Some(note) = tree
+            .entries
+            .into_iter()
+            .filter(|e| e.kind == "blob")
+            .find(|e| e.path.replace('/', "") == commit_sha)
+        else {
+            return Ok(None);
+        };
+        let text = self
+            .api
+            .blob_text(&self.config.api_base, &token, owner, repo, &note.sha)?;
+        Ok(Some((note.sha, text)))
     }
 }
 
@@ -352,6 +737,7 @@ mod tests {
             app_id: "1".into(),
             private_key_pem: String::new(),
             api_base: "https://ghe.example.com/api/v3".into(),
+            webhook_secret: None,
         };
         assert_eq!(cfg.api_host().as_deref(), Some("ghe.example.com"));
     }
@@ -382,6 +768,7 @@ mod tests {
                 app_id: "1".into(),
                 private_key_pem: test_key(),
                 api_base: "https://api.github.com".into(),
+                webhook_secret: None,
             },
             Arc::new(MockApi),
         );
