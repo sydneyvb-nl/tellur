@@ -53,7 +53,17 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
    by uninstalling the App. The **App private key** (`TELLUR_GITHUB_APP_PRIVATE_KEY`
    / `…_FILE`) is a new high-value secret — env/secret-store only, never committed;
    its compromise is equivalent to read access on every installed repo. The
-   outbound fetch is still bounded by the same SSRF host allowlist. The
+   outbound fetch is still bounded by the same SSRF host allowlist. P3 adds an
+   **inbound GitHub → hub webhook boundary** at `POST /webhook/github`: the hub
+   verifies `X-Hub-Signature-256` with `TELLUR_GITHUB_WEBHOOK_SECRET` before body
+   parsing, then resolves `installation.id` through the explicit
+   `github_installation` org mapping. Unmapped deliveries are rejected, so a
+   webhook cannot choose its own tenant. Accepted `installation_repositories` and
+   `push` deliveries sync installed GitHub repos/source templates and harvest
+   pushed `refs/notes/ai` commit notes via installation tokens; the
+   `github_note_harvest` table makes redelivery idempotent per `(org, repo,
+   commit)`. The webhook secret is a high-value inbound-auth secret and must live
+   in env/secret storage, never code or logs. The
    **export portal**
    — org bundles are **durable jobs**: `POST .../export/events|audit` enqueues
    (admin) and returns a job id, polled at `GET .../jobs/{id}` or listed via

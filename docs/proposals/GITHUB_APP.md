@@ -1,10 +1,10 @@
 # Proposal: Zero-touch provenance + GitHub App
 
-**Status:** proposed (not shipped) · **Last updated:** 2026-06-12
+**Status:** P1-P3 shipped; P4 open · **Last updated:** 2026-06-16
 **Builds on:** `tellur login`/`push` (#33), source connection + blob proxy (#35),
 `refs/notes/ai` notes commands, `tellur setup` agent hooks.
 
-> Design proposal, not shipped behavior. It defines how Tellur becomes
+> Design proposal plus shipped implementation notes. It defines how Tellur becomes
 > **zero-touch for developers** — after a one-time install, no one runs a
 > `tellur` command again — and where an optional **GitHub App** fits. It does
 > **not** change Tellur's local-first, Git-native guarantees.
@@ -114,12 +114,15 @@ fallback (GitLab/Bitbucket/self-managed).
 ### B2. Repo discovery + auto-provision
 List the installation's repos → create/sync them on the hub by name, auto-fill
 the source connection (templates) — no manual `--repo` or template entry.
+Shipped via signed GitHub webhooks plus an explicit installation→org mapping.
 
 ### B3. Notes harvester (the git-native sync)
 On the App's `push` **webhook**, the hub fetches the repo's updated `refs/notes/ai`
 (via the installation token) and ingests the commit-level attribution. This makes
 auto-pushed notes pay off automatically: a developer pushes code+notes to GitHub
 as usual; the hub stays current without any per-developer hub push of notes.
+Shipped as `POST /webhook/github`, HMAC-verified with
+`TELLUR_GITHUB_WEBHOOK_SECRET`, idempotent per `(org, repo, commit)`.
 
 ### B4. PR checks
 Post the Tellur PR risk report as a **Check Run** on the PR (native, replacing/
@@ -163,9 +166,9 @@ New or changed boundaries to add to `docs/THREAT_MODEL.md` when built:
 
 | Phase | Scope | Provider | Value |
 | --- | --- | --- | --- |
-| **P1** | `tellur connect`: git hooks + background pusher + auto notes push | any | **Zero-touch** (the headline goal) |
-| **P2** | GitHub App: installation tokens for the blob proxy | GitHub | Replaces stored PAT (security) |
-| **P3** | GitHub App: repo discovery + notes-harvester webhook | GitHub | Auto GitHub→hub commit-level sync |
+| **P1** | `tellur connect`: git hooks + background pusher + auto notes push | any | ✅ Shipped |
+| **P2** | GitHub App: installation tokens for the blob proxy | GitHub | ✅ Shipped |
+| **P3** | GitHub App: repo discovery + notes-harvester webhook | GitHub | ✅ Shipped |
 | **P4** | GitHub App: PR risk-report Check Run | GitHub | Native PR feedback |
 
 Recommended order: **P1 first** (delivers the developer's "never touch the

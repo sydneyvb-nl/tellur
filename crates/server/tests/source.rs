@@ -280,6 +280,7 @@ fn with_github_app_base(state: &mut AppState, api_base: &str) {
         app_id: "12345".into(),
         private_key_pem: test_key(),
         api_base: api_base.into(),
+        webhook_secret: None,
     };
     state.github_app = Some(Arc::new(tellur_server::github_app::GithubAppRuntime::new(
         cfg,

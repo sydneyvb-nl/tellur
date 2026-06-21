@@ -17,9 +17,9 @@ use r2d2_postgres::postgres::GenericClient;
 
 use super::{
     ActivityBucket, ActivityGroup, AuditEntry, AuditRecord, ComplianceSnapshot, DeviceAuth,
-    DevicePoll, IngestEvent, Job, LoginTx, MemberInfo, Org, OrgReport, PolicyDoc, PolicySummary,
-    Repo, RepoFacts, RepoRoleGrant, RepoSource, RepoSummary, ScimGroup, ScimUser, SessionSummary,
-    Store, StoredEvent, role_from_group_name,
+    DevicePoll, GithubInstallation, IngestEvent, Job, LoginTx, MemberInfo, Org, OrgReport,
+    PolicyDoc, PolicySummary, Repo, RepoFacts, RepoRoleGrant, RepoSource, RepoSummary, ScimGroup,
+    ScimUser, SessionSummary, Store, StoredEvent, role_from_group_name,
 };
 use crate::auth::{self, GeneratedToken, Principal, Role};
 
@@ -149,6 +149,20 @@ impl Store for PostgresStore {
                      template TEXT, raw_template TEXT, source_token TEXT,
                      updated_at TEXT NOT NULL
                  );
+                 CREATE TABLE IF NOT EXISTS github_installation (
+                     installation_id BIGINT PRIMARY KEY,
+                     org_id TEXT NOT NULL REFERENCES org(id),
+                     account_login TEXT NOT NULL,
+                     updated_at TEXT NOT NULL
+                 );
+                 CREATE TABLE IF NOT EXISTS github_note_harvest (
+                     org_id TEXT NOT NULL,
+                     repo_id TEXT NOT NULL REFERENCES repo(id),
+                     commit_sha TEXT NOT NULL,
+                     note_sha TEXT NOT NULL,
+                     harvested_at TEXT NOT NULL,
+                     PRIMARY KEY (org_id, repo_id, commit_sha)
+                 );
                  CREATE TABLE IF NOT EXISTS repo_role (
                      org_id TEXT NOT NULL REFERENCES org(id),
                      repo_id TEXT NOT NULL REFERENCES repo(id),
@@ -223,6 +237,20 @@ impl Store for PostgresStore {
                  ALTER TABLE repo_source ADD COLUMN IF NOT EXISTS raw_template TEXT;
                  ALTER TABLE repo_source ADD COLUMN IF NOT EXISTS source_token TEXT;
                  ALTER TABLE repo_source ALTER COLUMN template DROP NOT NULL;
+                 CREATE TABLE IF NOT EXISTS github_installation (
+                     installation_id BIGINT PRIMARY KEY,
+                     org_id TEXT NOT NULL REFERENCES org(id),
+                     account_login TEXT NOT NULL,
+                     updated_at TEXT NOT NULL
+                 );
+                 CREATE TABLE IF NOT EXISTS github_note_harvest (
+                     org_id TEXT NOT NULL,
+                     repo_id TEXT NOT NULL REFERENCES repo(id),
+                     commit_sha TEXT NOT NULL,
+                     note_sha TEXT NOT NULL,
+                     harvested_at TEXT NOT NULL,
+                     PRIMARY KEY (org_id, repo_id, commit_sha)
+                 );
                  ALTER TABLE job ADD COLUMN IF NOT EXISTS params TEXT;
                  ALTER TABLE member ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
                  ALTER TABLE member_identity ADD COLUMN IF NOT EXISTS oidc_issuer TEXT;
@@ -406,6 +434,74 @@ impl Store for PostgresStore {
             )?;
         }
         Ok(())
+    }
+
+    fn set_github_installation(
+        &self,
+        org_id: &str,
+        installation_id: i64,
+        account_login: &str,
+    ) -> Result<()> {
+        let mut client = self.client()?;
+        let org_exists = client
+            .query_opt("SELECT 1 FROM org WHERE id = $1", &[&org_id])?
+            .is_some();
+        if !org_exists {
+            bail!("org {org_id} not found");
+        }
+        client.execute(
+            "INSERT INTO github_installation
+                 (installation_id, org_id, account_login, updated_at)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (installation_id) DO UPDATE SET
+                 org_id = excluded.org_id,
+                 account_login = excluded.account_login,
+                 updated_at = excluded.updated_at",
+            &[
+                &installation_id,
+                &org_id,
+                &account_login,
+                &chrono::Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn github_installation(&self, installation_id: i64) -> Result<Option<GithubInstallation>> {
+        let row = self.client()?.query_opt(
+            "SELECT org_id, installation_id, account_login, updated_at
+             FROM github_installation WHERE installation_id = $1",
+            &[&installation_id],
+        )?;
+        Ok(row.map(|r| GithubInstallation {
+            org_id: r.get(0),
+            installation_id: r.get(1),
+            account_login: r.get(2),
+            updated_at: r.get(3),
+        }))
+    }
+
+    fn mark_github_note_harvested(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        commit_sha: &str,
+        note_sha: &str,
+    ) -> Result<bool> {
+        let changed = self.client()?.execute(
+            "INSERT INTO github_note_harvest
+                 (org_id, repo_id, commit_sha, note_sha, harvested_at)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (org_id, repo_id, commit_sha) DO NOTHING",
+            &[
+                &org_id,
+                &repo_id,
+                &commit_sha,
+                &note_sha,
+                &chrono::Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(changed == 1)
     }
 
     fn set_repo_role(

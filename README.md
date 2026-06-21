@@ -544,12 +544,16 @@ forever; the event provenance log is never pruned.
   `PATCH active=false`) revokes every credential type at once. A group named
   `tellur-admin` / `tellur-contributor` / `tellur-viewer` drives its members'
   role, recomputed on membership change.
-- **GitHub App (source access)** — optional, GitHub-only. Set
+- **GitHub App (source access + notes harvesting)** — optional, GitHub-only. Set
   `TELLUR_GITHUB_APP_ID` + `TELLUR_GITHUB_APP_PRIVATE_KEY` (or
   `TELLUR_GITHUB_APP_PRIVATE_KEY_FILE`) so the private-repo blob proxy authenticates
   with short-lived, per-repo `Contents:read` **installation tokens** instead of a
   stored PAT (`TELLUR_GITHUB_API_BASE` overrides the API base for GitHub
-  Enterprise). The App needs **Contents: read** + **Metadata: read**. Full
+  Enterprise). Add `TELLUR_GITHUB_WEBHOOK_SECRET` and map the installation with
+  `tellur-server admin set-github-installation` to let signed GitHub `push`
+  webhooks auto-provision repos and harvest pushed `refs/notes/ai` commit
+  attribution into the hub. The App needs **Contents: read** + **Metadata: read**
+  for P2/P3; P4 PR checks will add checks/pull-request permissions. Full
   step-by-step setup: [`docs/GITHUB_APP_SETUP.md`](docs/GITHUB_APP_SETUP.md).
 
 ### Zero-touch setup (`tellur connect`)
@@ -662,8 +666,11 @@ Screens (per [`docs/proposals/TEAM_DASHBOARD_UI.md`](docs/proposals/TEAM_DASHBOA
   `TELLUR_GITHUB_API_BASE` for GitHub Enterprise) and the proxy mints a
   short-lived, per-repo, `Contents:read` **installation token** per fetch instead
   — auto-rotating, revoked by uninstalling the App, no human-managed secret in the
-  DB. The PAT path stays as the fallback for GitLab/Bitbucket/self-managed (and
-  GitHub when the App isn't installed).
+  DB. With `TELLUR_GITHUB_WEBHOOK_SECRET` and an installation mapping, the same
+  App also accepts signed `push` webhooks at `/webhook/github`, syncs installed
+  repos/source templates, and harvests pushed `refs/notes/ai` commit attribution
+  idempotently. The PAT path stays as the fallback for GitLab/Bitbucket/self-managed
+  (and GitHub when the App isn't installed).
 - **Sessions & replay** — a dynamic per-session timeline: summary stats
   (events / duration / files / prompts), category + actor filters and search, and
   per-event nodes color-coded by kind (prompt / file / command / tool / test /
@@ -724,9 +731,10 @@ SSO, SCIM user + group provisioning, durable exports, compliance snapshots,
 retention, and the full team dashboard) are implemented. Active and upcoming work:
 
 - **Zero-touch provenance + GitHub App** — automatic `refs/notes/ai` push and
-  background hub sync so a developer never runs a command after install, plus an
-  optional GitHub App (installation-token source access, repo discovery,
-  notes harvester, PR checks). Design: [`docs/proposals/GITHUB_APP.md`](docs/proposals/GITHUB_APP.md).
+  background hub sync are implemented, and the optional GitHub App now covers
+  installation-token source access plus repo discovery / notes harvesting.
+  Remaining: native PR Check Runs. Design:
+  [`docs/proposals/GITHUB_APP.md`](docs/proposals/GITHUB_APP.md).
 - **Packaged releases** for npm, Homebrew, and GitHub Releases.
 - **Richer policy templates** for security-sensitive repositories.
 - **Broader agent coverage** as more tools expose stable local lifecycle hooks.

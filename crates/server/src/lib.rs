@@ -15,6 +15,7 @@ pub mod config;
 pub mod dashboard;
 pub mod error;
 pub mod github_app;
+pub mod github_webhook;
 pub mod jobs;
 pub mod metrics;
 pub mod oidc;
