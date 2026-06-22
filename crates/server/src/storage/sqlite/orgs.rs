@@ -18,8 +18,12 @@ impl SqliteStore {
         Ok(org)
     }
 
-
-    pub(crate) fn create_member(&self, org_id: &str, display_name: &str, role: Role) -> Result<String> {
+    pub(crate) fn create_member(
+        &self,
+        org_id: &str,
+        display_name: &str,
+        role: Role,
+    ) -> Result<String> {
         let member_id = ids::generate_id("mbr");
         let conn = self.conn()?;
         conn.execute(
@@ -37,7 +41,6 @@ impl SqliteStore {
         Ok(member_id)
     }
 
-
     pub(crate) fn create_token(&self, member_id: &str) -> Result<GeneratedToken> {
         let token = auth::generate_token()?;
         let conn = self.conn()?;
@@ -54,7 +57,6 @@ impl SqliteStore {
         .context("failed to create token (does the member exist?)")?;
         Ok(token)
     }
-
 
     pub(crate) fn authenticate(&self, token: &str) -> Result<Option<Principal>> {
         let Some((token_id, secret)) = auth::parse_token(token) else {
@@ -97,7 +99,6 @@ impl SqliteStore {
         }))
     }
 
-
     pub(crate) fn provision_member(
         &self,
         org_id: &str,
@@ -131,7 +132,6 @@ impl SqliteStore {
         Ok(member_id)
     }
 
-
     pub(crate) fn find_member_by_email(&self, email: &str) -> Result<Option<Principal>> {
         let conn = self.conn()?;
         principal_row(
@@ -141,7 +141,6 @@ impl SqliteStore {
             email,
         )
     }
-
 
     pub(crate) fn find_member_by_oidc_subject(
         &self,
@@ -174,8 +173,12 @@ impl SqliteStore {
         }
     }
 
-
-    pub(crate) fn bind_oidc_subject(&self, member_id: &str, issuer: &str, subject: &str) -> Result<bool> {
+    pub(crate) fn bind_oidc_subject(
+        &self,
+        member_id: &str,
+        issuer: &str,
+        subject: &str,
+    ) -> Result<bool> {
         // Only bind when no subject is set yet; never overwrite an existing
         // binding (that would let a different IdP account on the same email take
         // over the member).
@@ -187,7 +190,6 @@ impl SqliteStore {
         Ok(n > 0)
     }
 
-
     pub(crate) fn member_principal(&self, member_id: &str) -> Result<Option<Principal>> {
         let conn = self.conn()?;
         principal_row(
@@ -196,7 +198,6 @@ impl SqliteStore {
             member_id,
         )
     }
-
 
     pub(crate) fn list_members(&self, org_id: &str) -> Result<Vec<MemberInfo>> {
         let conn = self.conn()?;
@@ -233,5 +234,4 @@ impl SqliteStore {
         }
         Ok(out)
     }
-
 }

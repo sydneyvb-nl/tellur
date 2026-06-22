@@ -79,7 +79,6 @@ impl PostgresStore {
         Ok(new_ids)
     }
 
-
     pub(crate) fn event_count(&self, org_id: &str, repo_id: &str) -> Result<u64> {
         let n: i64 = self
             .client()?
@@ -90,7 +89,6 @@ impl PostgresStore {
             .get(0);
         Ok(n as u64)
     }
-
 
     pub(crate) fn verify_event_chain(&self, org_id: &str, repo_id: &str) -> Result<bool> {
         let mut client = self.client()?;
@@ -138,7 +136,6 @@ impl PostgresStore {
             None => Ok(counted == 0),
         }
     }
-
 
     pub(crate) fn put_attributions(
         &self,
@@ -194,8 +191,11 @@ impl PostgresStore {
         Ok(files.len())
     }
 
-
-    pub(crate) fn list_attributions(&self, org_id: &str, repo_id: &str) -> Result<Vec<FileAttribution>> {
+    pub(crate) fn list_attributions(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+    ) -> Result<Vec<FileAttribution>> {
         let rows = self.client()?.query(
             "SELECT file_path, git_blob_sha, ranges_json, updated_at
              FROM attribution WHERE org_id = $1 AND repo_id = $2 ORDER BY file_path",
@@ -217,7 +217,6 @@ impl PostgresStore {
         }
         Ok(out)
     }
-
 
     pub(crate) fn list_events(
         &self,
@@ -253,7 +252,6 @@ impl PostgresStore {
         Ok(out)
     }
 
-
     pub(crate) fn org_report(&self, org_id: &str) -> Result<OrgReport> {
         let mut client = self.client()?;
         let total_events: i64 = client
@@ -282,7 +280,6 @@ impl PostgresStore {
         })
     }
 
-
     pub(crate) fn recent_org_events(&self, org_id: &str, limit: u32) -> Result<Vec<StoredEvent>> {
         let rows = self.client()?.query(
             "SELECT seq, id, repo_id, session_id, ts, event_type, actor, payload
@@ -309,7 +306,6 @@ impl PostgresStore {
         Ok(out)
     }
 
-
     pub(crate) fn activity_by_day(
         &self,
         org_id: &str,
@@ -333,7 +329,6 @@ impl PostgresStore {
             })
             .collect())
     }
-
 
     pub(crate) fn repo_facts(&self, org_id: &str, repo_id: &str) -> Result<RepoFacts> {
         let mut client = self.client()?;
@@ -360,7 +355,6 @@ impl PostgresStore {
             last_activity,
         })
     }
-
 
     pub(crate) fn list_sessions(
         &self,
@@ -395,7 +389,6 @@ impl PostgresStore {
             .collect())
     }
 
-
     pub(crate) fn session_events(
         &self,
         org_id: &str,
@@ -427,7 +420,6 @@ impl PostgresStore {
         Ok(out)
     }
 
-
     pub(crate) fn export_events(&self, org_id: &str) -> Result<Vec<StoredEvent>> {
         let rows = self.client()?.query(
             "SELECT seq, id, repo_id, session_id, ts, event_type, actor, payload
@@ -453,5 +445,4 @@ impl PostgresStore {
         }
         Ok(out)
     }
-
 }

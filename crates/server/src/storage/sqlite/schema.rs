@@ -316,7 +316,6 @@ impl SqliteStore {
         Ok(())
     }
 
-
     pub(crate) fn health_check(&self) -> Result<()> {
         let conn = self.conn()?;
         conn.query_row(
@@ -327,5 +326,4 @@ impl SqliteStore {
         .context("database health check failed")?;
         Ok(())
     }
-
 }

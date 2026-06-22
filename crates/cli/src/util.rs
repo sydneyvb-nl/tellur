@@ -69,7 +69,10 @@ pub(crate) const PROMPT_EXCERPT_MAX: usize = 600;
 /// Build a secret-redacted, length-bounded excerpt of a prompt for storage.
 /// Secrets are stripped first (using the repo's redaction rules), then it is
 /// truncated on a char boundary with an ellipsis so it stays a compact preview.
-pub(crate) fn prompt_excerpt(engine: &tellur_core::redaction::RedactionEngine, text: &str) -> String {
+pub(crate) fn prompt_excerpt(
+    engine: &tellur_core::redaction::RedactionEngine,
+    text: &str,
+) -> String {
     let cleaned = engine
         .scan_and_redact(text)
         .redacted_content

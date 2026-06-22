@@ -23,7 +23,6 @@ impl PostgresStore {
             .collect())
     }
 
-
     pub(crate) fn list_audit(
         &self,
         org_id: &str,
@@ -78,7 +77,6 @@ impl PostgresStore {
             .collect())
     }
 
-
     pub(crate) fn append_audit(&self, entry: &AuditEntry) -> Result<()> {
         let ts = chrono::Utc::now().to_rfc3339();
         let mut client = self.client()?;
@@ -125,7 +123,6 @@ impl PostgresStore {
         Ok(())
     }
 
-
     pub(crate) fn audit_len(&self) -> Result<u64> {
         let n: i64 = self
             .client()?
@@ -133,7 +130,6 @@ impl PostgresStore {
             .get(0);
         Ok(n as u64)
     }
-
 
     pub(crate) fn verify_audit_chain(&self) -> Result<bool> {
         let mut client = self.client()?;
@@ -186,7 +182,6 @@ impl PostgresStore {
         }
     }
 
-
     pub(crate) fn seal_audit_before(&self, cutoff_rfc3339: &str) -> Result<u64> {
         let mut client = self.client()?;
         let mut tx = client.transaction()?;
@@ -226,5 +221,4 @@ impl PostgresStore {
         tx.commit()?;
         Ok(pruned)
     }
-
 }

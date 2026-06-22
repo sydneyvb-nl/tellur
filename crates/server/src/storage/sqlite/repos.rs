@@ -25,7 +25,6 @@ impl SqliteStore {
         })
     }
 
-
     pub(crate) fn find_repo(&self, org_id: &str, repo: &str) -> Result<Option<Repo>> {
         let conn = self.conn()?;
         let found: Option<(String, String)> = conn
@@ -52,7 +51,6 @@ impl SqliteStore {
         }))
     }
 
-
     pub(crate) fn get_repo_source(&self, org_id: &str, repo_id: &str) -> Result<RepoSource> {
         let conn = self.conn()?;
         let row = conn
@@ -71,7 +69,6 @@ impl SqliteStore {
             .optional()?;
         Ok(row.unwrap_or_default())
     }
-
 
     pub(crate) fn set_repo_source(
         &self,
@@ -101,7 +98,6 @@ impl SqliteStore {
         }
         Ok(())
     }
-
 
     pub(crate) fn set_github_installation(
         &self,
@@ -137,8 +133,10 @@ impl SqliteStore {
         Ok(())
     }
 
-
-    pub(crate) fn github_installation(&self, installation_id: i64) -> Result<Option<GithubInstallation>> {
+    pub(crate) fn github_installation(
+        &self,
+        installation_id: i64,
+    ) -> Result<Option<GithubInstallation>> {
         let conn = self.conn()?;
         conn.query_row(
             "SELECT org_id, installation_id, account_login, updated_at
@@ -156,7 +154,6 @@ impl SqliteStore {
         .optional()
         .map_err(Into::into)
     }
-
 
     pub(crate) fn mark_github_note_harvested(
         &self,
@@ -180,7 +177,6 @@ impl SqliteStore {
         )?;
         Ok(n == 1)
     }
-
 
     pub(crate) fn set_repo_role(
         &self,
@@ -230,8 +226,12 @@ impl SqliteStore {
         Ok(())
     }
 
-
-    pub(crate) fn remove_repo_role(&self, org_id: &str, repo_id: &str, member_id: &str) -> Result<bool> {
+    pub(crate) fn remove_repo_role(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        member_id: &str,
+    ) -> Result<bool> {
         let conn = self.conn()?;
         let n = conn.execute(
             "DELETE FROM repo_role WHERE org_id = ?1 AND repo_id = ?2 AND member_id = ?3",
@@ -240,8 +240,12 @@ impl SqliteStore {
         Ok(n > 0)
     }
 
-
-    pub(crate) fn get_repo_role(&self, org_id: &str, repo_id: &str, member_id: &str) -> Result<Option<Role>> {
+    pub(crate) fn get_repo_role(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        member_id: &str,
+    ) -> Result<Option<Role>> {
         let conn = self.conn()?;
         let role: Option<String> = conn
             .query_row(
@@ -253,8 +257,11 @@ impl SqliteStore {
         role.map(|r| Role::parse(&r)).transpose()
     }
 
-
-    pub(crate) fn list_repo_roles(&self, org_id: &str, repo_id: &str) -> Result<Vec<RepoRoleGrant>> {
+    pub(crate) fn list_repo_roles(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+    ) -> Result<Vec<RepoRoleGrant>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
             "SELECT member_id, role, updated_at FROM repo_role
@@ -274,7 +281,6 @@ impl SqliteStore {
         Ok(out)
     }
 
-
     pub(crate) fn list_repos(&self, org_id: &str) -> Result<Vec<RepoSummary>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
@@ -293,5 +299,4 @@ impl SqliteStore {
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
-
 }

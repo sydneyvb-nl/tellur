@@ -24,7 +24,6 @@ impl PostgresStore {
         Ok(())
     }
 
-
     pub(crate) fn count_logins(&self) -> Result<u64> {
         let n: i64 = self
             .client()?
@@ -33,7 +32,6 @@ impl PostgresStore {
         Ok(n as u64)
     }
 
-
     pub(crate) fn prune_expired_logins(&self, ttl_secs: i64) -> Result<u64> {
         let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(ttl_secs)).to_rfc3339();
         let n = self
@@ -41,7 +39,6 @@ impl PostgresStore {
             .execute("DELETE FROM oidc_login WHERE created_at < $1", &[&cutoff])?;
         Ok(n)
     }
-
 
     pub(crate) fn take_login(&self, state: &str) -> Result<Option<LoginTx>> {
         let row = self.client()?.query_opt(
@@ -57,7 +54,6 @@ impl PostgresStore {
         }))
     }
 
-
     pub(crate) fn create_session(&self, member_id: &str, ttl_secs: i64) -> Result<String> {
         let id = ids::generate_id("sess");
         let now = chrono::Utc::now();
@@ -69,7 +65,6 @@ impl PostgresStore {
         )?;
         Ok(id)
     }
-
 
     pub(crate) fn session_principal(&self, session_id: &str) -> Result<Option<Principal>> {
         let now = chrono::Utc::now().to_rfc3339();
@@ -89,14 +84,12 @@ impl PostgresStore {
         }
     }
 
-
     pub(crate) fn delete_session(&self, session_id: &str) -> Result<bool> {
         let n = self
             .client()?
             .execute("DELETE FROM session WHERE id = $1", &[&session_id])?;
         Ok(n > 0)
     }
-
 
     pub(crate) fn create_device_auth(&self, device_code: &str, user_code: &str) -> Result<()> {
         self.client()?.execute(
@@ -107,7 +100,6 @@ impl PostgresStore {
         Ok(())
     }
 
-
     pub(crate) fn count_device_auths(&self) -> Result<u64> {
         let n: i64 = self
             .client()?
@@ -116,7 +108,6 @@ impl PostgresStore {
         Ok(n as u64)
     }
 
-
     pub(crate) fn prune_expired_device_auths(&self, ttl_secs: i64) -> Result<u64> {
         let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(ttl_secs)).to_rfc3339();
         let n = self
@@ -124,7 +115,6 @@ impl PostgresStore {
             .execute("DELETE FROM device_auth WHERE created_at < $1", &[&cutoff])?;
         Ok(n)
     }
-
 
     pub(crate) fn find_device_by_user_code(&self, user_code: &str) -> Result<Option<DeviceAuth>> {
         let row = self.client()?.query_opt(
@@ -140,8 +130,12 @@ impl PostgresStore {
         }))
     }
 
-
-    pub(crate) fn set_device_decision(&self, user_code: &str, member_id: &str, approve: bool) -> Result<bool> {
+    pub(crate) fn set_device_decision(
+        &self,
+        user_code: &str,
+        member_id: &str,
+        approve: bool,
+    ) -> Result<bool> {
         let status = if approve { "approved" } else { "denied" };
         let n = self.client()?.execute(
             "UPDATE device_auth SET status = $2, member_id = $3
@@ -150,7 +144,6 @@ impl PostgresStore {
         )?;
         Ok(n > 0)
     }
-
 
     pub(crate) fn poll_device(&self, device_code: &str, ttl_secs: i64) -> Result<DevicePoll> {
         // A short transaction with an advisory lock serializes the read +
@@ -194,7 +187,6 @@ impl PostgresStore {
         Ok(outcome)
     }
 
-
     pub(crate) fn prune_expired_sessions(&self) -> Result<u64> {
         let now = chrono::Utc::now().to_rfc3339();
         let n = self
@@ -202,5 +194,4 @@ impl PostgresStore {
             .execute("DELETE FROM session WHERE expires_at < $1", &[&now])?;
         Ok(n)
     }
-
 }

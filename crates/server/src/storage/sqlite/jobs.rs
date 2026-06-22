@@ -12,8 +12,12 @@ impl SqliteStore {
         Ok(n as u64)
     }
 
-
-    pub(crate) fn enqueue_job(&self, org_id: &str, kind: &str, job_params: Option<&str>) -> Result<String> {
+    pub(crate) fn enqueue_job(
+        &self,
+        org_id: &str,
+        kind: &str,
+        job_params: Option<&str>,
+    ) -> Result<String> {
         let id = ids::generate_id("job");
         let now = chrono::Utc::now().to_rfc3339();
         self.conn()?
@@ -25,7 +29,6 @@ impl SqliteStore {
             .context("failed to enqueue job")?;
         Ok(id)
     }
-
 
     pub(crate) fn claim_next_job(&self) -> Result<Option<Job>> {
         let mut guard = self.conn()?;
@@ -69,7 +72,6 @@ impl SqliteStore {
         }))
     }
 
-
     pub(crate) fn complete_job(&self, job_id: &str, result_json: &str) -> Result<()> {
         self.conn()?.execute(
             "UPDATE job SET status = 'completed', result = ?2, updated_at = ?3 WHERE id = ?1",
@@ -78,7 +80,6 @@ impl SqliteStore {
         Ok(())
     }
 
-
     pub(crate) fn fail_job(&self, job_id: &str, error: &str) -> Result<()> {
         self.conn()?.execute(
             "UPDATE job SET status = 'failed', error = ?2, updated_at = ?3 WHERE id = ?1",
@@ -86,7 +87,6 @@ impl SqliteStore {
         )?;
         Ok(())
     }
-
 
     pub(crate) fn get_job(&self, org_id: &str, job_id: &str) -> Result<Option<Job>> {
         let conn = self.conn()?;
@@ -113,7 +113,6 @@ impl SqliteStore {
         Ok(row)
     }
 
-
     pub(crate) fn list_jobs(&self, org_id: &str, limit: u32) -> Result<Vec<Job>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
@@ -136,7 +135,6 @@ impl SqliteStore {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-
     pub(crate) fn requeue_running_jobs(&self) -> Result<u64> {
         let n = self.conn()?.execute(
             "UPDATE job SET status = 'queued', updated_at = ?1 WHERE status = 'running'",
@@ -144,5 +142,4 @@ impl SqliteStore {
         )?;
         Ok(n as u64)
     }
-
 }

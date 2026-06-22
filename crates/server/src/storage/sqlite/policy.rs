@@ -36,7 +36,6 @@ impl SqliteStore {
         Ok(version)
     }
 
-
     pub(crate) fn list_policies(&self, org_id: &str) -> Result<Vec<PolicySummary>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
@@ -51,7 +50,6 @@ impl SqliteStore {
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
-
 
     pub(crate) fn get_policy(&self, org_id: &str, name: &str) -> Result<Option<PolicyDoc>> {
         let conn = self.conn()?;
@@ -73,8 +71,11 @@ impl SqliteStore {
         Ok(doc)
     }
 
-
-    pub(crate) fn put_compliance_snapshots(&self, org_id: &str, snaps: &[ComplianceSnapshot]) -> Result<()> {
+    pub(crate) fn put_compliance_snapshots(
+        &self,
+        org_id: &str,
+        snaps: &[ComplianceSnapshot],
+    ) -> Result<()> {
         let mut guard = self.conn()?;
         let tx = guard.transaction()?;
         for snap in snaps {
@@ -102,7 +103,6 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
-
 
     pub(crate) fn latest_compliance(&self, org_id: &str) -> Result<Vec<ComplianceSnapshot>> {
         let conn = self.conn()?;
@@ -137,5 +137,4 @@ impl SqliteStore {
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
-
 }

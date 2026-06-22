@@ -197,7 +197,6 @@ impl PostgresStore {
         Ok(())
     }
 
-
     pub(crate) fn health_check(&self) -> Result<()> {
         // Verify the schema is migrated (not just that the DB is reachable), so
         // a connected-but-unmigrated backend reports not-ready instead of
@@ -211,5 +210,4 @@ impl PostgresStore {
             .context("database health check failed")?;
         Ok(())
     }
-
 }

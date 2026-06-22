@@ -82,7 +82,6 @@ impl SqliteStore {
         Ok(new_ids)
     }
 
-
     pub(crate) fn event_count(&self, org_id: &str, repo_id: &str) -> Result<u64> {
         let conn = self.conn()?;
         let n: i64 = conn.query_row(
@@ -92,7 +91,6 @@ impl SqliteStore {
         )?;
         Ok(n as u64)
     }
-
 
     pub(crate) fn verify_event_chain(&self, org_id: &str, repo_id: &str) -> Result<bool> {
         let conn = self.conn()?;
@@ -133,7 +131,6 @@ impl SqliteStore {
             },
         )
     }
-
 
     pub(crate) fn put_attributions(
         &self,
@@ -195,8 +192,11 @@ impl SqliteStore {
         Ok(files.len())
     }
 
-
-    pub(crate) fn list_attributions(&self, org_id: &str, repo_id: &str) -> Result<Vec<FileAttribution>> {
+    pub(crate) fn list_attributions(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+    ) -> Result<Vec<FileAttribution>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
             "SELECT file_path, git_blob_sha, ranges_json, updated_at
@@ -225,7 +225,6 @@ impl SqliteStore {
         }
         Ok(out)
     }
-
 
     pub(crate) fn list_events(
         &self,
@@ -275,7 +274,6 @@ impl SqliteStore {
         Ok(out)
     }
 
-
     pub(crate) fn org_report(&self, org_id: &str) -> Result<OrgReport> {
         let conn = self.conn()?;
         let total_events: i64 = conn.query_row(
@@ -302,7 +300,6 @@ impl SqliteStore {
             repos: self.list_repos(org_id)?,
         })
     }
-
 
     pub(crate) fn recent_org_events(&self, org_id: &str, limit: u32) -> Result<Vec<StoredEvent>> {
         let conn = self.conn()?;
@@ -341,7 +338,6 @@ impl SqliteStore {
         Ok(out)
     }
 
-
     pub(crate) fn activity_by_day(
         &self,
         org_id: &str,
@@ -371,7 +367,6 @@ impl SqliteStore {
         Ok(out)
     }
 
-
     pub(crate) fn repo_facts(&self, org_id: &str, repo_id: &str) -> Result<RepoFacts> {
         let conn = self.conn()?;
         let event_count: i64 = conn.query_row(
@@ -398,7 +393,6 @@ impl SqliteStore {
             last_activity,
         })
     }
-
 
     pub(crate) fn list_sessions(
         &self,
@@ -440,7 +434,6 @@ impl SqliteStore {
         }
         Ok(out)
     }
-
 
     pub(crate) fn session_events(
         &self,
@@ -484,7 +477,6 @@ impl SqliteStore {
         Ok(out)
     }
 
-
     pub(crate) fn export_events(&self, org_id: &str) -> Result<Vec<StoredEvent>> {
         let conn = self.conn()?;
         // Include repo_id: an org-level export spans multiple repos, so each
@@ -523,5 +515,4 @@ impl SqliteStore {
         }
         Ok(out)
     }
-
 }

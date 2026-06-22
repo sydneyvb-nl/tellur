@@ -16,7 +16,6 @@ impl SqliteStore {
         Ok(ts)
     }
 
-
     pub(crate) fn scim_create_group(
         &self,
         org_id: &str,
@@ -45,8 +44,11 @@ impl SqliteStore {
         })
     }
 
-
-    pub(crate) fn scim_list_groups(&self, org_id: &str, name_filter: Option<&str>) -> Result<Vec<ScimGroup>> {
+    pub(crate) fn scim_list_groups(
+        &self,
+        org_id: &str,
+        name_filter: Option<&str>,
+    ) -> Result<Vec<ScimGroup>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, display_name, external_id FROM scim_group
@@ -72,7 +74,6 @@ impl SqliteStore {
         Ok(out)
     }
 
-
     pub(crate) fn scim_get_group(&self, org_id: &str, group_id: &str) -> Result<Option<ScimGroup>> {
         let conn = self.conn()?;
         let row = conn
@@ -96,7 +97,6 @@ impl SqliteStore {
             None => Ok(None),
         }
     }
-
 
     pub(crate) fn scim_update_group(
         &self,
@@ -160,7 +160,6 @@ impl SqliteStore {
         self.scim_get_group(org_id, group_id)
     }
 
-
     pub(crate) fn scim_delete_group(&self, org_id: &str, group_id: &str) -> Result<bool> {
         let mut guard = self.conn()?;
         let tx = guard.transaction()?;
@@ -188,7 +187,6 @@ impl SqliteStore {
         Ok(true)
     }
 
-
     pub(crate) fn create_scim_token(&self, org_id: &str) -> Result<GeneratedToken> {
         let token = auth::generate_token()?;
         self.conn()?
@@ -205,7 +203,6 @@ impl SqliteStore {
             .context("failed to create SCIM token (does the org exist?)")?;
         Ok(token)
     }
-
 
     pub(crate) fn authenticate_scim(&self, token: &str) -> Result<Option<String>> {
         let Some((token_id, secret)) = auth::parse_token(token) else {
@@ -229,7 +226,6 @@ impl SqliteStore {
         }
         Ok(Some(org_id))
     }
-
 
     pub(crate) fn scim_create_user(
         &self,
@@ -270,8 +266,11 @@ impl SqliteStore {
         })
     }
 
-
-    pub(crate) fn scim_list_users(&self, org_id: &str, email_filter: Option<&str>) -> Result<Vec<ScimUser>> {
+    pub(crate) fn scim_list_users(
+        &self,
+        org_id: &str,
+        email_filter: Option<&str>,
+    ) -> Result<Vec<ScimUser>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
             "SELECT m.id, m.display_name, m.role, m.active, i.email, i.external_id
@@ -304,7 +303,6 @@ impl SqliteStore {
         Ok(out)
     }
 
-
     pub(crate) fn scim_get_user(&self, org_id: &str, member_id: &str) -> Result<Option<ScimUser>> {
         let conn = self.conn()?;
         let row = conn
@@ -336,7 +334,6 @@ impl SqliteStore {
             None => Ok(None),
         }
     }
-
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn scim_update_user(

@@ -12,8 +12,12 @@ impl PostgresStore {
         Ok(n)
     }
 
-
-    pub(crate) fn enqueue_job(&self, org_id: &str, kind: &str, job_params: Option<&str>) -> Result<String> {
+    pub(crate) fn enqueue_job(
+        &self,
+        org_id: &str,
+        kind: &str,
+        job_params: Option<&str>,
+    ) -> Result<String> {
         let id = ids::generate_id("job");
         let now = chrono::Utc::now().to_rfc3339();
         self.client()?
@@ -25,7 +29,6 @@ impl PostgresStore {
             .context("failed to enqueue job")?;
         Ok(id)
     }
-
 
     pub(crate) fn claim_next_job(&self) -> Result<Option<Job>> {
         // FOR UPDATE SKIP LOCKED lets multiple workers claim distinct jobs.
@@ -53,7 +56,6 @@ impl PostgresStore {
         }))
     }
 
-
     pub(crate) fn complete_job(&self, job_id: &str, result_json: &str) -> Result<()> {
         self.client()?.execute(
             "UPDATE job SET status = 'completed', result = $2, updated_at = $3 WHERE id = $1",
@@ -62,7 +64,6 @@ impl PostgresStore {
         Ok(())
     }
 
-
     pub(crate) fn fail_job(&self, job_id: &str, error: &str) -> Result<()> {
         self.client()?.execute(
             "UPDATE job SET status = 'failed', error = $2, updated_at = $3 WHERE id = $1",
@@ -70,7 +71,6 @@ impl PostgresStore {
         )?;
         Ok(())
     }
-
 
     pub(crate) fn get_job(&self, org_id: &str, job_id: &str) -> Result<Option<Job>> {
         let row = self.client()?.query_opt(
@@ -90,7 +90,6 @@ impl PostgresStore {
             updated_at: r.get(8),
         }))
     }
-
 
     pub(crate) fn list_jobs(&self, org_id: &str, limit: u32) -> Result<Vec<Job>> {
         let lim = limit as i64;
@@ -115,7 +114,6 @@ impl PostgresStore {
             .collect())
     }
 
-
     pub(crate) fn requeue_running_jobs(&self) -> Result<u64> {
         let n = self.client()?.execute(
             "UPDATE job SET status = 'queued', updated_at = $1 WHERE status = 'running'",
@@ -123,5 +121,4 @@ impl PostgresStore {
         )?;
         Ok(n)
     }
-
 }

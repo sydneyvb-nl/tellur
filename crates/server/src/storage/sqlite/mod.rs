@@ -25,14 +25,14 @@ pub(crate) use super::{
 };
 pub(crate) use crate::auth::{self, GeneratedToken, Principal, Role};
 
-mod schema;
-mod orgs;
-mod repos;
-mod events;
-mod policy;
 mod audit;
 mod auth_sessions;
+mod events;
 mod jobs;
+mod orgs;
+mod policy;
+mod repos;
+mod schema;
 mod scim;
 
 /// Current schema version. Bumped as migrations are added in later phases.
@@ -88,7 +88,12 @@ pub(crate) fn split_csv(s: Option<String>) -> Vec<String> {
 
 /// Add a column to a table if it is not already present (idempotent migration).
 /// Table/column/definition are always internal constants, never user input.
-pub(crate) fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
+pub(crate) fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<()> {
     debug_assert!(matches!(
         table,
         "member" | "member_identity" | "oidc_login" | "job" | "audit_head" | "repo_source"
@@ -139,7 +144,11 @@ pub(crate) fn audit_hash(
 
 /// Count events grouped by an internal column (`event_type` or `actor`), scoped
 /// to an org. The column is never user-controlled.
-pub(crate) fn group_counts(conn: &Connection, column: &str, org_id: &str) -> Result<BTreeMap<String, u64>> {
+pub(crate) fn group_counts(
+    conn: &Connection,
+    column: &str,
+    org_id: &str,
+) -> Result<BTreeMap<String, u64>> {
     assert!(
         matches!(column, "event_type" | "actor"),
         "group_counts column must be an allow-listed identifier"
@@ -156,7 +165,6 @@ pub(crate) fn group_counts(conn: &Connection, column: &str, org_id: &str) -> Res
     }
     Ok(map)
 }
-
 
 impl Store for SqliteStore {
     fn migrate(&self) -> Result<()> {
@@ -195,11 +203,23 @@ impl Store for SqliteStore {
         self.get_repo_source(org_id, repo_id)
     }
 
-    fn set_repo_source( &self, org_id: &str, repo_id: &str, link: Option<&str>, raw: Option<&str>, token: Option<&str>, ) -> Result<()> {
+    fn set_repo_source(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        link: Option<&str>,
+        raw: Option<&str>,
+        token: Option<&str>,
+    ) -> Result<()> {
         self.set_repo_source(org_id, repo_id, link, raw, token)
     }
 
-    fn set_github_installation( &self, org_id: &str, installation_id: i64, account_login: &str, ) -> Result<()> {
+    fn set_github_installation(
+        &self,
+        org_id: &str,
+        installation_id: i64,
+        account_login: &str,
+    ) -> Result<()> {
         self.set_github_installation(org_id, installation_id, account_login)
     }
 
@@ -207,11 +227,23 @@ impl Store for SqliteStore {
         self.github_installation(installation_id)
     }
 
-    fn mark_github_note_harvested( &self, org_id: &str, repo_id: &str, commit_sha: &str, note_sha: &str, ) -> Result<bool> {
+    fn mark_github_note_harvested(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        commit_sha: &str,
+        note_sha: &str,
+    ) -> Result<bool> {
         self.mark_github_note_harvested(org_id, repo_id, commit_sha, note_sha)
     }
 
-    fn set_repo_role( &self, org_id: &str, repo_id: &str, member_id: &str, role: Role, ) -> Result<()> {
+    fn set_repo_role(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        member_id: &str,
+        role: Role,
+    ) -> Result<()> {
         self.set_repo_role(org_id, repo_id, member_id, role)
     }
 
@@ -227,7 +259,12 @@ impl Store for SqliteStore {
         self.list_repo_roles(org_id, repo_id)
     }
 
-    fn append_events( &self, org_id: &str, repo_id: &str, events: &[IngestEvent], ) -> Result<Vec<String>> {
+    fn append_events(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        events: &[IngestEvent],
+    ) -> Result<Vec<String>> {
         self.append_events(org_id, repo_id, events)
     }
 
@@ -239,7 +276,12 @@ impl Store for SqliteStore {
         self.verify_event_chain(org_id, repo_id)
     }
 
-    fn put_attributions( &self, org_id: &str, repo_id: &str, files: &[FileAttribution], ) -> Result<usize> {
+    fn put_attributions(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        files: &[FileAttribution],
+    ) -> Result<usize> {
         self.put_attributions(org_id, repo_id, files)
     }
 
@@ -251,7 +293,13 @@ impl Store for SqliteStore {
         self.list_repos(org_id)
     }
 
-    fn list_events( &self, org_id: &str, repo_id: &str, limit: u32, before_seq: Option<i64>, ) -> Result<Vec<StoredEvent>> {
+    fn list_events(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        limit: u32,
+        before_seq: Option<i64>,
+    ) -> Result<Vec<StoredEvent>> {
         self.list_events(org_id, repo_id, limit, before_seq)
     }
 
@@ -263,7 +311,12 @@ impl Store for SqliteStore {
         self.recent_org_events(org_id, limit)
     }
 
-    fn activity_by_day( &self, org_id: &str, since_rfc3339: &str, group: ActivityGroup, ) -> Result<Vec<ActivityBucket>> {
+    fn activity_by_day(
+        &self,
+        org_id: &str,
+        since_rfc3339: &str,
+        group: ActivityGroup,
+    ) -> Result<Vec<ActivityBucket>> {
         self.activity_by_day(org_id, since_rfc3339, group)
     }
 
@@ -271,11 +324,23 @@ impl Store for SqliteStore {
         self.repo_facts(org_id, repo_id)
     }
 
-    fn list_sessions( &self, org_id: &str, repo_id: Option<&str>, actor: Option<&str>, since_rfc3339: Option<&str>, limit: u32, ) -> Result<Vec<SessionSummary>> {
+    fn list_sessions(
+        &self,
+        org_id: &str,
+        repo_id: Option<&str>,
+        actor: Option<&str>,
+        since_rfc3339: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<SessionSummary>> {
         self.list_sessions(org_id, repo_id, actor, since_rfc3339, limit)
     }
 
-    fn session_events( &self, org_id: &str, session_id: &str, limit: u32, ) -> Result<Vec<StoredEvent>> {
+    fn session_events(
+        &self,
+        org_id: &str,
+        session_id: &str,
+        limit: u32,
+    ) -> Result<Vec<StoredEvent>> {
         self.session_events(org_id, session_id, limit)
     }
 
@@ -299,7 +364,15 @@ impl Store for SqliteStore {
         self.export_audit(org_id)
     }
 
-    fn list_audit( &self, org_id: &str, actor: Option<&str>, action: Option<&str>, since_rfc3339: Option<&str>, before_seq: Option<i64>, limit: u32, ) -> Result<Vec<AuditRecord>> {
+    fn list_audit(
+        &self,
+        org_id: &str,
+        actor: Option<&str>,
+        action: Option<&str>,
+        since_rfc3339: Option<&str>,
+        before_seq: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<AuditRecord>> {
         self.list_audit(org_id, actor, action, since_rfc3339, before_seq, limit)
     }
 
@@ -319,7 +392,13 @@ impl Store for SqliteStore {
         self.seal_audit_before(cutoff_rfc3339)
     }
 
-    fn provision_member( &self, org_id: &str, display_name: &str, role: Role, email: &str, ) -> Result<String> {
+    fn provision_member(
+        &self,
+        org_id: &str,
+        display_name: &str,
+        role: Role,
+        email: &str,
+    ) -> Result<String> {
         self.provision_member(org_id, display_name, role, email)
     }
 
@@ -327,7 +406,11 @@ impl Store for SqliteStore {
         self.find_member_by_email(email)
     }
 
-    fn find_member_by_oidc_subject( &self, issuer: &str, subject: &str, ) -> Result<Option<Principal>> {
+    fn find_member_by_oidc_subject(
+        &self,
+        issuer: &str,
+        subject: &str,
+    ) -> Result<Option<Principal>> {
         self.find_member_by_oidc_subject(issuer, subject)
     }
 
@@ -335,7 +418,13 @@ impl Store for SqliteStore {
         self.bind_oidc_subject(member_id, issuer, subject)
     }
 
-    fn put_login( &self, state: &str, pkce_verifier: &str, nonce: &str, browser_binding: &str, ) -> Result<()> {
+    fn put_login(
+        &self,
+        state: &str,
+        pkce_verifier: &str,
+        nonce: &str,
+        browser_binding: &str,
+    ) -> Result<()> {
         self.put_login(state, pkce_verifier, nonce, browser_binding)
     }
 
@@ -439,7 +528,13 @@ impl Store for SqliteStore {
         self.latest_compliance(org_id)
     }
 
-    fn scim_create_group( &self, org_id: &str, display_name: &str, external_id: Option<&str>, members: &[String], ) -> Result<ScimGroup> {
+    fn scim_create_group(
+        &self,
+        org_id: &str,
+        display_name: &str,
+        external_id: Option<&str>,
+        members: &[String],
+    ) -> Result<ScimGroup> {
         self.scim_create_group(org_id, display_name, external_id, members)
     }
 
@@ -451,7 +546,14 @@ impl Store for SqliteStore {
         self.scim_get_group(org_id, group_id)
     }
 
-    fn scim_update_group( &self, org_id: &str, group_id: &str, display_name: Option<&str>, external_id: Option<&str>, members: Option<&[String]>, ) -> Result<Option<ScimGroup>> {
+    fn scim_update_group(
+        &self,
+        org_id: &str,
+        group_id: &str,
+        display_name: Option<&str>,
+        external_id: Option<&str>,
+        members: Option<&[String]>,
+    ) -> Result<Option<ScimGroup>> {
         self.scim_update_group(org_id, group_id, display_name, external_id, members)
     }
 
@@ -471,7 +573,14 @@ impl Store for SqliteStore {
         self.authenticate_scim(token)
     }
 
-    fn scim_create_user( &self, org_id: &str, email: &str, display_name: &str, role: Role, external_id: Option<&str>, ) -> Result<ScimUser> {
+    fn scim_create_user(
+        &self,
+        org_id: &str,
+        email: &str,
+        display_name: &str,
+        role: Role,
+        external_id: Option<&str>,
+    ) -> Result<ScimUser> {
         self.scim_create_user(org_id, email, display_name, role, external_id)
     }
 
@@ -483,11 +592,27 @@ impl Store for SqliteStore {
         self.scim_get_user(org_id, member_id)
     }
 
-    fn scim_update_user( &self, org_id: &str, member_id: &str, email: Option<&str>, display_name: Option<&str>, role: Option<Role>, active: Option<bool>, external_id: Option<&str>, ) -> Result<Option<ScimUser>> {
-        self.scim_update_user(org_id, member_id, email, display_name, role, active, external_id)
+    fn scim_update_user(
+        &self,
+        org_id: &str,
+        member_id: &str,
+        email: Option<&str>,
+        display_name: Option<&str>,
+        role: Option<Role>,
+        active: Option<bool>,
+        external_id: Option<&str>,
+    ) -> Result<Option<ScimUser>> {
+        self.scim_update_user(
+            org_id,
+            member_id,
+            email,
+            display_name,
+            role,
+            active,
+            external_id,
+        )
     }
 }
-
 
 /// Read the member ids belonging to a group.
 pub(crate) fn group_member_ids(conn: &Connection, group_id: &str) -> Result<Vec<String>> {
@@ -581,7 +706,6 @@ pub(crate) fn principal_row(conn: &Connection, sql: &str, key: &str) -> Result<O
         None => Ok(None),
     }
 }
-
 
 #[cfg(test)]
 mod tests {

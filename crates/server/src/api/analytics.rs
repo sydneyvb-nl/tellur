@@ -258,4 +258,3 @@ pub async fn overview(
         "recent_events": recent,
     })))
 }
-

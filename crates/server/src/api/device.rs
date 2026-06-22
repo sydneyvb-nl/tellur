@@ -349,4 +349,3 @@ Start again from your terminal with <code>tellur login</code>.</p>"
     };
     device_shell("Device login", body)
 }
-

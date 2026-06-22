@@ -18,8 +18,12 @@ impl PostgresStore {
         Ok(org)
     }
 
-
-    pub(crate) fn create_member(&self, org_id: &str, display_name: &str, role: Role) -> Result<String> {
+    pub(crate) fn create_member(
+        &self,
+        org_id: &str,
+        display_name: &str,
+        role: Role,
+    ) -> Result<String> {
         let member_id = ids::generate_id("mbr");
         self.client()?
             .execute(
@@ -37,7 +41,6 @@ impl PostgresStore {
         Ok(member_id)
     }
 
-
     pub(crate) fn create_token(&self, member_id: &str) -> Result<GeneratedToken> {
         let token = auth::generate_token()?;
         self.client()?
@@ -54,7 +57,6 @@ impl PostgresStore {
             .context("failed to create token (does the member exist?)")?;
         Ok(token)
     }
-
 
     pub(crate) fn authenticate(&self, token: &str) -> Result<Option<Principal>> {
         let Some((token_id, secret)) = auth::parse_token(token) else {
@@ -77,7 +79,6 @@ impl PostgresStore {
             role: Role::parse(&row.get::<_, String>(3))?,
         }))
     }
-
 
     pub(crate) fn provision_member(
         &self,
@@ -110,7 +111,6 @@ impl PostgresStore {
         Ok(member_id)
     }
 
-
     pub(crate) fn find_member_by_email(&self, email: &str) -> Result<Option<Principal>> {
         principal_row(
             &mut self.client()?,
@@ -119,7 +119,6 @@ impl PostgresStore {
             email,
         )
     }
-
 
     pub(crate) fn find_member_by_oidc_subject(
         &self,
@@ -142,8 +141,12 @@ impl PostgresStore {
         }
     }
 
-
-    pub(crate) fn bind_oidc_subject(&self, member_id: &str, issuer: &str, subject: &str) -> Result<bool> {
+    pub(crate) fn bind_oidc_subject(
+        &self,
+        member_id: &str,
+        issuer: &str,
+        subject: &str,
+    ) -> Result<bool> {
         // Only bind when no subject is set yet (see SQLite impl for rationale).
         let n = self.client()?.execute(
             "UPDATE member_identity SET oidc_issuer = $2, oidc_subject = $3
@@ -152,7 +155,6 @@ impl PostgresStore {
         )?;
         Ok(n > 0)
     }
-
 
     pub(crate) fn member_principal(&self, member_id: &str) -> Result<Option<Principal>> {
         let row = self.client()?.query_opt(
@@ -168,7 +170,6 @@ impl PostgresStore {
             None => Ok(None),
         }
     }
-
 
     pub(crate) fn list_members(&self, org_id: &str) -> Result<Vec<MemberInfo>> {
         let rows = self.client()?.query(
@@ -194,5 +195,4 @@ impl PostgresStore {
             })
             .collect())
     }
-
 }

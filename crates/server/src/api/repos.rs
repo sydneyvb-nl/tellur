@@ -645,4 +645,3 @@ pub async fn ingest_attributions(
         .map_err(ServerError::Internal)?;
     Ok(Json(json!({ "repo_id": repo.id, "files": n })))
 }
-

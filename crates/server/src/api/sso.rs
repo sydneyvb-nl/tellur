@@ -227,4 +227,3 @@ pub async fn oidc_logout(
 }
 
 // ─── Device authorization (CLI `tellur login`, RFC 8628-style) ───────────────
-

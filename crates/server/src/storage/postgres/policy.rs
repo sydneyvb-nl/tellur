@@ -35,7 +35,6 @@ impl PostgresStore {
         Ok(version)
     }
 
-
     pub(crate) fn list_policies(&self, org_id: &str) -> Result<Vec<PolicySummary>> {
         let rows = self.client()?.query(
             "SELECT name, version, updated_at FROM policy WHERE org_id = $1 ORDER BY name",
@@ -51,7 +50,6 @@ impl PostgresStore {
             .collect())
     }
 
-
     pub(crate) fn get_policy(&self, org_id: &str, name: &str) -> Result<Option<PolicyDoc>> {
         let row = self.client()?.query_opt(
             "SELECT name, content, version, updated_at FROM policy
@@ -66,8 +64,11 @@ impl PostgresStore {
         }))
     }
 
-
-    pub(crate) fn put_compliance_snapshots(&self, org_id: &str, snaps: &[ComplianceSnapshot]) -> Result<()> {
+    pub(crate) fn put_compliance_snapshots(
+        &self,
+        org_id: &str,
+        snaps: &[ComplianceSnapshot],
+    ) -> Result<()> {
         let mut client = self.client()?;
         let mut tx = client.transaction()?;
         for snap in snaps {
@@ -95,7 +96,6 @@ impl PostgresStore {
         tx.commit()?;
         Ok(())
     }
-
 
     pub(crate) fn latest_compliance(&self, org_id: &str) -> Result<Vec<ComplianceSnapshot>> {
         let rows = self.client()?.query(
@@ -128,5 +128,4 @@ impl PostgresStore {
             })
             .collect())
     }
-
 }

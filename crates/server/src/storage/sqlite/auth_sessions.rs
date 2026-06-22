@@ -24,14 +24,12 @@ impl SqliteStore {
         Ok(())
     }
 
-
     pub(crate) fn count_logins(&self) -> Result<u64> {
         let n: i64 = self
             .conn()?
             .query_row("SELECT COUNT(*) FROM oidc_login", [], |r| r.get(0))?;
         Ok(n as u64)
     }
-
 
     pub(crate) fn prune_expired_logins(&self, ttl_secs: i64) -> Result<u64> {
         let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(ttl_secs)).to_rfc3339();
@@ -41,7 +39,6 @@ impl SqliteStore {
         )?;
         Ok(n as u64)
     }
-
 
     pub(crate) fn take_login(&self, state: &str) -> Result<Option<LoginTx>> {
         let conn = self.conn()?;
@@ -66,7 +63,6 @@ impl SqliteStore {
         Ok(tx)
     }
 
-
     pub(crate) fn create_session(&self, member_id: &str, ttl_secs: i64) -> Result<String> {
         let id = ids::generate_id("sess");
         let now = chrono::Utc::now();
@@ -78,7 +74,6 @@ impl SqliteStore {
         )?;
         Ok(id)
     }
-
 
     pub(crate) fn session_principal(&self, session_id: &str) -> Result<Option<Principal>> {
         let conn = self.conn()?;
@@ -108,14 +103,12 @@ impl SqliteStore {
         }
     }
 
-
     pub(crate) fn delete_session(&self, session_id: &str) -> Result<bool> {
         let n = self
             .conn()?
             .execute("DELETE FROM session WHERE id = ?1", params![session_id])?;
         Ok(n > 0)
     }
-
 
     pub(crate) fn create_device_auth(&self, device_code: &str, user_code: &str) -> Result<()> {
         self.conn()?.execute(
@@ -126,14 +119,12 @@ impl SqliteStore {
         Ok(())
     }
 
-
     pub(crate) fn count_device_auths(&self) -> Result<u64> {
         let n: i64 = self
             .conn()?
             .query_row("SELECT COUNT(*) FROM device_auth", [], |r| r.get(0))?;
         Ok(n as u64)
     }
-
 
     pub(crate) fn prune_expired_device_auths(&self, ttl_secs: i64) -> Result<u64> {
         let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(ttl_secs)).to_rfc3339();
@@ -143,7 +134,6 @@ impl SqliteStore {
         )?;
         Ok(n as u64)
     }
-
 
     pub(crate) fn find_device_by_user_code(&self, user_code: &str) -> Result<Option<DeviceAuth>> {
         let conn = self.conn()?;
@@ -165,8 +155,12 @@ impl SqliteStore {
         Ok(row)
     }
 
-
-    pub(crate) fn set_device_decision(&self, user_code: &str, member_id: &str, approve: bool) -> Result<bool> {
+    pub(crate) fn set_device_decision(
+        &self,
+        user_code: &str,
+        member_id: &str,
+        approve: bool,
+    ) -> Result<bool> {
         // Only a still-pending request may transition, so a second click (or a
         // race) cannot flip an already-decided request.
         let status = if approve { "approved" } else { "denied" };
@@ -177,7 +171,6 @@ impl SqliteStore {
         )?;
         Ok(n > 0)
     }
-
 
     pub(crate) fn poll_device(&self, device_code: &str, ttl_secs: i64) -> Result<DevicePoll> {
         // Serialize the read + terminal delete so a token is delivered at most
@@ -224,7 +217,6 @@ impl SqliteStore {
         Ok(outcome)
     }
 
-
     pub(crate) fn prune_expired_sessions(&self) -> Result<u64> {
         let now = chrono::Utc::now().to_rfc3339();
         let n = self
@@ -232,5 +224,4 @@ impl SqliteStore {
             .execute("DELETE FROM session WHERE expires_at < ?1", params![now])?;
         Ok(n as u64)
     }
-
 }

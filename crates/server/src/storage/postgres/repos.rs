@@ -26,7 +26,6 @@ impl PostgresStore {
         })
     }
 
-
     pub(crate) fn find_repo(&self, org_id: &str, repo: &str) -> Result<Option<Repo>> {
         let mut client = self.client()?;
         let row = client.query_opt(
@@ -40,7 +39,6 @@ impl PostgresStore {
             name: r.get(1),
         }))
     }
-
 
     pub(crate) fn get_repo_source(&self, org_id: &str, repo_id: &str) -> Result<RepoSource> {
         let row = self.client()?.query_opt(
@@ -56,7 +54,6 @@ impl PostgresStore {
             })
             .unwrap_or_default())
     }
-
 
     pub(crate) fn set_repo_source(
         &self,
@@ -85,7 +82,6 @@ impl PostgresStore {
         }
         Ok(())
     }
-
 
     pub(crate) fn set_github_installation(
         &self,
@@ -118,8 +114,10 @@ impl PostgresStore {
         Ok(())
     }
 
-
-    pub(crate) fn github_installation(&self, installation_id: i64) -> Result<Option<GithubInstallation>> {
+    pub(crate) fn github_installation(
+        &self,
+        installation_id: i64,
+    ) -> Result<Option<GithubInstallation>> {
         let row = self.client()?.query_opt(
             "SELECT org_id, installation_id, account_login, updated_at
              FROM github_installation WHERE installation_id = $1",
@@ -132,7 +130,6 @@ impl PostgresStore {
             updated_at: r.get(3),
         }))
     }
-
 
     pub(crate) fn mark_github_note_harvested(
         &self,
@@ -156,7 +153,6 @@ impl PostgresStore {
         )?;
         Ok(changed == 1)
     }
-
 
     pub(crate) fn set_repo_role(
         &self,
@@ -200,8 +196,12 @@ impl PostgresStore {
         Ok(())
     }
 
-
-    pub(crate) fn remove_repo_role(&self, org_id: &str, repo_id: &str, member_id: &str) -> Result<bool> {
+    pub(crate) fn remove_repo_role(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        member_id: &str,
+    ) -> Result<bool> {
         let n = self.client()?.execute(
             "DELETE FROM repo_role WHERE org_id = $1 AND repo_id = $2 AND member_id = $3",
             &[&org_id, &repo_id, &member_id],
@@ -209,8 +209,12 @@ impl PostgresStore {
         Ok(n > 0)
     }
 
-
-    pub(crate) fn get_repo_role(&self, org_id: &str, repo_id: &str, member_id: &str) -> Result<Option<Role>> {
+    pub(crate) fn get_repo_role(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+        member_id: &str,
+    ) -> Result<Option<Role>> {
         let row = self.client()?.query_opt(
             "SELECT role FROM repo_role WHERE org_id = $1 AND repo_id = $2 AND member_id = $3",
             &[&org_id, &repo_id, &member_id],
@@ -218,8 +222,11 @@ impl PostgresStore {
         row.map(|r| Role::parse(&r.get::<_, String>(0))).transpose()
     }
 
-
-    pub(crate) fn list_repo_roles(&self, org_id: &str, repo_id: &str) -> Result<Vec<RepoRoleGrant>> {
+    pub(crate) fn list_repo_roles(
+        &self,
+        org_id: &str,
+        repo_id: &str,
+    ) -> Result<Vec<RepoRoleGrant>> {
         let rows = self.client()?.query(
             "SELECT member_id, role, updated_at FROM repo_role
              WHERE org_id = $1 AND repo_id = $2 ORDER BY member_id",
@@ -234,7 +241,6 @@ impl PostgresStore {
             })
             .collect())
     }
-
 
     pub(crate) fn list_repos(&self, org_id: &str) -> Result<Vec<RepoSummary>> {
         let rows = self.client()?.query(
@@ -252,5 +258,4 @@ impl PostgresStore {
             })
             .collect())
     }
-
 }

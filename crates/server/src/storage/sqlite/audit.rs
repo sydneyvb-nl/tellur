@@ -23,7 +23,6 @@ impl SqliteStore {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-
     pub(crate) fn list_audit(
         &self,
         org_id: &str,
@@ -77,7 +76,6 @@ impl SqliteStore {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-
     pub(crate) fn append_audit(&self, entry: &AuditEntry) -> Result<()> {
         let ts = chrono::Utc::now().to_rfc3339();
         let mut guard = self.conn()?;
@@ -126,13 +124,11 @@ impl SqliteStore {
         Ok(())
     }
 
-
     pub(crate) fn audit_len(&self) -> Result<u64> {
         let conn = self.conn()?;
         let n: i64 = conn.query_row("SELECT COUNT(*) FROM audit_log", [], |r| r.get(0))?;
         Ok(n as u64)
     }
-
 
     pub(crate) fn verify_audit_chain(&self) -> Result<bool> {
         let conn = self.conn()?;
@@ -171,7 +167,6 @@ impl SqliteStore {
             },
         )
     }
-
 
     pub(crate) fn seal_audit_before(&self, cutoff_rfc3339: &str) -> Result<u64> {
         let mut guard = self.conn()?;
@@ -213,5 +208,4 @@ impl SqliteStore {
         tx.commit()?;
         Ok(pruned as u64)
     }
-
 }

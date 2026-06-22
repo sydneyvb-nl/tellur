@@ -12,7 +12,6 @@ impl PostgresStore {
         Ok(row.map(|r| r.get(0)))
     }
 
-
     pub(crate) fn scim_create_group(
         &self,
         org_id: &str,
@@ -41,8 +40,11 @@ impl PostgresStore {
         })
     }
 
-
-    pub(crate) fn scim_list_groups(&self, org_id: &str, name_filter: Option<&str>) -> Result<Vec<ScimGroup>> {
+    pub(crate) fn scim_list_groups(
+        &self,
+        org_id: &str,
+        name_filter: Option<&str>,
+    ) -> Result<Vec<ScimGroup>> {
         let mut client = self.client()?;
         let rows = client.query(
             "SELECT id, display_name, external_id FROM scim_group
@@ -67,7 +69,6 @@ impl PostgresStore {
         Ok(out)
     }
 
-
     pub(crate) fn scim_get_group(&self, org_id: &str, group_id: &str) -> Result<Option<ScimGroup>> {
         let mut client = self.client()?;
         let row = client.query_opt(
@@ -90,7 +91,6 @@ impl PostgresStore {
             None => Ok(None),
         }
     }
-
 
     pub(crate) fn scim_update_group(
         &self,
@@ -150,7 +150,6 @@ impl PostgresStore {
         self.scim_get_group(org_id, group_id)
     }
 
-
     pub(crate) fn scim_delete_group(&self, org_id: &str, group_id: &str) -> Result<bool> {
         let mut client = self.client()?;
         let mut tx = client.transaction()?;
@@ -176,7 +175,6 @@ impl PostgresStore {
         Ok(true)
     }
 
-
     pub(crate) fn create_scim_token(&self, org_id: &str) -> Result<GeneratedToken> {
         let token = auth::generate_token()?;
         self.client()?
@@ -194,7 +192,6 @@ impl PostgresStore {
         Ok(token)
     }
 
-
     pub(crate) fn authenticate_scim(&self, token: &str) -> Result<Option<String>> {
         let Some((token_id, secret)) = auth::parse_token(token) else {
             return Ok(None);
@@ -210,7 +207,6 @@ impl PostgresStore {
         }
         Ok(Some(row.get(1)))
     }
-
 
     pub(crate) fn scim_create_user(
         &self,
@@ -251,8 +247,11 @@ impl PostgresStore {
         })
     }
 
-
-    pub(crate) fn scim_list_users(&self, org_id: &str, email_filter: Option<&str>) -> Result<Vec<ScimUser>> {
+    pub(crate) fn scim_list_users(
+        &self,
+        org_id: &str,
+        email_filter: Option<&str>,
+    ) -> Result<Vec<ScimUser>> {
         let rows = self.client()?.query(
             "SELECT m.id, m.display_name, m.role, m.active, i.email, i.external_id
              FROM member m JOIN member_identity i ON i.member_id = m.id
@@ -274,7 +273,6 @@ impl PostgresStore {
         Ok(out)
     }
 
-
     pub(crate) fn scim_get_user(&self, org_id: &str, member_id: &str) -> Result<Option<ScimUser>> {
         let row = self.client()?.query_opt(
             "SELECT m.display_name, m.role, m.active, i.email, i.external_id
@@ -294,7 +292,6 @@ impl PostgresStore {
             None => Ok(None),
         }
     }
-
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn scim_update_user(

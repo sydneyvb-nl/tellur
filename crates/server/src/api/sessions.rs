@@ -101,4 +101,3 @@ pub async fn session_detail(
 }
 
 // ─── Audit read + jobs list (dashboard D3) ───────────────────────────────────
-
