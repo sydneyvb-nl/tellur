@@ -14,7 +14,7 @@ use anyhow::Result;
 
 use crate::auth::{GeneratedToken, Principal, Role};
 
-mod chain;
+pub(crate) mod chain;
 pub mod postgres;
 pub mod sqlite;
 pub use postgres::PostgresStore;
