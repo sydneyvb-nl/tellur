@@ -1,6 +1,6 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-16 (GitHub App P3 notes harvester on `codex/github-app-notes-harvester`)
+**Last updated:** 2026-06-22 (maintainability refactor — monolith decomposition on `refactor/decompose-monoliths`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** main · **Open PRs:** none · **Working tree:** clean
@@ -60,6 +60,27 @@ timeline are all shipped.
 has **no marking workflow on purpose** — review marking does not belong in the
 hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 "mark reviewed" action.
+
+> **2026-06-22 — Maintainability refactor: decomposed the four monolith files.**
+> On branch `refactor/decompose-monoliths`. Behavior-preserving structural split,
+> no functional change. `crates/cli/src/main.rs` (4879 lines) → a 190-line
+> dispatcher plus focused command modules (`cli`/`repo`/`inspect`/`capture`/
+> `maintain`/`policy`/`push`/`notes`/`connect`/`setup`/`hooks`/`serve` + `util`/
+> `git` helpers). `crates/server/src/api.rs` (2745) → an `api/` directory of
+> per-domain handler modules (`common` auth-extractor/guards + `analytics`/`repos`/
+> `sessions`/`exports`/`rbac`/`policies`/`sso`/`device`), re-exported from `api/mod.rs`
+> so `crate::api::*` (router + tests) is unchanged. Both storage backends
+> `storage/sqlite.rs` (3006) + `storage/postgres.rs` (2251) → `storage/{sqlite,
+> postgres}/` directories: `mod.rs` keeps the connection/pool, shared query helpers
+> and the schema migration and exposes a **thin delegating `impl Store`**, with the
+> per-domain SQL in submodules (`orgs`/`repos`/`events`/`policy`/`audit`/
+> `auth_sessions`/`jobs`/`scim`/`schema`). SQL bodies and handler logic moved
+> verbatim. `storage::chain` is now `pub(crate)`; the now-dead `use storage::Store
+> as _` shim in `build_state` was removed; two stray untracked macOS duplicate files
+> (`github_webhook 2.rs`) that broke local clippy were deleted. Verified end-to-end
+> against a live Postgres (`TELLUR_TEST_DATABASE_URL`): `cargo fmt` +
+> `clippy --all-targets --all-features -D warnings` + `test` (337 workspace tests) +
+> `cargo deny check` all green.
 
 > **2026-06-16 — GitHub App repo discovery + notes harvester (proposal P3).** On
 > branch `codex/github-app-notes-harvester`. Added `POST /webhook/github` for
