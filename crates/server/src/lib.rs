@@ -41,7 +41,6 @@ use anyhow::Result;
 /// (horizontal scale), otherwise the embedded SQLite store (zero-config
 /// single-node).
 pub fn build_state(config: Config) -> Result<AppState> {
-    use storage::Store as _;
     let store: Arc<dyn storage::Store> = match &config.database_url {
         Some(url) => {
             tracing::info!("using Postgres storage backend");
