@@ -446,16 +446,22 @@ tellur team report --base main --head HEAD      # Markdown summary
 tellur team report --base main --head HEAD --json
 ```
 
-The report shows AI-assisted vs. human lines, a breakdown by tool / model /
-author, and provenance coverage (which commits in the range carry a note). It is
-tolerant: commits with no note — or an unparseable one — are listed under
-"without provenance" rather than failing the report. This is the no-server
+The report intersects each commit's portable note with its actual zero-context
+Git patch. It reports added/deleted PR lines, AI/human/unknown added lines, a
+breakdown by tool/model/author, and both commit and line-level provenance
+coverage. Missing or unparseable notes never become “0% AI”: the affected diff
+lines are explicitly unknown and the report is marked `missing` or `partial`.
+This is the no-server
 ("Tier 0") slice of the team/server roadmap; see
 [`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md).
 
 To post the report automatically on pull requests, copy the example workflow in
 [`docs/examples/github-actions-team-report.yml`](docs/examples/github-actions-team-report.yml)
 into `.github/workflows/`.
+
+The repository's own PR workflow uses this Git-notes report. It deliberately
+does not run the local-index `tellur pr-report` command in CI: a fresh checkout
+does not contain a developer's local SQLite attribution index.
 
 ## Self-Hosted Team Hub (preview)
 

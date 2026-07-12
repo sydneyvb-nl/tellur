@@ -1,15 +1,14 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-22 (maintainability refactor — monolith decomposition on `refactor/decompose-monoliths`)
+**Last updated:** 2026-07-12 (honest PR provenance reporting on `fix/pr-provenance-evidence-states`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
-**Branch:** main · **Open PRs:** none · **Working tree:** clean
+**Branch:** `fix/pr-provenance-evidence-states` · **Open PRs:** #48, #49
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
 ## Handover — current state & open work
 
-**Everything described in the dated changelog below is merged to `main`.** There
-are no open PRs and the working tree is clean. The local pipeline, the team hub
+Everything before the 2026-07-12 entry below is merged to `main`. The local pipeline, the team hub
 (`tellur-server`), the CLI hub coupling (`tellur login`/`push`/`logout`), the A12
 source connection + private-repo proxy, prompt excerpts, and the dynamic session
 timeline are all shipped.
@@ -60,6 +59,20 @@ timeline are all shipped.
 has **no marking workflow on purpose** — review marking does not belong in the
 hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 "mark reviewed" action.
+
+> **2026-07-12 — Honest, diff-scoped GitHub PR provenance.** On
+> `fix/pr-provenance-evidence-states`. Replaced the broken CI use of local-index
+> `tellur pr-report`: a fresh Actions checkout cannot contain the developer's
+> local SQLite attribution and previously rendered that missing evidence as
+> “Low risk / 0% AI / 0 total lines”. The workflow now fetches `refs/notes/ai`
+> and runs the git-native team report against the immutable PR base/head SHAs.
+> Team reporting parses each commit's zero-context patch, intersects portable
+> authorship ranges with the actual added lines, reports deletions separately,
+> and exposes `complete`/`partial`/`missing`/`empty` line-coverage states. Missing
+> or invalid notes turn real additions into `unknown`; they can never produce a
+> false 0% AI conclusion. Added pure patch/coverage tests and expanded the CLI
+> integration test through both complete and missing-note scenarios. Workspace
+> total: 338 tests. README, adapter mechanics, and CI examples updated.
 
 > **2026-06-22 — Maintainability refactor: decomposed the four monolith files.**
 > On branch `refactor/decompose-monoliths`. Behavior-preserving structural split,

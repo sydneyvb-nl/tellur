@@ -20,6 +20,10 @@ pub struct TeamCommitNote {
     pub sha: String,
     /// Raw note text, or `None` if the commit has no authorship note.
     pub note: Option<String>,
+    /// Added line ranges in the commit's resulting files.
+    pub added_ranges: BTreeMap<String, Vec<(u32, u32)>>,
+    /// Deleted lines are reported for scope, but cannot carry resulting-line attribution.
+    pub deleted_lines: u64,
 }
 
 /// Per-author line tallies (AI-assisted vs. human-authored).
@@ -40,6 +44,11 @@ pub struct TeamReport {
     pub commits_with_provenance: usize,
     /// Short SHAs of commits with no (or unparseable) authorship note.
     pub commits_without_provenance: Vec<String>,
+    pub coverage_status: String,
+    pub added_lines: u64,
+    pub deleted_lines: u64,
+    pub attributed_lines: u64,
+    pub coverage_percentage: f64,
     pub ai_lines: u64,
     pub human_lines: u64,
     pub unknown_lines: u64,
@@ -71,32 +80,44 @@ pub fn aggregate_team_report(
     let mut with_provenance = 0usize;
     let mut without_provenance: Vec<String> = Vec::new();
 
+    let mut added_lines = 0u64;
+    let mut deleted_lines = 0u64;
+
     for commit in commits {
+        added_lines += count_ranges(commit.added_ranges.values().flatten().copied());
+        deleted_lines += commit.deleted_lines;
         let parsed = match commit.note.as_deref() {
             Some(note) => match parse_git_ai_note(note) {
                 Ok(parsed) => parsed,
                 Err(_) => {
                     without_provenance.push(short_sha(&commit.sha));
+                    unknown_lines += count_ranges(commit.added_ranges.values().flatten().copied());
                     continue;
                 }
             },
             None => {
                 without_provenance.push(short_sha(&commit.sha));
+                unknown_lines += count_ranges(commit.added_ranges.values().flatten().copied());
                 continue;
             }
         };
         with_provenance += 1;
 
-        for file in &parsed.files {
-            for entry in &file.entries {
-                let lines: u64 = entry
-                    .ranges
-                    .iter()
-                    .map(|(start, end)| u64::from(end.saturating_sub(*start) + 1))
-                    .sum();
-                if lines == 0 {
+        for (file_path, ranges) in &commit.added_ranges {
+            let attested_file = parsed.files.iter().find(|file| file.path == *file_path);
+            for line in ranges.iter().flat_map(|(start, end)| *start..=*end) {
+                let entry = attested_file.and_then(|file| {
+                    file.entries.iter().find(|entry| {
+                        entry
+                            .ranges
+                            .iter()
+                            .any(|(start, end)| line >= *start && line <= *end)
+                    })
+                });
+                let Some(entry) = entry else {
+                    unknown_lines += 1;
                     continue;
-                }
+                };
 
                 if let Some((session_key, _)) = entry.key.split_once("::") {
                     // AI-assisted: resolve tool/model/author from the session map.
@@ -110,28 +131,39 @@ pub fn aggregate_team_report(
                     let author = session
                         .and_then(|s| s.human_author.clone())
                         .unwrap_or_else(|| "unknown".to_string());
-                    ai_lines += lines;
-                    *by_tool.entry(tool).or_default() += lines;
-                    *by_model.entry(model).or_default() += lines;
-                    by_author.entry(author).or_default().ai_lines += lines;
+                    ai_lines += 1;
+                    *by_tool.entry(tool).or_default() += 1;
+                    *by_model.entry(model).or_default() += 1;
+                    by_author.entry(author).or_default().ai_lines += 1;
                 } else if let Some(human) = parsed.humans.get(&entry.key) {
-                    human_lines += lines;
+                    human_lines += 1;
                     by_author
                         .entry(human.author.clone())
                         .or_default()
-                        .human_lines += lines;
+                        .human_lines += 1;
                 } else {
-                    unknown_lines += lines;
+                    unknown_lines += 1;
                 }
             }
         }
     }
 
-    let total = ai_lines + human_lines + unknown_lines;
-    let ai_percentage = if total > 0 {
-        (ai_lines as f64 / total as f64) * 100.0
+    let attributed_lines = ai_lines + human_lines;
+    let ai_percentage = if added_lines > 0 {
+        (ai_lines as f64 / added_lines as f64) * 100.0
     } else {
         0.0
+    };
+    let coverage_percentage = if added_lines > 0 {
+        (attributed_lines as f64 / added_lines as f64) * 100.0
+    } else {
+        100.0
+    };
+    let coverage_status = match (added_lines, attributed_lines, unknown_lines) {
+        (0, _, _) => "empty",
+        (_, 0, _) => "missing",
+        (_, _, 0) => "complete",
+        _ => "partial",
     };
 
     TeamReport {
@@ -142,6 +174,11 @@ pub fn aggregate_team_report(
         commits_total: commits.len(),
         commits_with_provenance: with_provenance,
         commits_without_provenance: without_provenance,
+        coverage_status: coverage_status.to_string(),
+        added_lines,
+        deleted_lines,
+        attributed_lines,
+        coverage_percentage,
         ai_lines,
         human_lines,
         unknown_lines,
@@ -161,6 +198,13 @@ pub fn to_markdown(report: &TeamReport) -> String {
         report.base_ref, report.head_ref
     ));
 
+    match report.coverage_status.as_str() {
+        "missing" => out.push_str("> ⚠️ **Provenance unavailable.** Tellur cannot determine whether this PR's added lines are AI- or human-authored.\n\n"),
+        "partial" => out.push_str("> ⚠️ **Provenance is partial.** The AI share below is confirmed evidence over all added lines; unattributed lines remain unknown.\n\n"),
+        "complete" => out.push_str("> ✅ **Provenance coverage is complete for added lines.**\n\n"),
+        _ => out.push_str("> ℹ️ **This PR contains no added lines to attribute.**\n\n"),
+    }
+
     out.push_str("## Coverage\n\n");
     out.push_str(&format!("- Commits in range: {}\n", report.commits_total));
     out.push_str(&format!(
@@ -176,14 +220,38 @@ pub fn to_markdown(report: &TeamReport) -> String {
             report.commits_without_provenance.join(", ")
         ));
     }
+    out.push_str(&format!("- Added lines in PR: {}\n", report.added_lines));
+    out.push_str(&format!(
+        "- Deleted lines in PR: {}\n",
+        report.deleted_lines
+    ));
+    out.push_str(&format!(
+        "- Attributed added lines: {} ({:.1}% coverage)\n",
+        report.attributed_lines, report.coverage_percentage
+    ));
+    out.push_str(&format!(
+        "- Unattributed added lines: {}\n\n",
+        report.unknown_lines
+    ));
 
     out.push_str("## AI involvement\n\n");
+    if report.coverage_status == "missing" {
+        out.push_str("- AI-assisted lines: **unknown** (no portable provenance)\n");
+        out.push_str("- Human lines: **unknown** (no portable provenance)\n");
+    } else if report.coverage_status == "empty" {
+        out.push_str("- AI-assisted lines: n/a\n");
+        out.push_str("- Human lines: n/a\n");
+    } else {
+        out.push_str(&format!(
+            "- AI-assisted lines: {} ({:.1}% of all added lines)\n",
+            report.ai_lines, report.ai_percentage
+        ));
+        out.push_str(&format!("- Human lines: {}\n", report.human_lines));
+    }
     out.push_str(&format!(
-        "- AI-assisted lines: {} ({:.1}%)\n",
-        report.ai_lines, report.ai_percentage
+        "- Unknown added lines: {}\n\n",
+        report.unknown_lines
     ));
-    out.push_str(&format!("- Human lines: {}\n", report.human_lines));
-    out.push_str(&format!("- Unknown lines: {}\n\n", report.unknown_lines));
 
     if !report.by_tool.is_empty() {
         out.push_str("## AI lines by tool\n\n");
@@ -226,6 +294,57 @@ fn sorted_desc(map: &BTreeMap<String, u64>) -> Vec<(String, u64)> {
 
 fn short_sha(sha: &str) -> String {
     sha.chars().take(8).collect()
+}
+
+fn count_ranges(ranges: impl Iterator<Item = (u32, u32)>) -> u64 {
+    ranges
+        .map(|(start, end)| u64::from(end.saturating_sub(start) + 1))
+        .sum()
+}
+
+/// Extract resulting-file addition ranges and deletion counts from a zero-context Git patch.
+pub fn parse_commit_patch(patch: &str) -> (BTreeMap<String, Vec<(u32, u32)>>, u64) {
+    let mut files = BTreeMap::<String, Vec<(u32, u32)>>::new();
+    let mut current_file: Option<String> = None;
+    let mut deleted = 0u64;
+
+    for line in patch.lines() {
+        if let Some(path) = line.strip_prefix("+++ ") {
+            current_file =
+                (path != "/dev/null").then(|| path.strip_prefix("b/").unwrap_or(path).to_string());
+            continue;
+        }
+        let Some(hunk) = line.strip_prefix("@@") else {
+            continue;
+        };
+        let Some(header) = hunk.split("@@").next() else {
+            continue;
+        };
+        let mut parts = header.split_whitespace();
+        let old = parts.find(|part| part.starts_with('-'));
+        let new = parts.find(|part| part.starts_with('+'));
+        if let Some(old) = old {
+            deleted += u64::from(parse_hunk_part(old).1);
+        }
+        if let (Some(file), Some(new)) = (current_file.as_ref(), new) {
+            let (start, count) = parse_hunk_part(new);
+            if count > 0 {
+                files
+                    .entry(file.clone())
+                    .or_default()
+                    .push((start, start + count - 1));
+            }
+        }
+    }
+    (files, deleted)
+}
+
+fn parse_hunk_part(part: &str) -> (u32, u32) {
+    let value = part.trim_start_matches(['-', '+']);
+    let mut pieces = value.split(',');
+    let start = pieces.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+    let count = pieces.next().and_then(|v| v.parse().ok()).unwrap_or(1);
+    (start, count)
 }
 
 #[cfg(test)]
@@ -282,10 +401,14 @@ mod tests {
             TeamCommitNote {
                 sha: "aaaaaaaaaaaa".to_string(),
                 note: Some(note),
+                added_ranges: BTreeMap::from([("src/a.rs".to_string(), vec![(3, 7)])]),
+                deleted_lines: 2,
             },
             TeamCommitNote {
                 sha: "bbbbbbbbbbbb".to_string(),
                 note: None,
+                added_ranges: BTreeMap::new(),
+                deleted_lines: 0,
             },
         ];
 
@@ -296,6 +419,9 @@ mod tests {
         assert_eq!(report.ai_lines, 5);
         assert_eq!(report.human_lines, 0);
         assert_eq!(report.ai_percentage, 100.0);
+        assert_eq!(report.coverage_status, "complete");
+        assert_eq!(report.added_lines, 5);
+        assert_eq!(report.deleted_lines, 2);
         assert_eq!(report.by_tool.get("claude-code"), Some(&5));
         assert_eq!(report.by_model.get("claude-opus-4.7"), Some(&5));
         assert_eq!(report.by_author.get("alice").map(|s| s.ai_lines), Some(5));
@@ -307,16 +433,26 @@ mod tests {
             TeamCommitNote {
                 sha: "deadbeef0000".to_string(),
                 note: Some("not a valid note".to_string()),
+                added_ranges: BTreeMap::from([("src/a.rs".to_string(), vec![(1, 3)])]),
+                deleted_lines: 0,
             },
             TeamCommitNote {
                 sha: "cafebabe0000".to_string(),
                 note: None,
+                added_ranges: BTreeMap::from([("src/b.rs".to_string(), vec![(8, 9)])]),
+                deleted_lines: 1,
             },
         ];
         let report = aggregate_team_report("main", "HEAD", &commits);
         assert_eq!(report.commits_with_provenance, 0);
         assert_eq!(report.commits_without_provenance.len(), 2);
         assert_eq!(report.ai_lines, 0);
+        assert_eq!(report.unknown_lines, 5);
+        assert_eq!(report.coverage_status, "missing");
+        let markdown = to_markdown(&report);
+        assert!(markdown.contains("Provenance unavailable"));
+        assert!(markdown.contains("AI-assisted lines: **unknown**"));
+        assert!(!markdown.contains("AI-assisted lines: 0"));
         assert!(to_markdown(&report).contains("Without provenance: 2"));
     }
 
@@ -326,5 +462,13 @@ mod tests {
         assert_eq!(report.commits_total, 0);
         assert_eq!(report.ai_percentage, 0.0);
         assert!(to_markdown(&report).contains("Commits in range: 0"));
+    }
+
+    #[test]
+    fn parses_added_ranges_and_deletions_from_zero_context_patch() {
+        let patch = "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -2,2 +2,3 @@\n-old\n+new\n@@ -10,0 +12,2 @@\n+one\n+two\n";
+        let (files, deleted) = parse_commit_patch(patch);
+        assert_eq!(files["src/a.rs"], vec![(2, 4), (12, 13)]);
+        assert_eq!(deleted, 2);
     }
 }

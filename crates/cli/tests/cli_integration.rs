@@ -1175,7 +1175,7 @@ fn test_team_report_aggregates_notes_over_range() {
             &AttributionRange {
                 range_id: "rng_team".to_string(),
                 start_line: 1,
-                end_line: 5,
+                end_line: 1,
                 origin: Origin::Ai,
                 evidence_strength: EvidenceStrength::Recorded,
                 confidence: 1.0,
@@ -1218,7 +1218,8 @@ fn test_team_report_aggregates_notes_over_range() {
     let stdout = String::from_utf8_lossy(&report.stdout);
     assert!(stdout.contains("Tellur Team AI-Involvement Report"));
     assert!(stdout.contains("With provenance: 1"));
-    assert!(stdout.contains("AI-assisted lines: 5"));
+    assert!(stdout.contains("AI-assisted lines: 1"));
+    assert!(stdout.contains("100.0% coverage"));
     assert!(stdout.contains("claude-code"));
     assert!(stdout.contains("alice"));
 
@@ -1234,8 +1235,27 @@ fn test_team_report_aggregates_notes_over_range() {
     let parsed: serde_json::Value =
         serde_json::from_slice(&json.stdout).expect("team report --json must be valid JSON");
     assert_eq!(parsed["schema"], "tellur.team-report.v1");
-    assert_eq!(parsed["ai_lines"], 5);
+    assert_eq!(parsed["ai_lines"], 1);
     assert_eq!(parsed["commits_with_provenance"], 1);
+
+    // Removing the portable note must produce an explicit unknown state based
+    // on the real Git diff, never a false "0% AI" conclusion.
+    Command::new("git")
+        .args(["notes", "--ref", "refs/notes/ai", "remove", "HEAD"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let missing = require_binary()
+        .args(["team", "report", "--base", &base_sha, "--head", "HEAD"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(missing.status.success());
+    let missing_stdout = String::from_utf8_lossy(&missing.stdout);
+    assert!(missing_stdout.contains("Provenance unavailable"));
+    assert!(missing_stdout.contains("Unattributed added lines: 1"));
+    assert!(missing_stdout.contains("AI-assisted lines: **unknown**"));
+    assert!(!missing_stdout.contains("AI-assisted lines: 0"));
 
     let _ = fs::remove_dir_all(&dir);
 }

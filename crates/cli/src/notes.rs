@@ -238,11 +238,30 @@ pub(crate) fn cmd_team_report(base: &str, head: &str, notes_ref: &str, json: boo
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
-        .map(|sha| tellur_core::report::TeamCommitNote {
-            note: read_git_note(&storage.root, notes_ref, sha).ok(),
-            sha: sha.to_string(),
+        .map(|sha| {
+            let patch = git_output(
+                &storage.root,
+                &[
+                    "-c",
+                    "core.quotePath=false",
+                    "show",
+                    "--first-parent",
+                    "--format=",
+                    "--unified=0",
+                    "--no-ext-diff",
+                    sha,
+                ],
+            )?;
+            let (added_ranges, deleted_lines) =
+                tellur_core::report::team_report::parse_commit_patch(&patch);
+            Ok(tellur_core::report::TeamCommitNote {
+                note: read_git_note(&storage.root, notes_ref, sha).ok(),
+                sha: sha.to_string(),
+                added_ranges,
+                deleted_lines,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
 
     let report = tellur_core::report::aggregate_team_report(base, head, &commits);
     if json {
