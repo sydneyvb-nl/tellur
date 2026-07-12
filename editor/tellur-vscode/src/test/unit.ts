@@ -1,4 +1,5 @@
 import './suite/modelMetadata.test';
+import './suite/editorIdentity.test';
 import { runRegisteredTests } from './suite/harness';
 
 runRegisteredTests().catch(error => {

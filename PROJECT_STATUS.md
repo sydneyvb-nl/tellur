@@ -1,6 +1,6 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-07-12 (adapter harness compatibility on `feat/adapter-harness-compat`)
+**Last updated:** 2026-07-12 (developer GUI compatibility on `feat/adapter-harness-compat`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** `feat/adapter-harness-compat` · **Open PRs:** none before this change
@@ -78,6 +78,23 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > the gate is green. README and adapter docs updated; no CONTRIBUTING change was
 > needed because the workflow and repository structure did not change.
 >
+> **2026-07-12 — Developer GUI compatibility audit.** Continued on
+> `feat/adapter-harness-compat` before a PR existed. Checked the implementation
+> against current official VS Code, Cursor, Windsurf, and JetBrains contracts.
+> Fixed the VS Code-family extension so it requires Workspace Trust, runs as a
+> workspace extension beside local/remote repos, maintains one watcher per
+> multi-root folder (including runtime add/remove), and correctly auto-detects
+> VS Code/Cursor/Windsurf when setup has not written an explicit source. The old
+> package defaults had masked host detection, so manual Cursor/Windsurf installs
+> could be mislabeled `vscode-ai`; regression tests now cover all three hosts.
+> Expanded the JetBrains install range from builds 241–242 to 241–253
+> (2024.1–2025.3). Verification: VS Code compile + 7 unit tests + 2 real Extension
+> Host tests + VSIX package; JetBrains 3 tests + `buildPlugin`/headless IDE boot on
+> JDK 17. The pinned IntelliJ Gradle Plugin 2.0.1 cannot resolve the renamed
+> 2025.3 Community distribution for Plugin Verifier, so a deliberate build-tool
+> upgrade + cross-version verifier matrix is recorded as follow-up. Added
+> `docs/GUI_COMPATIBILITY.md`; README/adapter/plugin docs updated.
+>
 > **2026-06-22 — Maintainability refactor: decomposed the four monolith files.**
 > On branch `refactor/decompose-monoliths`. Behavior-preserving structural split,
 > no functional change. `crates/cli/src/main.rs` (4879 lines) → a 190-line
@@ -98,6 +115,7 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > against a live Postgres (`TELLUR_TEST_DATABASE_URL`): `cargo fmt` +
 > `clippy --all-targets --all-features -D warnings` + `test` (337 workspace tests) +
 > `cargo deny check` all green.
+
 > **2026-06-16 — GitHub App repo discovery + notes harvester (proposal P3).** On
 > branch `codex/github-app-notes-harvester`. Added `POST /webhook/github` for
 > GitHub App webhooks. The endpoint requires `TELLUR_GITHUB_WEBHOOK_SECRET` and

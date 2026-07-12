@@ -45,7 +45,7 @@ export interface ExplainResult {
 
 export class TellurClient {
     private binaryPath: string;
-    private watchProcess: ReturnType<typeof execFile> | null = null;
+    private watchProcesses = new Map<string, ReturnType<typeof execFile>>();
     private outputChannel: vscode.OutputChannel;
 
     constructor(binaryPath: string) {
@@ -70,13 +70,13 @@ export class TellurClient {
     }
 
     /** Initialize Tellur in the workspace */
-    async init(): Promise<string> {
-        return this.exec(['init']);
+    async init(cwd?: string): Promise<string> {
+        return this.exec(['init'], cwd);
     }
 
     /** Initialize Tellur when needed; init is idempotent in the CLI. */
-    async ensureInitialized(): Promise<void> {
-        await this.init();
+    async ensureInitialized(cwd?: string): Promise<void> {
+        await this.init(cwd);
     }
 
     /** Explain who changed a specific line */
@@ -142,10 +142,12 @@ export class TellurClient {
     }
 
     /** Start watching for changes */
-    startWatch(options?: { agentId?: string; agentName?: string; modelId?: string }): void {
-        const workDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    startWatch(
+        workDir?: string,
+        options?: { agentId?: string; agentName?: string; modelId?: string },
+    ): void {
         if (!workDir) return;
-        if (this.watchProcess) return;
+        if (this.watchProcesses.has(workDir)) return;
 
         const args = ['watch'];
         if (options?.agentId) {
@@ -158,15 +160,18 @@ export class TellurClient {
             args.push('--model-id', options.modelId);
         }
 
-        this.watchProcess = execFile(this.binaryPath, args, { cwd: workDir });
-        this.watchProcess.stdout?.on('data', (data: Buffer) => {
+        const watchProcess = execFile(this.binaryPath, args, { cwd: workDir });
+        this.watchProcesses.set(workDir, watchProcess);
+        watchProcess.stdout?.on('data', (data: Buffer) => {
             this.outputChannel.append(data.toString());
         });
-        this.watchProcess.stderr?.on('data', (data: Buffer) => {
+        watchProcess.stderr?.on('data', (data: Buffer) => {
             this.outputChannel.append(data.toString());
         });
-        this.watchProcess.on('exit', () => {
-            this.watchProcess = null;
+        watchProcess.on('exit', () => {
+            if (this.watchProcesses.get(workDir) === watchProcess) {
+                this.watchProcesses.delete(workDir);
+            }
         });
     }
 
@@ -187,9 +192,16 @@ export class TellurClient {
     }
 
     /** Stop watching */
-    stopWatch(): void {
-        this.watchProcess?.kill();
-        this.watchProcess = null;
+    stopWatch(workDir?: string): void {
+        if (workDir) {
+            this.watchProcesses.get(workDir)?.kill();
+            this.watchProcesses.delete(workDir);
+            return;
+        }
+        for (const process of this.watchProcesses.values()) {
+            process.kill();
+        }
+        this.watchProcesses.clear();
     }
 
     /** Check if tellur is installed */
