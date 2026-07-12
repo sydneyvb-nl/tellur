@@ -3,7 +3,8 @@
 **Last updated:** 2026-07-12 (developer GUI compatibility on `feat/adapter-harness-compat`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
-**Branch:** `feat/adapter-harness-compat` · **Open PRs:** none before this change
+**Branch:** `feat/adapter-harness-compat` · **Open PRs:** #48 (adapter/editor compatibility),
+#49 (team-hub JTBD overview)
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
 ## Handover — current state & open work
@@ -72,7 +73,7 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > including `NotebookEdit`, `Grep`, and `Glob`. Copilot preserves pre-hashed
 > prompts plus completion/suggestion/language correlation fields. Added four
 > regression tests covering the shared metadata contract and Codex, Claude, and
-> Copilot harness variants. Full workspace: 341 tests green; clippy `-D warnings`
+> Copilot harness variants. Full workspace: 342 tests green; clippy `-D warnings`
 > green. `cargo deny check` initially exposed newly published
 > `RUSTSEC-2026-0190` in locked `anyhow 1.0.102`; lockfile upgraded to 1.0.103 and
 > the gate is green. README and adapter docs updated; no CONTRIBUTING change was
@@ -94,6 +95,9 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > 2025.3 Community distribution for Plugin Verifier, so a deliberate build-tool
 > upgrade + cross-version verifier matrix is recorded as follow-up. Added
 > `docs/GUI_COMPATIBILITY.md`; README/adapter/plugin docs updated.
+> Review follow-up: VS Code virtual workspaces are now explicitly unsupported,
+> matching the filesystem-backed checkout requirement, and Codex envelope imports
+> inherit wrapper `sessionId` values even when no `session_meta` event is present.
 >
 > **2026-06-22 — Maintainability refactor: decomposed the four monolith files.**
 > On branch `refactor/decompose-monoliths`. Behavior-preserving structural split,

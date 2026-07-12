@@ -37,6 +37,9 @@ impl CodexAdapter {
         let mut session_id = fallback_session_id.to_string();
 
         for raw in &values {
+            if let Some(id) = crate::import::first_string(raw, &[&["session_id"], &["sessionId"]]) {
+                session_id = id.to_string();
+            }
             if raw.get("type").and_then(|v| v.as_str()) == Some("session_meta")
                 && let Some(id) = raw
                     .get("payload")
@@ -261,5 +264,29 @@ mod tests {
         assert_eq!(events[1].id, "source-event-9");
         assert!(events[1].timestamp.starts_with("2023-11-"));
         assert_eq!(events[1].payload["file_path"], "src/main.rs");
+    }
+
+    #[test]
+    fn test_parse_codex_envelope_inherits_wrapper_session_without_meta_event() {
+        let adapter = CodexAdapter::new();
+        let dir = std::env::temp_dir().join("tellur_test_codex_wrapper_session");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("telemetry.json");
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "sessionId": "editor-session-42",
+                "events": [{
+                    "type": "event_msg",
+                    "payload": {"type": "file_change", "path": "src/lib.rs"}
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let events = adapter.parse_jsonl(&path, "fallback").unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].session_id, "editor-session-42");
     }
 }

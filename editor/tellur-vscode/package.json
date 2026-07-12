@@ -16,6 +16,10 @@
     "workspace"
   ],
   "capabilities": {
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Tellur requires a filesystem-backed Git checkout so the CLI can write repository-local provenance data."
+    },
     "untrustedWorkspaces": {
       "supported": false,
       "description": "Tellur runs the configured CLI and writes provenance data in the workspace, so the workspace must be trusted first."

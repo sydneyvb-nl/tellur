@@ -42,10 +42,10 @@ Verified locally:
 - two tests inside a real VS Code 1.128 Extension Host;
 - VSIX packaging.
 
-Known limit: vscode.dev/github.dev-style virtual workspaces without a runnable
-Node workspace host cannot execute the local-first Rust CLI. Remote SSH, WSL,
-Dev Containers, and Codespaces need `tellur` installed in the remote workspace
-environment.
+The extension manifest explicitly disables virtual workspaces: vscode.dev and
+github.dev do not provide the filesystem-backed Git checkout that the local-first
+Rust CLI requires. Remote SSH, WSL, Dev Containers, and Codespaces remain
+supported when `tellur` is installed in the remote workspace environment.
 
 ## JetBrains IDEs
 
