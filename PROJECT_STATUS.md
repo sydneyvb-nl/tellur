@@ -3,15 +3,16 @@
 **Last updated:** 2026-07-12 (team-hub JTBD overview on `feat/team-hub-jtbd-ux`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
-**Branch:** `feat/team-hub-jtbd-ux` · **Open PRs:** #48 (adapter/editor compatibility)
+**Branch:** `feat/team-hub-jtbd-ux` · **Open PRs:** #48 (adapter/editor compatibility),
+#49 (team-hub JTBD overview)
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
 ## Handover — current state & open work
 
 **Everything described in the dated changelog below before the 2026-07-12 entry
 is merged to `main`.** The current team-hub UX milestone is on
-`feat/team-hub-jtbd-ux`; adapter/editor compatibility is open as PR #48. The
-local pipeline, the team hub
+`feat/team-hub-jtbd-ux`; adapter/editor compatibility is open as PR #48 and this
+hub milestone as PR #49. The local pipeline, the team hub
 (`tellur-server`), the CLI hub coupling (`tellur login`/`push`/`logout`), the A12
 source connection + private-repo proxy, prompt excerpts, and the dynamic session
 timeline are all shipped.
