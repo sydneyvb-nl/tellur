@@ -76,10 +76,13 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > safe transitions. Mobile now uses a scrollable primary nav instead of removing
 > it. Updated English/Dutch copy and the E2E contract, including a 390px mobile
 > navigation test. Verification: `pnpm check`, 63 Vitest tests, production build,
-> 6 Playwright E2E tests, `cargo build -p tellur-server`, and
+> 7 Playwright E2E tests, `cargo build -p tellur-server`, and
 > `cargo test -p tellur-server` green. The broader hub JTBD audit remains an
 > iterative program; this change deliberately lands one coherent, reviewable
 > milestone instead of mixing every screen into one unsafe mega-PR.
+> Review follow-up: the decision headline now distinguishes organizations with
+> zero AI-attributed lines from genuinely complete review coverage. The lockfile
+> also pins `anyhow` 1.0.103, resolving RUSTSEC-2026-0190 in the supply-chain gate.
 
 > **2026-06-22 — Maintainability refactor: decomposed the four monolith files.**
 > On branch `refactor/decompose-monoliths`. Behavior-preserving structural split,

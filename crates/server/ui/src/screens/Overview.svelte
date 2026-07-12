@@ -71,17 +71,23 @@
       <div class="decision-copy">
         <p class="eyebrow">{t("overview.attention")}</p>
         <h2 id="decision-title">
-          {#if reviewGap > 0}
+          {#if data.totals.ai_lines === 0}
+            {t("overview.noAiHeadline")}
+          {:else if reviewGap > 0}
             {t("overview.reviewGapHeadline", { n: count(reviewGap) })}
           {:else}
             {t("overview.clearHeadline")}
           {/if}
         </h2>
         <p>
-          {t("overview.reviewGapContext", {
-            repos: count(reposAtRisk),
-            coverage: data.review_coverage === null ? "—" : pct(data.review_coverage),
-          })}
+          {#if data.totals.ai_lines === 0}
+            {t("overview.noAiContext")}
+          {:else}
+            {t("overview.reviewGapContext", {
+              repos: count(reposAtRisk),
+              coverage: data.review_coverage === null ? "—" : pct(data.review_coverage),
+            })}
+          {/if}
         </p>
       </div>
       <a class="primary" href={reposPath(org)}>{t("overview.reviewRepos")}</a>

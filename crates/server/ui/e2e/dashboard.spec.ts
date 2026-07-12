@@ -125,6 +125,24 @@ test("overview renders and admin nav is present", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Audit log" })).toBeVisible();
 });
 
+test("overview does not claim review completion when no AI lines exist", async ({ page }) => {
+  await mockApi(page, "admin");
+  await page.route("**/v1/**/overview", (route) => {
+    const base = fixtures("admin").overview;
+    const overview = {
+      ...base,
+      totals: { ...base.totals, ai_lines: 0, reviewed_ai_lines: 0 },
+      ai_share: 0,
+      review_coverage: null,
+    };
+    return route.fulfill({ json: overview });
+  });
+  await page.goto(`/app/orgs/${ORG}/overview`);
+
+  await expect(page.getByRole("heading", { name: "No AI-attributed lines recorded yet" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "All AI-attributed lines are reviewed" })).toHaveCount(0);
+});
+
 test("non-admin does not see admin nav items", async ({ page }) => {
   await mockApi(page, "viewer");
   await page.goto(`/app/orgs/${ORG}/overview`);
