@@ -1,15 +1,15 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-22 (maintainability refactor — monolith decomposition on `refactor/decompose-monoliths`)
+**Last updated:** 2026-07-12 (adapter harness compatibility on `feat/adapter-harness-compat`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
-**Branch:** main · **Open PRs:** none · **Working tree:** clean
+**Branch:** `feat/adapter-harness-compat` · **Open PRs:** none before this change
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
 ## Handover — current state & open work
 
-**Everything described in the dated changelog below is merged to `main`.** There
-are no open PRs and the working tree is clean. The local pipeline, the team hub
+Everything before the 2026-07-12 entry below is merged to `main`; the adapter
+harness change is complete on its feature branch and ready for review. The local pipeline, the team hub
 (`tellur-server`), the CLI hub coupling (`tellur login`/`push`/`logout`), the A12
 source connection + private-repo proxy, prompt excerpts, and the dynamic session
 timeline are all shipped.
@@ -61,6 +61,23 @@ has **no marking workflow on purpose** — review marking does not belong in the
 hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 "mark reviewed" action.
 
+> **2026-07-12 — Adapter harness compatibility + supply-chain gate.** On branch
+> `feat/adapter-harness-compat`. Migrated the older Codex, Claude Code, and
+> Copilot import paths onto the shared tolerant JSON stream contract. All three
+> now accept JSONL, top-level arrays, single objects, and common envelope exports;
+> preserve source event IDs and string/numeric timestamps; inherit wrapper
+> session/model metadata; and normalize nested model/command/file concepts with
+> prompt hashing and secret redaction. Claude imports now retain user/assistant
+> role events and recognize Anthropic `content`-block `tool_use` records,
+> including `NotebookEdit`, `Grep`, and `Glob`. Copilot preserves pre-hashed
+> prompts plus completion/suggestion/language correlation fields. Added four
+> regression tests covering the shared metadata contract and Codex, Claude, and
+> Copilot harness variants. Full workspace: 341 tests green; clippy `-D warnings`
+> green. `cargo deny check` initially exposed newly published
+> `RUSTSEC-2026-0190` in locked `anyhow 1.0.102`; lockfile upgraded to 1.0.103 and
+> the gate is green. README and adapter docs updated; no CONTRIBUTING change was
+> needed because the workflow and repository structure did not change.
+>
 > **2026-06-22 — Maintainability refactor: decomposed the four monolith files.**
 > On branch `refactor/decompose-monoliths`. Behavior-preserving structural split,
 > no functional change. `crates/cli/src/main.rs` (4879 lines) → a 190-line
@@ -81,7 +98,6 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > against a live Postgres (`TELLUR_TEST_DATABASE_URL`): `cargo fmt` +
 > `clippy --all-targets --all-features -D warnings` + `test` (337 workspace tests) +
 > `cargo deny check` all green.
-
 > **2026-06-16 — GitHub App repo discovery + notes harvester (proposal P3).** On
 > branch `codex/github-app-notes-harvester`. Added `POST /webhook/github` for
 > GitHub App webhooks. The endpoint requires `TELLUR_GITHUB_WEBHOOK_SECRET` and

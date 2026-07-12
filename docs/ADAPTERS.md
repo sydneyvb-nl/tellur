@@ -1,6 +1,6 @@
 # Tellur Adapter Notes
 
-Last updated: 2026-06-02
+Last updated: 2026-07-12
 
 ## Current Guarantees
 
@@ -13,6 +13,9 @@ Last updated: 2026-06-02
 - A repository can opt out of global hook capture by creating `.tellur/disable`.
 - Imports preserve source `id`, `session_id`, `timestamp`, `event_type`,
   `actor`, and payload content.
+- JSON-stream importers accept JSONL, arrays, single objects, and common
+  envelope shapes. Envelope metadata is inherited by child events, and epoch
+  seconds/milliseconds are normalized to RFC 3339 timestamps.
 - Tellur always recomputes `prev_hash` and `event_hash` when imported events are
   appended to the local event log.
 - Non-empty malformed JSON/JSONL input fails the import with a line-specific
@@ -38,13 +41,13 @@ Last updated: 2026-06-02
 
 | Adapter | Capture Mode | Notes |
 | --- | --- | --- |
-| Claude Code | User/project hooks and transcript import | Highest-fidelity first-party integration. User-level hooks can be installed once with `tellur setup agents`; project hooks remain available through `tellur hooks install claude-code`. |
-| Codex CLI/App | User hooks, personal plugin, JSONL import | User-level hooks can be installed once with `tellur setup agents`. A local Codex plugin is also generated for manual workflows and marketplace discovery. |
+| Claude Code | User/project hooks and transcript import | Highest-fidelity first-party integration. User-level hooks can be installed once with `tellur setup agents`; project hooks remain available through `tellur hooks install claude-code`. Transcript import accepts JSONL/array/envelope exports, role messages, top-level tool records, and Anthropic `content`-block `tool_use` records. |
+| Codex CLI/App | User hooks, personal plugin, JSONL/array/envelope import | User-level hooks can be installed once with `tellur setup agents`. A local Codex plugin is also generated for manual workflows and marketplace discovery. Imports preserve rollout source IDs/timestamps and track session metadata across subsequent events. |
 | Gemini CLI | User hooks and JSONL import | `tellur setup gemini-cli` writes Gemini's documented `~/.gemini/settings.json` hooks for `BeforeTool`, `AfterTool`, agent, and session events. Hook commands return `{}` on stdout as Gemini requires. |
 | Google Antigravity 2.0 | User hooks, MCP, JSONL import | `tellur setup antigravity` writes Antigravity hooks under `~/.gemini/config/hooks.json` and MCP configs under `~/.gemini/antigravity*/mcp_config.json`. |
 | Cursor IDE/CLI | VS Code-compatible extension capture, global MCP, JSON/JSONL import | `tellur setup cursor` writes Cursor user settings and `~/.cursor/mcp.json`. Cursor does not currently expose a documented local IDE lifecycle hook equivalent to Codex hooks, so live capture is handled by the extension save/watch path and Cursor CLI traces can still be imported. |
 | VS Code/Copilot | VS Code extension save/watch capture, metadata JSON/JSONL import | `tellur setup vscode` writes user settings so the installed extension can auto-init, watch, and capture saved files in every Git workspace. Prompt capture remains explicit because VS Code does not expose arbitrary Copilot prompts to extensions. |
-| GitHub Copilot | Metadata JSON/JSONL import | Import-only. Does not intercept Copilot prompts directly because VS Code does not expose that API to extensions. |
+| GitHub Copilot | Metadata JSON/JSONL/array/envelope import | Import-only. Handles editor/telemetry harness wrappers and preserves completion/suggestion correlation metadata. Does not intercept Copilot prompts directly because VS Code does not expose that API to extensions. |
 | Windsurf / Cascade | VS Code-compatible extension capture, global MCP, JSON/JSONL session import | `tellur setup windsurf` writes Windsurf user settings and `~/.codeium/windsurf/mcp_config.json`. Windsurf is a VS Code-compatible editor, so live capture is handled by the extension save/watch path (source `windsurf`); Cascade session exports can still be imported. |
 | JetBrains AI Assistant / Junie | JetBrains plugin save/watch capture + JSON/JSONL action-log import | The `editor/tellur-jetbrains` plugin subscribes to IDE virtual-file changes, coalesces duplicate file events, and routes saved/created files through a disposable bounded single-worker queue to `tellur hooks ingest --source jetbrains --auto-init`, capturing AI Assistant and Junie edits live. If a duplicate arrives while capture is already running, one follow-up capture is queued so the final file state is not dropped. Non-zero CLI exits and timeouts are logged. Exported action logs can still be imported. JetBrains MCP is configured in-IDE, not through a stable global config file, so Tellur does not auto-write it. |
 | Devin | Daemon webhook live capture + run/session export import | The daemon's authenticated `POST /webhook/devin` normalizes Devin's native run/session payload (messages, shell commands, file edits, status) into Tellur events with a recomputed hash chain. Run exports (object/array/JSONL) can still be imported after the fact. |
@@ -66,7 +69,7 @@ model every editor as if it had Codex-style hooks.
 | VS Code-compatible extension | VS Code, Cursor, Windsurf | Best available editor-level live capture where lifecycle hooks are not documented. Also captures edits from agents that run inside the editor (e.g. Cline/Roo Code, Continue). | User settings enable `autoInit`, `autoWatch`, and `captureOnSave`; save capture routes through `hooks ingest` with source `vscode`, `cursor`, or `windsurf`. |
 | JetBrains plugin | JetBrains IDEs (AI Assistant, Junie) | Editor-level live capture for IntelliJ-family IDEs, which have no documented local hook. | `editor/tellur-jetbrains` subscribes to `VFS_CHANGES`, deduplicates repeated file events in each batch, and routes saved/created files through a disposable bounded single-worker queue to `hooks ingest --source jetbrains --auto-init`. Duplicate saves during an active capture queue one follow-up capture. Non-zero exits and timeouts are logged. |
 | Daemon webhook | Devin, any cloud/CI agent | Live capture for cloud agents with no local surface. | `POST /webhook/{source}` (token-auth, loopback-only) normalizes a tool's native webhook payload into events and recomputes the hash chain (`crates/core/src/daemon/webhook.rs`). |
-| Import adapters | Cursor, Codex, Copilot, Aider, Gemini CLI, Antigravity, Windsurf, JetBrains, Devin, Continue, Cline/Roo Code, Generic | Historical or metadata-based evidence. | `tellur import <adapter> <source>` normalizes external event streams while preserving source identity and timestamps. JSONL/array/envelope adapters share one tolerant parsing loop (`crates/adapters/src/import.rs`); each adapter only defines its event-type mapping. |
+| Import adapters | Claude Code, Cursor, Codex, Copilot, Aider, Gemini CLI, Antigravity, Windsurf, JetBrains, Devin, Continue, Cline/Roo Code, Generic | Historical or metadata-based evidence. | `tellur import <adapter> <source>` normalizes external event streams while preserving source identity and timestamps. JSONL/array/envelope adapters share one tolerant parsing loop (`crates/adapters/src/import.rs`); each adapter only defines its event-type mapping. |
 | Git/policy fallback | All editors | Enforcement at review/commit time. | `tellur policy check`, PR reports, Git notes, and future pre-commit/CI wiring catch gaps in editor APIs. |
 
 ## Adoption Adapter Roadmap

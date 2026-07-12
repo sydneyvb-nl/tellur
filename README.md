@@ -237,6 +237,12 @@ tellur verify                       # Verify hash-chain integrity
 Import adapters preserve source event IDs, source timestamps, session IDs, actor,
 event type, and payload while recomputing Tellur's local hash chain. Invalid
 non-empty JSON/JSONL lines fail the import instead of being silently skipped.
+Codex, Claude Code, and Copilot imports accept JSONL, top-level arrays, single
+events, and common envelope exports (`events`, `messages`, `records`, and related
+keys), so the same adapter works with raw CLI transcripts and editor/telemetry
+harnesses. String timestamps and Unix epoch seconds/milliseconds are normalized;
+wrapper session/model metadata is inherited by child events without overriding
+event-local fields.
 Prompt-like fields are stored as hashes, not raw prompt text; secret-looking
 strings in retained metadata are redacted.
 

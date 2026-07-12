@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use tellur_core::adapter::{AdapterCapabilities, AdapterInfo, AgentAdapter};
 use tellur_core::schema::types::*;
 
@@ -32,17 +32,11 @@ impl CodexAdapter {
     /// The adapter is intentionally tolerant because Codex stream fields evolve:
     /// it preserves the raw payload and normalizes stable concepts only.
     pub fn parse_jsonl(&self, path: &Path, fallback_session_id: &str) -> Result<Vec<TraceEvent>> {
-        let content = std::fs::read_to_string(path)?;
+        let values = crate::import::read_json_values(path, "Codex")?;
         let mut events = Vec::new();
         let mut session_id = fallback_session_id.to_string();
 
-        for (idx, line) in content.lines().enumerate() {
-            if line.trim().is_empty() {
-                continue;
-            }
-            let raw = serde_json::from_str::<serde_json::Value>(line)
-                .with_context(|| format!("invalid Codex JSONL at line {}", idx + 1))?;
-
+        for raw in &values {
             if raw.get("type").and_then(|v| v.as_str()) == Some("session_meta")
                 && let Some(id) = raw
                     .get("payload")
@@ -51,25 +45,12 @@ impl CodexAdapter {
             {
                 session_id = id.to_string();
             }
-
-            let event_type = codex_event_type(&raw);
-            let payload = normalized_payload(&raw);
-            events.push(TraceEvent {
-                schema: "tellur.event.v1".to_string(),
-                id: tellur_core::schema::ids::generate_event_id(),
-                session_id: session_id.clone(),
-                timestamp: raw
-                    .get("timestamp")
-                    .and_then(|v| v.as_str())
-                    .map(ToString::to_string)
-                    .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
-                event_type,
-                actor: EventActor::Agent,
-                payload,
-                redaction: None,
-                prev_hash: None,
-                event_hash: None,
-            });
+            events.push(crate::import::build_event(
+                raw,
+                &session_id,
+                codex_event_type(raw),
+                "codex",
+            ));
         }
 
         Ok(events)
@@ -108,43 +89,6 @@ fn codex_event_type(raw: &serde_json::Value) -> EventType {
         (Some(other), _) => EventType::Custom(format!("codex.{other}")),
         _ => EventType::Custom("codex.unknown".to_string()),
     }
-}
-
-fn normalized_payload(raw: &serde_json::Value) -> serde_json::Value {
-    let payload = raw.get("payload").cloned().unwrap_or_else(|| raw.clone());
-    let prompt_hash = crate::sanitize::first_prompt_hash(&payload);
-    let command = payload
-        .get("command")
-        .or_else(|| payload.get("cmd"))
-        .or_else(|| payload.get("argv"))
-        .cloned();
-    let file_path = payload
-        .get("file_path")
-        .or_else(|| payload.get("path"))
-        .or_else(|| payload.get("file"))
-        .cloned();
-    let mut out = serde_json::json!({
-        "tool": "codex",
-        "raw_type": raw.get("type"),
-        "raw_payload": crate::sanitize::sanitized_value(&payload),
-    });
-    if let Some(command) = command {
-        out["command"] = crate::sanitize::sanitized_value(&command);
-    }
-    if let Some(file_path) = file_path {
-        out["file_path"] = crate::sanitize::sanitized_value(&file_path);
-    }
-    if let Some(prompt_hash) = prompt_hash {
-        out["prompt_hash"] = serde_json::Value::String(prompt_hash);
-    }
-    if let Some(model) = raw
-        .get("payload")
-        .and_then(|p| p.get("model").or_else(|| p.get("model_name")))
-        .cloned()
-    {
-        out["model"] = model;
-    }
-    out
 }
 
 #[async_trait::async_trait]
@@ -286,5 +230,36 @@ mod tests {
         let serialized = serde_json::to_string(payload).unwrap();
         assert!(!serialized.contains("sk-abclongkeyvalue12345"));
         assert!(!serialized.contains("use api_key"));
+    }
+
+    #[test]
+    fn test_parse_codex_envelope_preserves_source_identity_and_epoch_time() {
+        let adapter = CodexAdapter::new();
+        let dir = std::env::temp_dir().join("tellur_test_codex_envelope");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("rollout.json");
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "events": [
+                    {"type": "session_meta", "payload": {"id": "rollout-7"}},
+                    {
+                        "id": "source-event-9",
+                        "ts": 1_700_000_000_000_i64,
+                        "type": "event_msg",
+                        "payload": {"type": "file_change", "path": "src/main.rs"}
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let events = adapter.parse_jsonl(&path, "fallback").unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1].session_id, "rollout-7");
+        assert_eq!(events[1].id, "source-event-9");
+        assert!(events[1].timestamp.starts_with("2023-11-"));
+        assert_eq!(events[1].payload["file_path"], "src/main.rs");
     }
 }
