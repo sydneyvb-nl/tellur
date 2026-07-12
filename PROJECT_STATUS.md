@@ -3,7 +3,7 @@
 **Last updated:** 2026-07-12 (honest PR provenance reporting on `fix/pr-provenance-evidence-states`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
-**Branch:** `fix/pr-provenance-evidence-states` · **Open PRs:** #48, #49
+**Branch:** `fix/pr-provenance-evidence-states` · **Open PRs:** #48, #49, #50
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
 ## Handover — current state & open work
@@ -72,7 +72,8 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > or invalid notes turn real additions into `unknown`; they can never produce a
 > false 0% AI conclusion. Added pure patch/coverage tests and expanded the CLI
 > integration test through both complete and missing-note scenarios. Workspace
-> total: 338 tests. README, adapter mechanics, and CI examples updated.
+> total: 338 tests. README, adapter mechanics, and CI examples updated. Open as
+> PR #50.
 
 > **2026-06-22 — Maintainability refactor: decomposed the four monolith files.**
 > On branch `refactor/decompose-monoliths`. Behavior-preserving structural split,
