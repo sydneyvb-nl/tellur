@@ -1,15 +1,17 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-22 (maintainability refactor — monolith decomposition on `refactor/decompose-monoliths`)
+**Last updated:** 2026-07-12 (team-hub JTBD overview on `feat/team-hub-jtbd-ux`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
-**Branch:** main · **Open PRs:** none · **Working tree:** clean
+**Branch:** `feat/team-hub-jtbd-ux` · **Open PRs:** #48 (adapter/editor compatibility)
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
 ## Handover — current state & open work
 
-**Everything described in the dated changelog below is merged to `main`.** There
-are no open PRs and the working tree is clean. The local pipeline, the team hub
+**Everything described in the dated changelog below before the 2026-07-12 entry
+is merged to `main`.** The current team-hub UX milestone is on
+`feat/team-hub-jtbd-ux`; adapter/editor compatibility is open as PR #48. The
+local pipeline, the team hub
 (`tellur-server`), the CLI hub coupling (`tellur login`/`push`/`logout`), the A12
 source connection + private-repo proxy, prompt excerpts, and the dynamic session
 timeline are all shipped.
@@ -60,6 +62,23 @@ timeline are all shipped.
 has **no marking workflow on purpose** — review marking does not belong in the
 hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 "mark reviewed" action.
+
+> **2026-07-12 — Team hub JTBD overview + responsive governance navigation.**
+> On `feat/team-hub-jtbd-ux`, started the evidence-based hub UX pass for the SMB
+> and corporate jobs in `TEAM_DASHBOARD_UI.md`. The old Overview led with generic
+> event/session counters in five cards (overflowing the captured desktop
+> viewport) and hid the entire primary nav below 768px. Rebuilt it as a calm,
+> decision-first governance workspace: explicit review-gap headline and CTA,
+> four restrained metrics (unreviewed AI lines, coverage, AI share, repos), a
+> sorted repository priority queue that drills into evidence, evidence-volume
+> context, freshness, clearer load/empty states, and restrained/reduced-motion-
+> safe transitions. Mobile now uses a scrollable primary nav instead of removing
+> it. Updated English/Dutch copy and the E2E contract, including a 390px mobile
+> navigation test. Verification: `pnpm check`, 63 Vitest tests, production build,
+> 6 Playwright E2E tests, `cargo build -p tellur-server`, and
+> `cargo test -p tellur-server` green. The broader hub JTBD audit remains an
+> iterative program; this change deliberately lands one coherent, reviewable
+> milestone instead of mixing every screen into one unsafe mega-PR.
 
 > **2026-06-22 — Maintainability refactor: decomposed the four monolith files.**
 > On branch `refactor/decompose-monoliths`. Behavior-preserving structural split,
