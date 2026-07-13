@@ -45,9 +45,11 @@ expectation) and provide security updates throughout it.
   re-verifies chains on ingest.
 - Privacy-first: prompts are hashed/redacted before leaving the client; the hub
   stores no raw prompts by default.
-- Supply chain: `cargo-deny` (licenses + advisories) and `cargo audit` run in CI;
-  releases ship an SBOM and signed artifacts (see the Tier 1 implementation
-  plan).
+- Supply chain: `cargo-deny` enforces licenses, advisories, and allowed sources
+  in CI; third-party Actions are pinned to reviewed commit SHAs. Release jobs
+  receive read-only repository access except for the single publishing job,
+  which receives `contents: write`. Current release assets ship SHA-256
+  sidecars; signing/SBOM work remains roadmap rather than a shipped claim.
 - Standards: we build to OWASP ASVS 5.0 (target L2), the OWASP API Security
   Top 10, and NIST SSDF practices. See
   [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) and

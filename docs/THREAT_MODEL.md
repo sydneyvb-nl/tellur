@@ -1,7 +1,7 @@
 # Threat Model
 
-**Last updated:** 2026-06-03 · **Scope:** Tellur core/CLI (local-first) and the
-`tellur-server` hub (Tier 1, in progress). Updated whenever the API surface or
+**Last updated:** 2026-07-13 · **Scope:** Tellur core/CLI (local-first) and the
+`tellur-server` hub. Updated whenever the API surface or
 trust boundaries change (per `AGENTS.md` / NIST SSDF).
 
 ## Assets
@@ -190,6 +190,10 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
   command/text fields.
 - **Editor capture** records file changes; origin (AI vs human) is decided by the
   attribution layer, not asserted by the client.
+- **Local imports** may read an absolute transcript/export path explicitly
+  selected by the logged-in OS user. They are not a repository sandbox and do
+  not accept those paths from network requests. The local dashboard treats all
+  imported/API values as text DOM nodes, never as HTML markup.
 - **CLI hub credentials** (`tellur login`) are written to
   `~/.config/tellur/hosts.json` with `0600` perms (owner-only on Unix); a
   compromised local OS user can read them — the same trust level as `.tellur`
@@ -214,6 +218,9 @@ trust boundaries change (per `AGENTS.md` / NIST SSDF).
   local-first; encryption-at-rest options are documented for sensitive setups.
 - Prompt-injection of AI agents is recorded as evidence, not fully prevented
   (PRD §14.6).
+- The local CLI and its import files share the logged-in OS user's privileges;
+  Tellur does not protect that user from another process already running as the
+  same account.
 
 ## Review triggers
 

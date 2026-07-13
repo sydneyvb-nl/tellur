@@ -481,6 +481,19 @@ mod tests {
         let _router = build_router(state);
     }
 
+    #[test]
+    fn dashboard_avoids_html_string_injection_sinks() {
+        let dashboard = include_str!("../../../../web/index.html");
+        for sink in [".innerHTML", ".outerHTML", "document.write"] {
+            assert!(
+                !dashboard.contains(sink),
+                "dashboard reintroduced unsafe DOM sink {sink}"
+            );
+        }
+        assert!(dashboard.contains("textContent"));
+        assert!(dashboard.contains("replaceChildren"));
+    }
+
     #[tokio::test]
     async fn test_list_sessions_returns_dashboard_rows() {
         use crate::schema::types::*;

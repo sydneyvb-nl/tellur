@@ -11,36 +11,28 @@
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Params, Row, ToSql};
 
-/// Locates a chain's single head-checkpoint row: the table and its key
-/// column/value (`audit_head` keyed by `id=1`; `event_head` keyed by `repo_id`).
-pub struct HeadRef<'a> {
-    pub table: &'a str,
-    pub key_col: &'a str,
-    pub key: &'a dyn ToSql,
-}
-
-/// Guard against accidental SQL identifier injection: table/column names are
-/// always internal constants, never user input.
-fn assert_ident(head: &HeadRef) {
-    debug_assert!(
-        matches!(head.table, "audit_head" | "event_head"),
-        "unexpected head table"
-    );
-    debug_assert!(
-        matches!(head.key_col, "id" | "repo_id"),
-        "unexpected head key column"
-    );
+/// Locates one of the two chain head-checkpoint rows. The SQL identifiers are
+/// encoded in the variants instead of accepted as strings, so callers can only
+/// provide the bound key value and can never influence query structure.
+pub enum HeadRef<'a> {
+    Audit(&'a dyn ToSql),
+    Event(&'a dyn ToSql),
 }
 
 /// Read the chain head (tip hash + length), or the genesis default `("", 0)`.
 pub fn read_head(conn: &Connection, head: &HeadRef) -> Result<(String, i64)> {
-    assert_ident(head);
-    let sql = format!(
-        "SELECT head_hash, entry_count FROM {} WHERE {} = ?1",
-        head.table, head.key_col
-    );
+    let (sql, key) = match head {
+        HeadRef::Audit(key) => (
+            "SELECT head_hash, entry_count FROM audit_head WHERE id = ?1",
+            *key,
+        ),
+        HeadRef::Event(key) => (
+            "SELECT head_hash, entry_count FROM event_head WHERE repo_id = ?1",
+            *key,
+        ),
+    };
     let row = conn
-        .query_row(&sql, rusqlite::params![head.key], |r| {
+        .query_row(sql, rusqlite::params![key], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
         })
         .optional()
@@ -55,14 +47,21 @@ pub fn write_head(
     head_hash: &str,
     entry_count: i64,
 ) -> Result<()> {
-    assert_ident(head);
-    let sql = format!(
-        "INSERT INTO {0} ({1}, head_hash, entry_count) VALUES (?1, ?2, ?3)
-         ON CONFLICT({1}) DO UPDATE SET head_hash = excluded.head_hash,
-                                        entry_count = excluded.entry_count",
-        head.table, head.key_col
-    );
-    conn.execute(&sql, rusqlite::params![head.key, head_hash, entry_count])
+    let (sql, key) = match head {
+        HeadRef::Audit(key) => (
+            "INSERT INTO audit_head (id, head_hash, entry_count) VALUES (?1, ?2, ?3)
+             ON CONFLICT(id) DO UPDATE SET head_hash = excluded.head_hash,
+                                           entry_count = excluded.entry_count",
+            *key,
+        ),
+        HeadRef::Event(key) => (
+            "INSERT INTO event_head (repo_id, head_hash, entry_count) VALUES (?1, ?2, ?3)
+             ON CONFLICT(repo_id) DO UPDATE SET head_hash = excluded.head_hash,
+                                                entry_count = excluded.entry_count",
+            *key,
+        ),
+    };
+    conn.execute(sql, rusqlite::params![key, head_hash, entry_count])
         .context("failed to update chain head")?;
     Ok(())
 }

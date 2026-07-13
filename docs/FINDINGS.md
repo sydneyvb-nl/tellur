@@ -1,5 +1,13 @@
 # Tellur — Code Review & Findings
 
+> **2026-07-13 security follow-up:** the supplied Aikido SAST/dependency report
+> was revalidated against current trust boundaries. Confirmed DOM XSS,
+> supply-chain pinning, workflow-permission, and dependency issues were
+> remediated; dynamic SQLite identifiers were structurally removed. The 15
+> filesystem-read alerts were classified as non-exploitable local-path reads,
+> with per-boundary rationale in
+> [`docs/security/AIKIDO_2026_07_13.md`](security/AIKIDO_2026_07_13.md).
+
 **Date:** 2026-05-31
 **Reviewer:** Claude (Opus 4.8) — full code review + security review
 **Scope:** entire repository at `main` (Rust core/CLI/adapters, VS Code extension, schemas, CI, packaging, docs)

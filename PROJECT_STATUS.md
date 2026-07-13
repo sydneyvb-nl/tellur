@@ -1,6 +1,6 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-07-13 (unified setup wizard + reality-aligned README)
+**Last updated:** 2026-07-13 (Aikido security remediation)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
 **Branch:** `codex/unified-setup-wizard` · **Open PRs:** none before this change
@@ -70,6 +70,24 @@ timeline are all shipped.
 has **no marking workflow on purpose** — review marking does not belong in the
 hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 "mark reviewed" action.
+
+> **2026-07-13 — Aikido security remediation.** On
+> `codex/security-aikido-remediation`. Removed confirmed DOM XSS sinks from the
+> embedded local dashboard by switching all API/import-driven rendering to DOM
+> text nodes; added a regression test that rejects HTML string sinks. Replaced
+> the SQLite hash-chain helper's dynamic table/column strings with a closed enum
+> and static parameterized queries. Pinned the five reported third-party GitHub
+> Actions to full commit SHAs, made release permissions deny-by-default and
+> job-scoped, updated `smallvec` to 1.15.2, and upgraded `notify` to 8.2.0 so
+> vulnerable `mio` 0.8.11 leaves the graph. The 15 path-read alerts were traced
+> to explicit local-user imports or fixed RepoStorage/home paths, not a remote
+> restricted-directory boundary; the non-applicability proof and security
+> invariants are recorded in `docs/security/AIKIDO_2026_07_13.md`. Verified with
+> `cargo fmt --all -- --check`, workspace clippy with warnings denied, all 353
+> Rust tests, `cargo deny check`, JavaScript/YAML parsing, pinned-SHA resolution,
+> and a real headless-browser injection attempt through the local daemon (the
+> malicious `<img onerror>` remained literal text; zero injected elements and
+> no handler execution).
 
 > **2026-07-13 — Unified setup and reality-aligned product onboarding.** On
 > `codex/unified-setup-wizard`. `tellur setup` is now the supported idempotent

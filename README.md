@@ -303,9 +303,13 @@ Rust adapters → redaction → hash-chained event log
 - Hash chains reveal modification of recorded evidence; they do not prove that
   every real-world action was captured.
 - Attribution quality is bounded by the integration and evidence available.
+- Dashboard API values are rendered as text rather than injected as HTML; CI
+  third-party actions are commit-pinned and release writes are job-scoped.
 
 See [SECURITY.md](SECURITY.md), [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), and
-[docs/ADAPTERS.md](docs/ADAPTERS.md) before a production rollout.
+[docs/ADAPTERS.md](docs/ADAPTERS.md) before a production rollout. The latest
+Aikido finding-by-finding triage is in
+[docs/security/AIKIDO_2026_07_13.md](docs/security/AIKIDO_2026_07_13.md).
 
 ## Contributing
 

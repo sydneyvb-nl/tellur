@@ -226,6 +226,8 @@
       font-size: 20px;
       font-weight: 700;
     }
+    .summary-item.compact-summary .summary-value { font-size: 14px; }
+    .summary-item.attribution-summary { flex: 1; }
     .attribution-bar {
       height: 6px;
       border-radius: 3px;
@@ -384,20 +386,33 @@ function renderSessionList() {
   });
 
   document.getElementById('session-count').textContent = filtered.length;
+  const items = filtered.map((s) => {
+    const item = element('div', `session-item${activeSession === s.id ? ' active' : ''}`);
+    item.addEventListener('click', () => selectSession(s.id));
+    item.append(element('div', 'session-agent', `${getAgentIcon(s.agent_id)} ${s.agent_id || 'unknown'}`));
+    if (s.model_id) item.append(element('div', 'session-model', s.model_id));
+    item.append(element('div', 'session-time', formatTime(s.started_at)));
 
-  list.innerHTML = filtered.map(s => `
-    <div class="session-item ${activeSession === s.id ? 'active' : ''}" onclick="selectSession('${s.id}')">
-      <div class="session-agent">
-        ${getAgentIcon(s.agent_id)} ${s.agent_id}
-      </div>
-      ${s.model_id ? `<div class="session-model">${s.model_id}</div>` : ''}
-      <div class="session-time">${formatTime(s.started_at)}</div>
-      <div class="session-stats">
-        <span class="stat events">${s.event_count} events</span>
-        <span class="stat ${s.ai_percentage > 50 ? 'ai' : 'human'}">${s.ai_percentage}% AI</span>
-      </div>
-    </div>
-  `).join('');
+    const stats = element('div', 'session-stats');
+    stats.append(element('span', 'stat events', `${Number(s.event_count) || 0} events`));
+    const aiPct = percentage(s.ai_percentage);
+    stats.append(element('span', `stat ${aiPct > 50 ? 'ai' : 'human'}`, `${aiPct}% AI`));
+    item.append(stats);
+    return item;
+  });
+  list.replaceChildren(...items);
+}
+
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = String(text);
+  return node;
+}
+
+function percentage(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(100, Math.max(0, number)) : 0;
 }
 
 function getAgentIcon(agent) {
@@ -437,18 +452,15 @@ function normalizeEventType(type) {
 }
 
 function renderDiff(diff) {
-  if (!diff) return '';
-  return `<div class="diff-block">${diff.split('\n').map(line => {
-    if (line.startsWith('+')) return `<span class="diff-add">${escapeHtml(line)}</span>`;
-    if (line.startsWith('-')) return `<span class="diff-del">${escapeHtml(line)}</span>`;
-    return `<span class="diff-ctx">${escapeHtml(line)}</span>`;
-  }).join('\n')}</div>`;
-}
-
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  const block = element('div', 'diff-block');
+  if (!diff) return block;
+  const lines = diff.split('\n');
+  lines.forEach((line, index) => {
+    const className = line.startsWith('+') ? 'diff-add' : line.startsWith('-') ? 'diff-del' : 'diff-ctx';
+    block.append(element('span', className, line));
+    if (index < lines.length - 1) block.append(document.createTextNode('\n'));
+  });
+  return block;
 }
 
 async function selectSession(id) {
@@ -460,54 +472,44 @@ async function selectSession(id) {
 
   const main = document.getElementById('main-content');
 
-  const aiPct = session?.ai_percentage || 0;
+  const aiPct = percentage(session?.ai_percentage);
   const humanPct = 100 - aiPct;
 
-  main.innerHTML = `
-    <div class="summary-bar">
-      <div class="summary-item">
-        <span class="summary-label">Agent</span>
-        <span class="summary-value">${session?.agent_id || 'unknown'}</span>
-      </div>
-      <div class="summary-item">
-        <span class="summary-label">Model</span>
-        <span class="summary-value" style="font-size:14px">${session?.model_id || 'human'}</span>
-      </div>
-      <div class="summary-item">
-        <span class="summary-label">Events</span>
-        <span class="summary-value">${events.length}</span>
-      </div>
-      <div class="summary-item">
-        <span class="summary-label">Files Changed</span>
-        <span class="summary-value">${session?.files_changed || 0}</span>
-      </div>
-      <div class="summary-item">
-        <span class="summary-label">Lines Added</span>
-        <span class="summary-value">${session?.lines_added || 0}</span>
-      </div>
-      <div class="summary-item" style="flex:1">
-        <span class="summary-label">AI vs Human</span>
-        <span class="summary-value" style="font-size:14px">${aiPct}% / ${humanPct}%</span>
-        <div class="attribution-bar">
-          <div class="ai" style="width:${aiPct}%"></div>
-          <div class="human" style="width:${humanPct}%"></div>
-        </div>
-      </div>
-    </div>
+  const summary = element('div', 'summary-bar');
+  const addSummary = (label, value, className = '') => {
+    const item = element('div', `summary-item${className}`);
+    item.append(element('span', 'summary-label', label), element('span', 'summary-value', value));
+    summary.append(item);
+    return item;
+  };
+  addSummary('Agent', session?.agent_id || 'unknown');
+  addSummary('Model', session?.model_id || 'human', ' compact-summary');
+  addSummary('Events', events.length);
+  addSummary('Files Changed', Number(session?.files_changed) || 0);
+  addSummary('Lines Added', Number(session?.lines_added) || 0);
+  const attribution = addSummary('AI vs Human', `${aiPct}% / ${humanPct}%`, ' compact-summary attribution-summary');
+  const bar = element('div', 'attribution-bar');
+  const aiBar = element('div', 'ai');
+  const humanBar = element('div', 'human');
+  aiBar.style.width = `${aiPct}%`;
+  humanBar.style.width = `${humanPct}%`;
+  bar.append(aiBar, humanBar);
+  attribution.append(bar);
 
-    <div class="timeline">
-      ${events.map(e => `
-        <div class="event ${getEventClass(e.event_type)}">
-          <div class="event-header">
-            <span class="event-type ${getEventClass(e.event_type)}">${getTypeLabel(e.event_type)}</span>
-            <span class="event-time">${formatTime(e.timestamp)}</span>
-          </div>
-          <div class="event-body">${escapeHtml(e.body || '')}</div>
-          ${e.diff ? renderDiff(e.diff) : ''}
-        </div>
-      `).join('')}
-    </div>
-  `;
+  const timeline = element('div', 'timeline');
+  events.forEach((event) => {
+    const eventClass = getEventClass(event.event_type);
+    const eventNode = element('div', `event${eventClass ? ` ${eventClass}` : ''}`);
+    const header = element('div', 'event-header');
+    header.append(
+      element('span', `event-type${eventClass ? ` ${eventClass}` : ''}`, getTypeLabel(event.event_type)),
+      element('span', 'event-time', formatTime(event.timestamp)),
+    );
+    eventNode.append(header, element('div', 'event-body', event.body || ''));
+    if (event.diff) eventNode.append(renderDiff(event.diff));
+    timeline.append(eventNode);
+  });
+  main.replaceChildren(summary, timeline);
 }
 
 // --- Filters ---
@@ -556,28 +558,37 @@ async function loadHubDashboard({ hub, org, token }) {
   return res.json();
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
 function renderHubDashboard(data) {
   const r = data.report || {};
-  const repos = (r.repos || [])
-    .map((x) => `<li><strong>${escapeHtml(x.name)}</strong> — ${Number(x.event_count) || 0} events</li>`)
-    .join('');
-  const recent = (data.recent_events || [])
-    .map((e) => `<li><code>${escapeHtml(e.type)}</code> by ${escapeHtml(e.actor)} ` +
-      `in ${escapeHtml(e.repo_id)} <span class="muted">${escapeHtml(e.timestamp)}</span></li>`)
-    .join('');
   const main = document.getElementById('main-content');
-  main.innerHTML =
-    `<div class="session-detail">
-       <h2>Team activity — org ${escapeHtml(data.org_id)}</h2>
-       <p>${Number(r.total_events) || 0} events · ${Number(r.distinct_sessions) || 0} sessions · ${(r.repos||[]).length} repos</p>
-       <h3>Repositories</h3><ul>${repos || '<li class="muted">none</li>'}</ul>
-       <h3>Recent activity</h3><ul>${recent || '<li class="muted">none</li>'}</ul>
-     </div>`;
+  const detail = element('div', 'session-detail');
+  detail.append(
+    element('h2', '', `Team activity — org ${data.org_id || 'unknown'}`),
+    element('p', '', `${Number(r.total_events) || 0} events · ${Number(r.distinct_sessions) || 0} sessions · ${(r.repos || []).length} repos`),
+    element('h3', '', 'Repositories'),
+  );
+  const repos = element('ul');
+  (r.repos || []).forEach((repo) => {
+    const item = element('li');
+    item.append(element('strong', '', repo.name || 'unknown'), document.createTextNode(` — ${Number(repo.event_count) || 0} events`));
+    repos.append(item);
+  });
+  if (!repos.childElementCount) repos.append(element('li', 'muted', 'none'));
+  detail.append(repos, element('h3', '', 'Recent activity'));
+
+  const recent = element('ul');
+  (data.recent_events || []).forEach((event) => {
+    const item = element('li');
+    item.append(
+      element('code', '', event.type || 'unknown'),
+      document.createTextNode(` by ${event.actor || 'unknown'} in ${event.repo_id || 'unknown'} `),
+      element('span', 'muted', event.timestamp || ''),
+    );
+    recent.append(item);
+  });
+  if (!recent.childElementCount) recent.append(element('li', 'muted', 'none'));
+  detail.append(recent);
+  main.replaceChildren(detail);
 }
 
 // --- Init ---
@@ -587,8 +598,9 @@ async function init() {
     try {
       renderHubDashboard(await loadHubDashboard(hub));
     } catch (e) {
-      document.getElementById('main-content').innerHTML =
-        `<div class="session-detail"><h2>Tellur hub</h2><p>${escapeHtml(e.message)}</p></div>`;
+      const detail = element('div', 'session-detail');
+      detail.append(element('h2', '', 'Tellur hub'), element('p', '', e.message));
+      document.getElementById('main-content').replaceChildren(detail);
     }
     return;
   }
