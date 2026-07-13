@@ -1,18 +1,17 @@
 # Proposal: Tellur Team Dashboard (Web UI)
 
-**Status:** Design proposal — **not implemented**. Defines product scope, UX, a
-visual design system, the API surface it requires, runtime architecture, and a
-phased delivery plan for a full-fledged team dashboard served by the self-hosted
-hub (`tellur-server`).
+**Status:** Implemented baseline; active product specification. The embedded
+dashboard, APIs, role-gated screens, evidence drill-downs, exports, audit, and
+access surfaces are shipped. The specification now also tracks iterative JTBD
+and usability improvements against the working product.
 **Owner:** product + design (this doc) · **Roadmap:** PROJECT_STATUS.md #8 (Tier 1/2)
 · **Builds on:** `docs/proposals/TEAM_SERVER_MODE.md`,
 `docs/proposals/TEAM_SERVER_IMPLEMENTATION.md`
-**Last updated:** 2026-06-08
+**Last updated:** 2026-07-12
 
-> This is a plan, not shipped behavior. It is written so any contributor (or
-> agent) can pick up a milestone and build it without re-deriving the product
-> thinking. Nothing here is implemented yet. No pricing/commercial detail is in
-> scope (public repo).
+> The architecture and core screens below are shipped. Future-looking passages
+> remain design guidance, not a claim that every refinement is complete. No
+> pricing/commercial detail is in scope (public repo).
 
 ---
 

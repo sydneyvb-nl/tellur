@@ -88,6 +88,12 @@ SSO, SCIM provisioning, durable jobs, and an embedded web dashboard
 (Overview, repositories, sessions, policy compliance, people & access, audit log,
 and exports).
 
+The team Overview is decision-first: it leads with AI-attributed lines awaiting
+review, review coverage, AI share, and the repositories that need attention.
+Event/session volume remains evidence context rather than the primary success
+signal. Priority repositories link directly into file and session provenance,
+and the full governance navigation remains reachable on mobile.
+
 ## Install
 
 From source:

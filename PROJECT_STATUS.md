@@ -1,16 +1,17 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-07-12 (developer GUI compatibility on `feat/adapter-harness-compat`)
+**Last updated:** 2026-07-13 (PR #49 synchronized with adapter/editor compatibility on `main`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
-**Branch:** `feat/adapter-harness-compat` · **Open PRs:** #48 (adapter/editor compatibility),
-#49 (team-hub JTBD overview)
+**Branch:** `feat/team-hub-jtbd-ux` · **Open PRs:** #49 (team-hub JTBD overview),
+#50 (provenance reporting)
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
 ## Handover — current state & open work
 
-Everything before the 2026-07-12 entry below is merged to `main`; the adapter
-harness change is complete on its feature branch and ready for review. The local pipeline, the team hub
+**The adapter/editor compatibility work from PR #48 is merged to `main`.** The
+current team-hub UX milestone remains on `feat/team-hub-jtbd-ux` as PR #49;
+provenance reporting is open as PR #50. The local pipeline, the team hub
 (`tellur-server`), the CLI hub coupling (`tellur login`/`push`/`logout`), the A12
 source connection + private-repo proxy, prompt excerpts, and the dynamic session
 timeline are all shipped.
@@ -62,6 +63,26 @@ has **no marking workflow on purpose** — review marking does not belong in the
 hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 "mark reviewed" action.
 
+> **2026-07-12 — Team hub JTBD overview + responsive governance navigation.**
+> On `feat/team-hub-jtbd-ux`, started the evidence-based hub UX pass for the SMB
+> and corporate jobs in `TEAM_DASHBOARD_UI.md`. The old Overview led with generic
+> event/session counters in five cards (overflowing the captured desktop
+> viewport) and hid the entire primary nav below 768px. Rebuilt it as a calm,
+> decision-first governance workspace: explicit review-gap headline and CTA,
+> four restrained metrics (unreviewed AI lines, coverage, AI share, repos), a
+> sorted repository priority queue that drills into evidence, evidence-volume
+> context, freshness, clearer load/empty states, and restrained/reduced-motion-
+> safe transitions. Mobile now uses a scrollable primary nav instead of removing
+> it. Updated English/Dutch copy and the E2E contract, including a 390px mobile
+> navigation test. Verification: `pnpm check`, 63 Vitest tests, production build,
+> 7 Playwright E2E tests, `cargo build -p tellur-server`, and
+> `cargo test -p tellur-server` green. The broader hub JTBD audit remains an
+> iterative program; this change deliberately lands one coherent, reviewable
+> milestone instead of mixing every screen into one unsafe mega-PR.
+> Review follow-up: the decision headline now distinguishes organizations with
+> zero AI-attributed lines from genuinely complete review coverage. The lockfile
+> also pins `anyhow` 1.0.103, resolving RUSTSEC-2026-0190 in the supply-chain gate.
+>
 > **2026-07-12 — Adapter harness compatibility + supply-chain gate.** On branch
 > `feat/adapter-harness-compat`. Migrated the older Codex, Claude Code, and
 > Copilot import paths onto the shared tolerant JSON stream contract. All three
