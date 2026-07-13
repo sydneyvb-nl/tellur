@@ -1,0 +1,80 @@
+.github/workflows/ci.yml
+  s_2551a47536623f::t_5235694c9d7fec 109-153
+.github/workflows/release.yml
+  s_2551a47536623f::t_0f701aff60cc5a 131-134
+  s_2551a47536623f::t_784d8d08d6fe49 123
+  s_2551a47536623f::t_93f9aa21f26210 50
+  s_2551a47536623f::t_c5f3fb522f1d2b 79-118
+  s_2551a47536623f::t_fa3bc2393bad9a 120
+AGENTS.md
+  s_2551a47536623f::t_3e456e58af3823 133
+CONTRIBUTING.md
+  s_2551a47536623f::t_085569f98af6d2 87-88
+  s_2551a47536623f::t_5a1c7e120ae30b 105-109
+PROJECT_STATUS.md
+  s_2551a47536623f::t_1a1b4294168b84 84-90
+  s_2551a47536623f::t_4e88b6a1f0e29a 1257
+  s_2551a47536623f::t_58277658696f83 1230-1233
+  s_2551a47536623f::t_6d04fc53032cc0 1223
+  s_2551a47536623f::t_6e3e3c36fcd514 1265-1269
+  s_2551a47536623f::t_72c1531cd84ac5 1344
+  s_2551a47536623f::t_847cb45351544a 1338-1339
+  s_2551a47536623f::t_ca69b209c8de66 1160
+  s_2551a47536623f::t_ecce37f8176601 1262
+  s_2551a47536623f::t_fa984afc3b5920 54-56
+  s_2551a47536623f::t_fdf10179c7a689 32-38
+README.md
+  s_2551a47536623f::t_27a54e48a40f92 95-98
+  s_2551a47536623f::t_3813e90d0eb2e7 65-68
+  s_2551a47536623f::t_80f9d89ed9ee08 93
+  s_2551a47536623f::t_a5715c157c70d6 14-18
+  s_2551a47536623f::t_b7ef9f364a81e2 113-116
+  s_2551a47536623f::t_d64d32e7acaccd 24-29
+  s_2551a47536623f::t_d6850e7fef6aa2 108-109
+  s_2551a47536623f::t_de0a9db977fa13 74-75
+  s_2551a47536623f::t_f54f4acad444d8 32-38
+  s_2551a47536623f::t_f92bddbb6d58fe 261-267
+crates/cli/src/setup.rs
+  s_2551a47536623f::t_38d5bb88dea790 7
+  s_2551a47536623f::t_947519632fa5c1 235-275
+  s_2551a47536623f::t_c5c2431d02aab7 212-231
+  s_2551a47536623f::t_fb38ad525e7e6d 62
+crates/cli/tests/cli_integration.rs
+  s_2551a47536623f::t_f18842f830f0e8 1801-1852
+dist/tests/install-ps1-e2e.ps1
+  s_2551a47536623f::t_f2280a1a08df1a 1-63
+dist/tests/install-sh-e2e.sh
+  s_2551a47536623f::t_2f7c8cfbdc0a85 1-66
+docs/ADAPTERS.md
+  s_2551a47536623f::t_0f0f7187c33123 124-126
+  s_2551a47536623f::t_9d90fff8439172 66
+  s_2551a47536623f::t_a4b6fc2d2cb21c 15-19
+editor/tellur-jetbrains/README.md
+  s_2551a47536623f::t_45ffcd33c320cb 94-96
+  s_2551a47536623f::t_d4dbf8c98f9287 62-75
+install.ps1
+  s_2551a47536623f::t_4154ea2690237c 1-87
+install.sh
+  s_2551a47536623f::t_e907af5cd2f654 1-126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "tellur/0.1.0",
+  "base_commit_sha": "c0875f506306d1de21e99bb4ffb7bca798469420",
+  "prompts": {},
+  "humans": {},
+  "sessions": {
+    "s_2551a47536623f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "codex-pr51-unified-setup",
+        "model": "openai:gpt-5"
+      },
+      "human_author": "sydneyvb-nl",
+      "custom_attributes": {
+        "tellur.confidence": "1.00",
+        "tellur.evidence_strength": "claimed"
+      }
+    }
+  }
+}
