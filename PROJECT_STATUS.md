@@ -1,16 +1,16 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-07-13 (Aikido remediation after machine-wide release preparation)
+**Last updated:** 2026-07-13 (v0.1.0 release workflow repair)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
-**Branch:** `codex/security-aikido-remediation` · **PR:** #53
+**Branch:** `codex/fix-v0-1-0-release`
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
 ## Handover — current state & open work
 
-**PRs #48–#52 are merged to `main`: adapter/editor compatibility, team-hub UX,
+**PRs #48–#53 are merged to `main`: adapter/editor compatibility, team-hub UX,
 evidence-aware provenance, unified setup/release packaging, and machine-wide
-activation/release readiness.** The
+activation/release readiness, including the Aikido security remediation.** The
 local pipeline, the team hub
 (`tellur-server`), the CLI hub coupling (`tellur login`/`push`/`logout`), the A12
 source connection + private-repo proxy, prompt excerpts, and the dynamic session
@@ -82,6 +82,18 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > and a real headless-browser injection attempt through the local daemon (the
 > malicious `<img onerror>` remained literal text; zero injected elements and
 > no handler execution).
+
+> **2026-07-13 — v0.1.0 release workflow repair.** The first tag build exposed
+> that the VS Code package was already version `0.1.0`; npm treats setting an
+> identical version as an error by default and therefore skipped all editor
+> artifacts and publication. The release workflow now explicitly allows the
+> checked-in package version to match the tag. Production dependency audit is
+> clean (`npm audit --omit=dev`: zero findings). The original `v0.1.0` run did
+> not publish a GitHub Release; after this fix merges, the unpublished tag must
+> be recreated on the repaired commit before rerunning the release pipeline.
+> The VSIX packager was also upgraded to `@vscode/vsce` 3.9.2 with patched
+> `form-data` 4.0.6 and `undici` 6.27.0; the full extension dependency audit now
+> reports zero vulnerabilities.
 
 > **2026-07-13 — Unified setup and reality-aligned product onboarding.** On
 > `codex/unified-setup-wizard`. `tellur setup` is now the supported idempotent

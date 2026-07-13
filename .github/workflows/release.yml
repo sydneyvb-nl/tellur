@@ -103,7 +103,9 @@ jobs:
         working-directory: editor/tellur-vscode
         run: |
           npm ci
-          npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version
+          # The first release tag can intentionally match the checked-in
+          # extension version. npm otherwise exits 1 without changing files.
+          npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
           npm run test:unit
           npx vsce package --no-dependencies --out ../../tellur-vscode.vsix
       - name: Build JetBrains plugin ZIP
