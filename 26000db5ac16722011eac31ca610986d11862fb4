@@ -1,0 +1,32 @@
+PROJECT_STATUS.md
+  s_7a75557532985c::t_313b8828049f4b 1276
+  s_7a75557532985c::t_a971f92d3028de 107-108
+crates/cli/src/git.rs
+  s_7a75557532985c::t_4d2d80001c9a04 106
+  s_7a75557532985c::t_73c2b18a610750 138-169
+  s_7a75557532985c::t_a7d9cd0b7189f2 95-102
+crates/cli/src/notes.rs
+  s_7a75557532985c::t_2cda10e81aaa59 349-356
+  s_7a75557532985c::t_8a4e69fc2b8e0e 9-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "tellur/0.1.0",
+  "base_commit_sha": "26000db5ac16722011eac31ca610986d11862fb4",
+  "prompts": {},
+  "humans": {},
+  "sessions": {
+    "s_7a75557532985c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "sess_codex_pr52_release_readiness",
+        "model": "openai:gpt-5"
+      },
+      "human_author": "sydneyvb-nl",
+      "custom_attributes": {
+        "tellur.confidence": "1.00",
+        "tellur.evidence_strength": "claimed"
+      }
+    }
+  }
+}
