@@ -1,15 +1,16 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-06-22 (maintainability refactor — monolith decomposition on `refactor/decompose-monoliths`)
+**Last updated:** 2026-07-12 (developer GUI compatibility on `feat/adapter-harness-compat`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
-**Branch:** main · **Open PRs:** none · **Working tree:** clean
+**Branch:** `feat/adapter-harness-compat` · **Open PRs:** #48 (adapter/editor compatibility),
+#49 (team-hub JTBD overview)
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
 ## Handover — current state & open work
 
-**Everything described in the dated changelog below is merged to `main`.** There
-are no open PRs and the working tree is clean. The local pipeline, the team hub
+Everything before the 2026-07-12 entry below is merged to `main`; the adapter
+harness change is complete on its feature branch and ready for review. The local pipeline, the team hub
 (`tellur-server`), the CLI hub coupling (`tellur login`/`push`/`logout`), the A12
 source connection + private-repo proxy, prompt excerpts, and the dynamic session
 timeline are all shipped.
@@ -61,6 +62,43 @@ has **no marking workflow on purpose** — review marking does not belong in the
 hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 "mark reviewed" action.
 
+> **2026-07-12 — Adapter harness compatibility + supply-chain gate.** On branch
+> `feat/adapter-harness-compat`. Migrated the older Codex, Claude Code, and
+> Copilot import paths onto the shared tolerant JSON stream contract. All three
+> now accept JSONL, top-level arrays, single objects, and common envelope exports;
+> preserve source event IDs and string/numeric timestamps; inherit wrapper
+> session/model metadata; and normalize nested model/command/file concepts with
+> prompt hashing and secret redaction. Claude imports now retain user/assistant
+> role events and recognize Anthropic `content`-block `tool_use` records,
+> including `NotebookEdit`, `Grep`, and `Glob`. Copilot preserves pre-hashed
+> prompts plus completion/suggestion/language correlation fields. Added four
+> regression tests covering the shared metadata contract and Codex, Claude, and
+> Copilot harness variants. Full workspace: 342 tests green; clippy `-D warnings`
+> green. `cargo deny check` initially exposed newly published
+> `RUSTSEC-2026-0190` in locked `anyhow 1.0.102`; lockfile upgraded to 1.0.103 and
+> the gate is green. README and adapter docs updated; no CONTRIBUTING change was
+> needed because the workflow and repository structure did not change.
+>
+> **2026-07-12 — Developer GUI compatibility audit.** Continued on
+> `feat/adapter-harness-compat` before a PR existed. Checked the implementation
+> against current official VS Code, Cursor, Windsurf, and JetBrains contracts.
+> Fixed the VS Code-family extension so it requires Workspace Trust, runs as a
+> workspace extension beside local/remote repos, maintains one watcher per
+> multi-root folder (including runtime add/remove), and correctly auto-detects
+> VS Code/Cursor/Windsurf when setup has not written an explicit source. The old
+> package defaults had masked host detection, so manual Cursor/Windsurf installs
+> could be mislabeled `vscode-ai`; regression tests now cover all three hosts.
+> Expanded the JetBrains install range from builds 241–242 to 241–253
+> (2024.1–2025.3). Verification: VS Code compile + 7 unit tests + 2 real Extension
+> Host tests + VSIX package; JetBrains 3 tests + `buildPlugin`/headless IDE boot on
+> JDK 17. The pinned IntelliJ Gradle Plugin 2.0.1 cannot resolve the renamed
+> 2025.3 Community distribution for Plugin Verifier, so a deliberate build-tool
+> upgrade + cross-version verifier matrix is recorded as follow-up. Added
+> `docs/GUI_COMPATIBILITY.md`; README/adapter/plugin docs updated.
+> Review follow-up: VS Code virtual workspaces are now explicitly unsupported,
+> matching the filesystem-backed checkout requirement, and Codex envelope imports
+> inherit wrapper `sessionId` values even when no `session_meta` event is present.
+>
 > **2026-06-22 — Maintainability refactor: decomposed the four monolith files.**
 > On branch `refactor/decompose-monoliths`. Behavior-preserving structural split,
 > no functional change. `crates/cli/src/main.rs` (4879 lines) → a 190-line

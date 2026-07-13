@@ -81,11 +81,14 @@ JAVA_HOME=/path/to/jdk-17 ./gradlew buildPlugin
 Install the resulting zip via **Preferences → Plugins → ⚙ → Install Plugin from
 Disk…**.
 
-The plugin declares compatibility with IntelliJ Platform 2024.1 through 2024.2
-(`sinceBuild=241`, `untilBuild=242.*`). Raise that range only after building and
-checking the plugin against the newer platform.
+The plugin declares compatibility with IntelliJ Platform 2024.1 through 2025.3
+(`sinceBuild=241`, `untilBuild=253.*`). It compiles and runs its tests against
+the oldest supported 2024.1 SDK. The pinned IntelliJ Gradle Plugin 2.0.1 cannot
+resolve the renamed 2025.3 Community distribution for a local Plugin Verifier
+run; upgrading that build tooling and adding cross-version verification is a
+tracked follow-up, not silently treated as verified coverage.
 
-> **Verified:** `./gradlew buildPlugin` succeeds on JDK 17 and produces a loadable
+> **Verified:** `./gradlew test` and `./gradlew buildPlugin` succeed on JDK 17 and produce a loadable
 > plugin (the build's `buildSearchableOptions` step boots a headless IDE with the
 > plugin installed, which exercises `plugin.xml` and the listener/service
 > classes).
