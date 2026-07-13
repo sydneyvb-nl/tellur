@@ -1700,10 +1700,12 @@ fn test_connect_installs_hooks_and_notes_config() {
     let post_commit = fs::read_to_string(dir.join(".git/hooks/post-commit")).unwrap();
     assert!(post_commit.contains("tellur connect (managed)"));
     assert!(post_commit.contains("notes export"));
+    assert!(post_commit.contains(".tellur/disable"));
 
     let pre_push = fs::read_to_string(dir.join(".git/hooks/pre-push")).unwrap();
     assert!(pre_push.contains("tellur connect (managed)"));
     assert!(pre_push.contains("push"));
+    assert!(pre_push.contains(".tellur/disable"));
     assert!(
         pre_push.contains("TELLUR_CONNECT_PREPUSH"),
         "recursion guard missing"

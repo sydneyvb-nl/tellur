@@ -61,7 +61,8 @@ That is the normal setup path. The wizard is safe to run again and:
 There is no per-repository installation step. Opening or using a repository
 through Codex, Claude Code, Gemini CLI, Antigravity, Cursor, Windsurf, VS Code,
 or JetBrains is enough to activate it. Create `.tellur/disable` in a repository
-that must opt out.
+that must opt out; the file stops agent/editor ingestion and makes Tellur's
+managed commit/pre-push hooks skip note publication and Team Hub synchronization.
 
 For unattended installation, make the choice explicit:
 

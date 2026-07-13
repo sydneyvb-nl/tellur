@@ -94,6 +94,10 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > exist. PR CI also cross-compiles and packages both Linux release targets;
 > arm64 correctly uses the GNU cross toolchain instead of a GNU linker mislabeled
 > as musl.
+> Codex review P2 fixed: `.tellur/disable` is evaluated at hook runtime, so a
+> repository that opts out after activation no longer exports/pushes Git notes
+> or synchronizes events to the Team Hub. A shell-execution regression test
+> covers disabled and re-enabled behavior.
 
 > **2026-07-13 — End-to-end Codex capture and evidence-aware PR provenance.** On
 > `fix/pr-provenance-evidence-states`. Replaced the broken CI use of local-index
@@ -1261,7 +1265,7 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-354 Rust tests, 0 failures, 0 clippy warnings; `cargo deny check` green.
+355 Rust tests, 0 failures, 0 clippy warnings; `cargo deny check` green.
 (verified 2026-07-13 via `cargo test`; Postgres tests no-op without `TELLUR_TEST_DATABASE_URL`)
 - core:      77  (75 library + 2 CLI-contract integration: schema/event round-trip, glob, storage, hash-chain verify+reseal,
              index session/attribution round-trip, capture pipeline, attribution,
