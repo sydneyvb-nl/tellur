@@ -1,0 +1,50 @@
+PROJECT_STATUS.md
+  s_7a75557532985c::t_058e33c57f83a3 103-106
+  s_7a75557532985c::t_e00637db914735 1274
+README.md
+  s_7a75557532985c::t_4f8d9a7f3ddee1 50
+  s_7a75557532985c::t_c518f2c76f69db 65-66
+crates/cli/src/hub.rs
+  s_7a75557532985c::t_e70767fd9f9d55 38-41
+crates/cli/src/onboarding.rs
+  s_7a75557532985c::t_5b2f1a56e45207 52
+  s_7a75557532985c::t_7e29bab81e8948 126-128
+  s_7a75557532985c::t_e8bdb7261ec07c 45-49
+crates/cli/src/push.rs
+  s_7a75557532985c::t_0e7fae43ea7b8c 516-526
+  s_7a75557532985c::t_55fa99846d4ba0 273-276
+  s_7a75557532985c::t_5d4db8572c1976 125
+  s_7a75557532985c::t_652b646feab30b 480
+  s_7a75557532985c::t_703d9cffc82357 23-34
+  s_7a75557532985c::t_a4b7dc416bc867 41-43
+crates/cli/src/service.rs
+  s_7a75557532985c::t_ba83f4c4ea8860 83
+  s_7a75557532985c::t_c97484450f49c5 171
+crates/cli/tests/cli_integration.rs
+  s_7a75557532985c::t_080541eff38a2d 2038-2048
+  s_7a75557532985c::t_a6c5484871a7e6 1828-1831
+  s_7a75557532985c::t_bc071c1d964125 1754-1765
+docs/ADAPTERS.md
+  s_7a75557532985c::t_8d92cf434756c7 30-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "tellur/0.1.0",
+  "base_commit_sha": "dffe8a68c307379bca9b68ad4d9bbf2d01f75df8",
+  "prompts": {},
+  "humans": {},
+  "sessions": {
+    "s_7a75557532985c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "sess_codex_pr52_release_readiness",
+        "model": "openai:gpt-5"
+      },
+      "human_author": "sydneyvb-nl",
+      "custom_attributes": {
+        "tellur.confidence": "1.00",
+        "tellur.evidence_strength": "claimed"
+      }
+    }
+  }
+}
