@@ -117,11 +117,30 @@ test("overview renders and admin nav is present", async ({ page }) => {
   await page.goto(`/app/orgs/${ORG}/overview`);
 
   await expect(page.getByRole("heading", { name: "Overview", level: 1 })).toBeVisible();
-  // KPI value from the mocked overview payload.
-  await expect(page.locator(".kpi").filter({ hasText: "Events" })).toContainText("10");
+  // Decision-first governance summary from the mocked attribution payload.
+  await expect(page.getByRole("heading", { name: "12 AI-attributed lines still need review" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Governance metrics" })).toContainText("40%");
   // Admin-only rail items are visible for an admin.
   await expect(page.getByRole("link", { name: "Policies" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Audit log" })).toBeVisible();
+});
+
+test("overview does not claim review completion when no AI lines exist", async ({ page }) => {
+  await mockApi(page, "admin");
+  await page.route("**/v1/**/overview", (route) => {
+    const base = fixtures("admin").overview;
+    const overview = {
+      ...base,
+      totals: { ...base.totals, ai_lines: 0, reviewed_ai_lines: 0 },
+      ai_share: 0,
+      review_coverage: null,
+    };
+    return route.fulfill({ json: overview });
+  });
+  await page.goto(`/app/orgs/${ORG}/overview`);
+
+  await expect(page.getByRole("heading", { name: "No AI-attributed lines recorded yet" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "All AI-attributed lines are reviewed" })).toHaveCount(0);
 });
 
 test("non-admin does not see admin nav items", async ({ page }) => {
@@ -169,4 +188,14 @@ test("command palette navigates to a screen", async ({ page }) => {
   // Assert data-derived content too, so a wrong/failed fetch (error state) can't
   // pass on the always-rendered heading alone.
   await expect(page.getByText("alice@corp.test")).toBeVisible();
+});
+
+test("mobile keeps primary navigation and governance actions reachable", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockApi(page, "admin");
+  await page.goto(`/app/orgs/${ORG}/overview`);
+
+  await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Repositories", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Review repositories" })).toBeVisible();
 });

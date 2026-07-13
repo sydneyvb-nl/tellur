@@ -11,22 +11,6 @@ use serde::Deserialize;
 use tellur_core::adapter::{AdapterCapabilities, AdapterInfo, AgentAdapter};
 use tellur_core::schema::types::*;
 
-/// Claude Code transcript entry
-#[derive(Debug, Deserialize)]
-pub struct ClaudeTranscriptEntry {
-    pub role: Option<String>,
-    pub content: Option<String>,
-    pub tool_use: Option<ClaudeToolUse>,
-    pub timestamp: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ClaudeToolUse {
-    pub name: String,
-    pub input: serde_json::Value,
-    pub output: Option<serde_json::Value>,
-}
-
 pub struct ClaudeCodeAdapter {
     info: AdapterInfo,
 }
@@ -114,64 +98,44 @@ impl ClaudeCodeAdapter {
         transcript_path: &Path,
         session_id: &str,
     ) -> Result<Vec<TraceEvent>> {
-        let content =
-            std::fs::read_to_string(transcript_path).context("Failed to read transcript")?;
+        crate::import::parse_stream(
+            transcript_path,
+            "Claude Code transcript",
+            "claude-code",
+            session_id,
+            &[&["session_id"], &["sessionId"], &["conversation_id"]],
+            claude_event_type,
+        )
+    }
+}
 
-        let mut entries: Vec<ClaudeTranscriptEntry> = Vec::new();
-        for (idx, line) in content.lines().enumerate() {
-            if line.trim().is_empty() {
-                continue;
-            }
-            entries.push(
-                serde_json::from_str(line).with_context(|| {
-                    format!("invalid Claude transcript JSONL at line {}", idx + 1)
-                })?,
-            );
-        }
+fn claude_event_type(raw: &serde_json::Value) -> EventType {
+    if let Some(tool) = raw.get("tool_use") {
+        return claude_tool_event(tool.get("name").and_then(serde_json::Value::as_str));
+    }
+    if let Some(blocks) = raw.get("content").and_then(serde_json::Value::as_array)
+        && let Some(tool) = blocks
+            .iter()
+            .find(|block| block.get("type").and_then(serde_json::Value::as_str) == Some("tool_use"))
+    {
+        return claude_tool_event(tool.get("name").and_then(serde_json::Value::as_str));
+    }
+    match raw.get("role").and_then(serde_json::Value::as_str) {
+        Some("user") => EventType::UserPrompt,
+        Some("assistant") => EventType::Custom("ai.response".to_string()),
+        Some(other) => EventType::Custom(format!("claude-code.{other}")),
+        None => EventType::Custom("claude-code.unknown".to_string()),
+    }
+}
 
-        let mut events = Vec::new();
-
-        for entry in entries {
-            if let Some(tool) = &entry.tool_use {
-                let event_type = match tool.name.as_str() {
-                    "Write" | "Edit" | "MultiEdit" => EventType::FileWrite,
-                    "Bash" | "Shell" => EventType::CommandExecution,
-                    "Read" => EventType::FileRead,
-                    "Search" => EventType::CodeSearch,
-                    _ => EventType::Custom(tool.name.clone()),
-                };
-
-                let file_path = tool
-                    .input
-                    .get("file_path")
-                    .or_else(|| tool.input.get("path"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-
-                events.push(TraceEvent {
-                    schema: "tellur.event.v1".to_string(),
-                    id: tellur_core::schema::ids::generate_event_id(),
-                    session_id: session_id.to_string(),
-                    timestamp: entry
-                        .timestamp
-                        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
-                    event_type,
-                    actor: EventActor::Agent,
-                    payload: serde_json::json!({
-                        "tool": tool.name,
-                        "input": tool.input,
-                        "output": tool.output,
-                        "file_path": file_path,
-                    }),
-                    redaction: None,
-                    prev_hash: None,
-                    event_hash: None,
-                });
-            }
-        }
-
-        Ok(events)
+fn claude_tool_event(name: Option<&str>) -> EventType {
+    match name {
+        Some("Write" | "Edit" | "MultiEdit" | "NotebookEdit") => EventType::FileWrite,
+        Some("Bash" | "Shell") => EventType::CommandExecution,
+        Some("Read") => EventType::FileRead,
+        Some("Search" | "Grep" | "Glob") => EventType::CodeSearch,
+        Some(other) => EventType::Custom(format!("claude-code.tool.{other}")),
+        None => EventType::Custom("claude-code.tool".to_string()),
     }
 }
 
@@ -320,5 +284,44 @@ mod tests {
         let events = adapter.parse_transcript(&path, "sess_test").unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_type, EventType::FileWrite);
+    }
+
+    #[test]
+    fn test_parse_array_with_roles_and_content_block_tool_use() {
+        let adapter = ClaudeCodeAdapter::new();
+        let dir = std::env::temp_dir().join("tellur_test_claude_array");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("transcript.json");
+        std::fs::write(
+            &path,
+            serde_json::json!([
+                {
+                    "id": "prompt-1",
+                    "sessionId": "claude-session",
+                    "role": "user",
+                    "content": "update the notebook"
+                },
+                {
+                    "id": "tool-2",
+                    "role": "assistant",
+                    "content": [{
+                        "type": "tool_use",
+                        "name": "NotebookEdit",
+                        "input": {"file_path": "analysis.ipynb"}
+                    }]
+                }
+            ])
+            .to_string(),
+        )
+        .unwrap();
+
+        let events = adapter.parse_transcript(&path, "fallback").unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].id, "prompt-1");
+        assert_eq!(events[0].session_id, "claude-session");
+        assert_eq!(events[0].event_type, EventType::UserPrompt);
+        assert!(events[0].payload.get("prompt_hash").is_some());
+        assert_eq!(events[1].event_type, EventType::FileWrite);
+        assert_eq!(events[1].payload["file_path"], "analysis.ipynb");
     }
 }

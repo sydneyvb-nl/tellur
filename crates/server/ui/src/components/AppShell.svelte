@@ -290,9 +290,33 @@
   @media (max-width: 768px) {
     .shell {
       grid-template-columns: 1fr;
+      grid-template-rows: auto 1fr;
     }
     .rail {
+      padding: 10px 12px 0;
+      border-right: 0;
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+    }
+    .brand {
+      padding: 0 8px 8px;
+    }
+    .rail ul {
+      flex-direction: row;
+      min-width: max-content;
+    }
+    .rail a {
+      padding: 8px 10px;
+    }
+    .topbar {
+      padding: 8px 12px;
+      overflow-x: auto;
+    }
+    .kbd-hint, .role {
       display: none;
+    }
+    .content {
+      padding: 18px 16px;
     }
   }
 </style>

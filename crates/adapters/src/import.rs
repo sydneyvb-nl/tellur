@@ -91,6 +91,12 @@ const PROMPT_LEAF_KEYS: &[&str] = &[
     "question",
 ];
 
+/// Stable metadata emitted by several editor/telemetry harnesses. These fields
+/// are useful for correlating an accepted completion without retaining prompt
+/// material, so keep them normalized at the payload root as well as in the
+/// sanitized raw payload.
+const METADATA_LEAF_KEYS: &[&str] = &["language", "completion_id", "suggestion_id"];
+
 /// Upper bound on nodes visited by [`deep_find_string`] so a pathological input
 /// cannot make extraction expensive.
 const MAX_SCAN_NODES: usize = 2048;
@@ -237,7 +243,9 @@ pub fn base_payload(raw: &Value, tool: &str, event_type: &EventType) -> Value {
         "tool": tool,
         "raw_payload": crate::sanitize::sanitized_value(raw),
     });
-    if let Some(text) = deep_find_string(raw, PROMPT_LEAF_KEYS) {
+    if let Some(hash) = deep_find_string(raw, &["prompt_hash", "promptHash"]) {
+        out["prompt_hash"] = Value::String(hash.to_string());
+    } else if let Some(text) = deep_find_string(raw, PROMPT_LEAF_KEYS) {
         out["prompt_hash"] = Value::String(tellur_core::schema::ids::hash_content(text));
     }
     if let Some(model) = deep_find_string(raw, MODEL_LEAF_KEYS) {
@@ -255,6 +263,11 @@ pub fn base_payload(raw: &Value, tool: &str, event_type: &EventType) -> Value {
     }
     if let Some(file_path) = deep_find_string(raw, FILE_PATH_LEAF_KEYS) {
         out["file_path"] = crate::sanitize::sanitized_value(&Value::String(file_path.to_string()));
+    }
+    for key in METADATA_LEAF_KEYS {
+        if let Some(value) = deep_find_string(raw, &[*key]) {
+            out[*key] = crate::sanitize::sanitized_value(&Value::String(value.to_string()));
+        }
     }
     out
 }
@@ -462,5 +475,18 @@ mod tests {
         let raw = serde_json::json!({"ts": 1_700_000_000_000_i64});
         let ts = timestamp(&raw, TIMESTAMP_PATHS);
         assert!(ts.starts_with("2023-11-"));
+    }
+
+    #[test]
+    fn base_payload_preserves_prehashed_prompt_and_completion_metadata() {
+        let raw = serde_json::json!({
+            "prompt_hash": "sha256:already-hashed",
+            "language": "rust",
+            "completion_id": "cmp-1"
+        });
+        let payload = payload(&raw);
+        assert_eq!(payload["prompt_hash"], "sha256:already-hashed");
+        assert_eq!(payload["language"], "rust");
+        assert_eq!(payload["completion_id"], "cmp-1");
     }
 }

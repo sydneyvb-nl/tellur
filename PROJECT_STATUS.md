@@ -3,12 +3,14 @@
 **Last updated:** 2026-07-13 (end-to-end Codex capture + commit-scoped provenance on `fix/pr-provenance-evidence-states`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
-**Branch:** `fix/pr-provenance-evidence-states` · **Open PRs:** #48, #49, #50
+**Branch:** `fix/pr-provenance-evidence-states` · **Open PRs:** #50 (provenance reporting)
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
 ## Handover — current state & open work
 
-Everything before the 2026-07-12 entry below is merged to `main`. The local pipeline, the team hub
+**The adapter/editor compatibility work from PR #48 and team-hub UX work from
+PR #49 are merged to `main`.** Provenance reporting remains open as PR #50. The
+local pipeline, the team hub
 (`tellur-server`), the CLI hub coupling (`tellur login`/`push`/`logout`), the A12
 source connection + private-repo proxy, prompt excerpts, and the dynamic session
 timeline are all shipped.
@@ -87,7 +89,64 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > reports now exclude merge commits, preventing a base-branch merge's
 > first-parent diff from being counted as new PR code; covered by a real
 > base/feature/merge history integration test.
-
+>
+> **2026-07-12 — Team hub JTBD overview + responsive governance navigation.**
+> On `feat/team-hub-jtbd-ux`, started the evidence-based hub UX pass for the SMB
+> and corporate jobs in `TEAM_DASHBOARD_UI.md`. The old Overview led with generic
+> event/session counters in five cards (overflowing the captured desktop
+> viewport) and hid the entire primary nav below 768px. Rebuilt it as a calm,
+> decision-first governance workspace: explicit review-gap headline and CTA,
+> four restrained metrics (unreviewed AI lines, coverage, AI share, repos), a
+> sorted repository priority queue that drills into evidence, evidence-volume
+> context, freshness, clearer load/empty states, and restrained/reduced-motion-
+> safe transitions. Mobile now uses a scrollable primary nav instead of removing
+> it. Updated English/Dutch copy and the E2E contract, including a 390px mobile
+> navigation test. Verification: `pnpm check`, 63 Vitest tests, production build,
+> 7 Playwright E2E tests, `cargo build -p tellur-server`, and
+> `cargo test -p tellur-server` green. The broader hub JTBD audit remains an
+> iterative program; this change deliberately lands one coherent, reviewable
+> milestone instead of mixing every screen into one unsafe mega-PR.
+> Review follow-up: the decision headline now distinguishes organizations with
+> zero AI-attributed lines from genuinely complete review coverage. The lockfile
+> also pins `anyhow` 1.0.103, resolving RUSTSEC-2026-0190 in the supply-chain gate.
+>
+> **2026-07-12 — Adapter harness compatibility + supply-chain gate.** On branch
+> `feat/adapter-harness-compat`. Migrated the older Codex, Claude Code, and
+> Copilot import paths onto the shared tolerant JSON stream contract. All three
+> now accept JSONL, top-level arrays, single objects, and common envelope exports;
+> preserve source event IDs and string/numeric timestamps; inherit wrapper
+> session/model metadata; and normalize nested model/command/file concepts with
+> prompt hashing and secret redaction. Claude imports now retain user/assistant
+> role events and recognize Anthropic `content`-block `tool_use` records,
+> including `NotebookEdit`, `Grep`, and `Glob`. Copilot preserves pre-hashed
+> prompts plus completion/suggestion/language correlation fields. Added four
+> regression tests covering the shared metadata contract and Codex, Claude, and
+> Copilot harness variants. Full workspace: 342 tests green; clippy `-D warnings`
+> green. `cargo deny check` initially exposed newly published
+> `RUSTSEC-2026-0190` in locked `anyhow 1.0.102`; lockfile upgraded to 1.0.103 and
+> the gate is green. README and adapter docs updated; no CONTRIBUTING change was
+> needed because the workflow and repository structure did not change.
+>
+> **2026-07-12 — Developer GUI compatibility audit.** Continued on
+> `feat/adapter-harness-compat` before a PR existed. Checked the implementation
+> against current official VS Code, Cursor, Windsurf, and JetBrains contracts.
+> Fixed the VS Code-family extension so it requires Workspace Trust, runs as a
+> workspace extension beside local/remote repos, maintains one watcher per
+> multi-root folder (including runtime add/remove), and correctly auto-detects
+> VS Code/Cursor/Windsurf when setup has not written an explicit source. The old
+> package defaults had masked host detection, so manual Cursor/Windsurf installs
+> could be mislabeled `vscode-ai`; regression tests now cover all three hosts.
+> Expanded the JetBrains install range from builds 241–242 to 241–253
+> (2024.1–2025.3). Verification: VS Code compile + 7 unit tests + 2 real Extension
+> Host tests + VSIX package; JetBrains 3 tests + `buildPlugin`/headless IDE boot on
+> JDK 17. The pinned IntelliJ Gradle Plugin 2.0.1 cannot resolve the renamed
+> 2025.3 Community distribution for Plugin Verifier, so a deliberate build-tool
+> upgrade + cross-version verifier matrix is recorded as follow-up. Added
+> `docs/GUI_COMPATIBILITY.md`; README/adapter/plugin docs updated.
+> Review follow-up: VS Code virtual workspaces are now explicitly unsupported,
+> matching the filesystem-backed checkout requirement, and Codex envelope imports
+> inherit wrapper `sessionId` values even when no `session_meta` event is present.
+>
 > **2026-06-22 — Maintainability refactor: decomposed the four monolith files.**
 > On branch `refactor/decompose-monoliths`. Behavior-preserving structural split,
 > no functional change. `crates/cli/src/main.rs` (4879 lines) → a 190-line
