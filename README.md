@@ -12,19 +12,19 @@ optional self-hosted Team Hub adds shared policy, repository access controls,
 central reporting, SSO/SCIM, audit history, and organization-wide provenance.
 
 > **Project status:** Tellur is pre-release software. The repository contains a
-> verified release pipeline and single-command installers; the first public tag
-> still needs to be published from `main`. Marketplace listings are optional:
-> the installer uses GitHub-hosted, checksum-verified VSIX and JetBrains ZIP
-> release assets directly. See
+> verified v0.1 release pipeline and single-command installers. Marketplace
+> listings are optional: the installer uses GitHub-hosted, checksum-verified
+> VSIX and JetBrains ZIP release assets directly. See
 > [PROJECT_STATUS.md](PROJECT_STATUS.md) for the dated implementation status and
 > known blockers.
 
 ## The one setup flow
 
-Open a terminal in the Git repository you want Tellur to protect, then run the
-installer for your platform. It downloads a checksum-verified CLI, installs the
-Tellur package into detected VS Code, Cursor, Windsurf, and JetBrains products,
-and immediately starts the setup wizard.
+Install Tellur **once per machine**, from any directory. The installer downloads
+a checksum-verified CLI, installs the editor package into detected VS Code,
+Cursor, Windsurf, and JetBrains products, and immediately starts the setup
+wizard. The wizard globally configures Codex, Claude Code, Gemini CLI,
+Antigravity, Cursor, Windsurf, VS Code, and JetBrains plus an optional Team Hub.
 
 macOS or Linux:
 
@@ -40,17 +40,31 @@ irm https://github.com/sydneyvb-nl/tellur/releases/latest/download/install.ps1 |
 
 That is the normal setup path. The wizard is safe to run again and:
 
-- initializes `.tellur/` in the current repository;
 - configures supported agent hooks and MCP connections using the absolute path
   of the installed `tellur` binary;
 - configures capture settings for VS Code-compatible editors;
-- installs chained `post-commit` and `pre-push` Git hooks without overwriting
-  existing shell hooks;
 - asks for a Team Hub URL, or keeps the installation local-only;
-- performs browser-based Team Hub device login when a hub is selected;
-- installs background Team Hub synchronization when a hub is selected;
-- configures `refs/notes/ai` so commit-level provenance travels with Git; and
+- performs machine-wide browser-based Team Hub device login when selected;
+- remembers the most recently selected Team Hub as the default for unattended
+  Git automation, even when credentials for multiple hubs are saved (`--local-only`
+  explicitly disables implicit sync and removes the current repository's
+  background service without deleting saved logins);
+- makes every activated repository sync to that hub during `git push`;
+- optionally installs interval-based background sync for the repository that is
+  open while setup runs;
+- activates every Git repository automatically on first configured
+  agent/editor activity;
+- initializes `.tellur/` and chained `post-commit`/`pre-push` automation during
+  that first activity without overwriting existing shell hooks;
+- configures `refs/notes/ai` automatically on the first Git push; and
 - finishes with commands for checking and updating the setup.
+
+There is no per-repository installation step. Opening or using a repository
+through Codex, Claude Code, Gemini CLI, Antigravity, Cursor, Windsurf, VS Code,
+or JetBrains is enough to activate it. Create `.tellur/disable` in a repository
+that must opt out; the file stops agent/editor ingestion and makes Tellur's
+managed commit/pre-push hooks and background service skip note publication and
+Team Hub synchronization. An explicit manual `tellur push` also honors the opt-out.
 
 For unattended installation, make the choice explicit:
 
@@ -74,7 +88,7 @@ tellur setup update
 `tellur setup update` updates the **configuration to the currently running
 binary**; the installer is the product-update mechanism.
 
-Inspect the complete machine and current-repository setup at any time:
+Inspect the machine-wide setup and, when run inside one, the current repository:
 
 ```bash
 tellur setup status

@@ -10,15 +10,39 @@ use tellur_core::storage::{RepoStorage, TraceIndex};
 
 use crate::hub;
 
-/// Resolve the hub base URL from an explicit flag, the `TELLUR_HUB_URL` env, or
-/// — when exactly one hub is saved — the stored credentials. Errors otherwise so
-/// a typo never silently targets the wrong hub.
+/// Resolve the hub base URL from an explicit flag, the `TELLUR_HUB_URL` env, the
+/// machine-wide default, or — when exactly one hub is saved — stored credentials.
+/// Errors otherwise so a typo never silently targets the wrong hub.
 pub(crate) fn resolve_hub(explicit: Option<&str>, creds: &hub::Credentials) -> Result<String> {
     if let Some(h) = explicit {
         return Ok(hub::normalize_host(h));
     }
     if let Ok(h) = std::env::var("TELLUR_HUB_URL") {
         return Ok(hub::normalize_host(&h));
+    }
+    resolve_saved_hub(creds, unattended_sync())
+}
+
+fn unattended_sync() -> bool {
+    std::env::var_os("TELLUR_CONNECT_PREPUSH").is_some()
+        || std::env::var_os("TELLUR_UNATTENDED_SYNC").is_some()
+}
+
+fn resolve_saved_hub(creds: &hub::Credentials, unattended: bool) -> Result<String> {
+    if creds.unattended_sync_disabled {
+        bail!(
+            "implicit Team Hub sync is disabled by `tellur setup --local-only`; \
+             pass --hub to push explicitly"
+        );
+    }
+    if let Some(default) = creds.default_host.as_deref() {
+        let normalized = hub::normalize_host(default);
+        if creds.hosts.contains_key(&normalized) {
+            return Ok(normalized);
+        }
+    }
+    if unattended {
+        bail!("no default Team Hub selected — run `tellur setup --hub <url>`");
     }
     // Resolve the single saved host without indexing-then-unwrapping, so a future
     // refactor of the match condition can't turn this into a panic.
@@ -98,9 +122,10 @@ pub(crate) fn cmd_login(hub_arg: Option<&str>, no_browser: bool) -> Result<()> {
             hub::DevicePoll::Approved(host_creds) => {
                 let role = host_creds.role.clone();
                 let org = host_creds.org_id.clone();
-                creds
-                    .hosts
-                    .insert(hub::normalize_host(&hub_url), host_creds);
+                let normalized = hub::normalize_host(&hub_url);
+                creds.hosts.insert(normalized.clone(), host_creds);
+                creds.default_host = Some(normalized);
+                creds.unattended_sync_disabled = false;
                 creds.save()?;
                 println!("\n\n✓ Signed in to {hub_url}");
                 println!("  org {org} · role {role}");
@@ -132,6 +157,13 @@ pub(crate) fn cmd_logout(hub_arg: Option<&str>) -> Result<()> {
     let mut creds = hub::Credentials::load()?;
     let hub_url = resolve_hub(hub_arg, &creds)?;
     if creds.hosts.remove(&hub_url).is_some() {
+        if creds.default_host.as_deref() == Some(hub_url.as_str()) {
+            creds.default_host = if creds.hosts.len() == 1 {
+                creds.hosts.keys().next().cloned()
+            } else {
+                None
+            };
+        }
         creds.save()?;
         println!("Removed stored credentials for {hub_url}");
     } else {
@@ -240,6 +272,10 @@ pub(crate) fn cmd_push(
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
         bail!("Tellur is not initialized here — run `tellur init` first");
+    }
+    if storage.tellur_dir.join("disable").exists() {
+        println!("Team Hub push skipped: this repository opted out via .tellur/disable");
+        return Ok(());
     }
     let creds = hub::Credentials::load()?;
     let hub_url = resolve_hub(hub_arg, &creds)?;
@@ -440,6 +476,57 @@ fn read_local_attributions(storage: &RepoStorage) -> Result<Vec<serde_json::Valu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_credentials(hosts: &[&str], default_host: Option<&str>) -> hub::Credentials {
+        hub::Credentials {
+            default_host: default_host.map(str::to_owned),
+            unattended_sync_disabled: false,
+            hosts: hosts
+                .iter()
+                .map(|host| {
+                    (
+                        (*host).to_owned(),
+                        hub::HostCredentials {
+                            token: "token".into(),
+                            org_id: "org".into(),
+                            member_id: "member".into(),
+                            role: "contributor".into(),
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn resolve_hub_prefers_saved_default_with_multiple_hosts() {
+        let creds = test_credentials(
+            &["https://one.test", "https://two.test"],
+            Some("https://two.test"),
+        );
+        assert_eq!(resolve_hub(None, &creds).unwrap(), "https://two.test");
+    }
+
+    #[test]
+    fn resolve_hub_ignores_stale_default_and_keeps_ambiguity_safe() {
+        let creds = test_credentials(
+            &["https://one.test", "https://two.test"],
+            Some("https://gone.test"),
+        );
+        assert!(resolve_hub(None, &creds).is_err());
+    }
+
+    #[test]
+    fn unattended_hub_resolution_never_falls_back_after_local_only_setup() {
+        let mut creds = test_credentials(&["https://one.test"], None);
+        creds.unattended_sync_disabled = true;
+        assert!(resolve_saved_hub(&creds, true).is_err());
+        assert!(resolve_saved_hub(&creds, false).is_err());
+        assert_eq!(
+            resolve_hub(Some("https://one.test"), &creds).unwrap(),
+            "https://one.test"
+        );
+    }
 
     #[test]
     fn push_start_index_pushes_all_without_a_mark() {

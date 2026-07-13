@@ -7,6 +7,7 @@ use tellur_core::capture::{CaptureContext, capture_working_changes_for_paths};
 use tellur_core::schema::types::{AgentInfo, ModelInfo, Session};
 use tellur_core::storage::{EventWriter, RepoStorage, TraceIndex};
 
+use crate::connect::ensure_repo_git_automation;
 use crate::util::{
     current_actor, load_policy, prompt_excerpt, prompt_redaction_engine, sanitize_id,
 };
@@ -395,6 +396,9 @@ pub(crate) fn cmd_hooks_ingest(source: &str, auto_init: bool, json_response: boo
             }
             return Ok(());
         }
+    }
+    if auto_init && let Err(error) = ensure_repo_git_automation(&storage) {
+        eprintln!("tellur could not install repository Git automation: {error:#}");
     }
 
     let session_id = payload

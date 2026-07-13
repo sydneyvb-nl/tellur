@@ -29,9 +29,16 @@ pub struct HostCredentials {
     pub role: String,
 }
 
-/// The on-disk credentials file: a map of normalized hub URL → credentials.
+/// The on-disk credentials file: a map of normalized hub URL → credentials,
+/// plus the machine-wide default used by unattended Git automation.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Credentials {
+    #[serde(default)]
+    pub default_host: Option<String>,
+    /// Explicit opt-out selected by `tellur setup --local-only`. This is
+    /// distinct from a missing default in legacy credential files.
+    #[serde(default)]
+    pub unattended_sync_disabled: bool,
     #[serde(default)]
     pub hosts: BTreeMap<String, HostCredentials>,
 }
