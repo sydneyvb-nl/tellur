@@ -20,11 +20,26 @@ pub(crate) fn resolve_hub(explicit: Option<&str>, creds: &hub::Credentials) -> R
     if let Ok(h) = std::env::var("TELLUR_HUB_URL") {
         return Ok(hub::normalize_host(&h));
     }
+    resolve_saved_hub(creds, unattended_sync())
+}
+
+fn unattended_sync() -> bool {
+    std::env::var_os("TELLUR_CONNECT_PREPUSH").is_some()
+        || std::env::var_os("TELLUR_UNATTENDED_SYNC").is_some()
+}
+
+fn resolve_saved_hub(creds: &hub::Credentials, unattended: bool) -> Result<String> {
+    if unattended && creds.unattended_sync_disabled {
+        bail!("automatic Team Hub sync is disabled by `tellur setup --local-only`");
+    }
     if let Some(default) = creds.default_host.as_deref() {
         let normalized = hub::normalize_host(default);
         if creds.hosts.contains_key(&normalized) {
             return Ok(normalized);
         }
+    }
+    if unattended {
+        bail!("no default Team Hub selected — run `tellur setup --hub <url>`");
     }
     // Resolve the single saved host without indexing-then-unwrapping, so a future
     // refactor of the match condition can't turn this into a panic.
@@ -107,6 +122,7 @@ pub(crate) fn cmd_login(hub_arg: Option<&str>, no_browser: bool) -> Result<()> {
                 let normalized = hub::normalize_host(&hub_url);
                 creds.hosts.insert(normalized.clone(), host_creds);
                 creds.default_host = Some(normalized);
+                creds.unattended_sync_disabled = false;
                 creds.save()?;
                 println!("\n\n✓ Signed in to {hub_url}");
                 println!("  org {org} · role {role}");
@@ -253,6 +269,10 @@ pub(crate) fn cmd_push(
     let storage = RepoStorage::discover()?;
     if !storage.is_initialized() {
         bail!("Tellur is not initialized here — run `tellur init` first");
+    }
+    if storage.tellur_dir.join("disable").exists() {
+        println!("Team Hub push skipped: this repository opted out via .tellur/disable");
+        return Ok(());
     }
     let creds = hub::Credentials::load()?;
     let hub_url = resolve_hub(hub_arg, &creds)?;
@@ -457,6 +477,7 @@ mod tests {
     fn test_credentials(hosts: &[&str], default_host: Option<&str>) -> hub::Credentials {
         hub::Credentials {
             default_host: default_host.map(str::to_owned),
+            unattended_sync_disabled: false,
             hosts: hosts
                 .iter()
                 .map(|host| {
@@ -490,6 +511,17 @@ mod tests {
             Some("https://gone.test"),
         );
         assert!(resolve_hub(None, &creds).is_err());
+    }
+
+    #[test]
+    fn unattended_hub_resolution_never_falls_back_after_local_only_setup() {
+        let mut creds = test_credentials(&["https://one.test"], None);
+        creds.unattended_sync_disabled = true;
+        assert!(resolve_saved_hub(&creds, true).is_err());
+        assert_eq!(
+            resolve_saved_hub(&creds, false).unwrap(),
+            "https://one.test"
+        );
     }
 
     #[test]

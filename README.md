@@ -47,7 +47,7 @@ That is the normal setup path. The wizard is safe to run again and:
 - performs machine-wide browser-based Team Hub device login when selected;
 - remembers the most recently selected Team Hub as the default for unattended
   Git automation, even when credentials for multiple hubs are saved (`--local-only`
-  clears that default without deleting saved logins);
+  explicitly disables unattended sync without deleting saved logins);
 - makes every activated repository sync to that hub during `git push`;
 - optionally installs interval-based background sync for the repository that is
   open while setup runs;
@@ -62,7 +62,8 @@ There is no per-repository installation step. Opening or using a repository
 through Codex, Claude Code, Gemini CLI, Antigravity, Cursor, Windsurf, VS Code,
 or JetBrains is enough to activate it. Create `.tellur/disable` in a repository
 that must opt out; the file stops agent/editor ingestion and makes Tellur's
-managed commit/pre-push hooks skip note publication and Team Hub synchronization.
+managed commit/pre-push hooks and background service skip note publication and
+Team Hub synchronization. An explicit manual `tellur push` also honors the opt-out.
 
 For unattended installation, make the choice explicit:
 

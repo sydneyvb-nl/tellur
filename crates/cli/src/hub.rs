@@ -35,6 +35,10 @@ pub struct HostCredentials {
 pub struct Credentials {
     #[serde(default)]
     pub default_host: Option<String>,
+    /// Explicit opt-out selected by `tellur setup --local-only`. This is
+    /// distinct from a missing default in legacy credential files.
+    #[serde(default)]
+    pub unattended_sync_disabled: bool,
     #[serde(default)]
     pub hosts: BTreeMap<String, HostCredentials>,
 }

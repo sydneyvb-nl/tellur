@@ -80,6 +80,7 @@ pub fn install(repo_root: &Path, exe: &Path, interval_secs: u64) -> Result<Insta
 \t<key>Label</key>\n\t<string>{label}</string>\n\
 \t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>{exe}</string>\n\t\t<string>push</string>\n\t</array>\n\
 \t<key>WorkingDirectory</key>\n\t<string>{root}</string>\n\
+\t<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>TELLUR_UNATTENDED_SYNC</key>\n\t\t<string>1</string>\n\t</dict>\n\
 \t<key>StartInterval</key>\n\t<integer>{interval_secs}</integer>\n\
 \t<key>RunAtLoad</key>\n\t<true/>\n\
 \t<key>StandardOutPath</key>\n\t<string>{log}</string>\n\
@@ -167,6 +168,7 @@ Description=Tellur background push for {root}\n\n\
 [Service]\n\
 Type=oneshot\n\
 WorkingDirectory={root}\n\
+Environment=TELLUR_UNATTENDED_SYNC=1\n\
 ExecStart={exe} push\n"
     );
     let timer = format!(

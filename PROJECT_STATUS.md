@@ -100,6 +100,10 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > covers disabled and re-enabled behavior.
 > The supply-chain job now pins cargo-deny 0.19.8 instead of using an action
 > that downloads an incompatible floating `latest` CLI.
+> Codex re-review P1s fixed: `cmd_push` itself honors `.tellur/disable`, including
+> timer services, and `--local-only` persists an explicit unattended-sync opt-out.
+> Pre-push/service calls are marked unattended and never fall back to the sole
+> saved host when no default hub is selected.
 
 > **2026-07-13 — End-to-end Codex capture and evidence-aware PR provenance.** On
 > `fix/pr-provenance-evidence-states`. Replaced the broken CI use of local-index
@@ -1267,7 +1271,7 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-355 Rust tests, 0 failures, 0 clippy warnings; `cargo deny check` green.
+357 Rust tests, 0 failures, 0 clippy warnings; `cargo deny check` green.
 (verified 2026-07-13 via `cargo test`; Postgres tests no-op without `TELLUR_TEST_DATABASE_URL`)
 - core:      77  (75 library + 2 CLI-contract integration: schema/event round-trip, glob, storage, hash-chain verify+reseal,
              index session/attribution round-trip, capture pipeline, attribution,

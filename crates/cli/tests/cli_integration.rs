@@ -1752,6 +1752,18 @@ fn test_connect_installs_hooks_and_notes_config() {
 }
 
 #[test]
+fn test_push_honors_repository_disable_file_before_hub_resolution() {
+    let dir = temp_repo();
+    tellur().arg("init").current_dir(&dir).output().unwrap();
+    fs::write(dir.join(".tellur/disable"), "").unwrap();
+
+    let output = tellur().arg("push").current_dir(&dir).output().unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains(".tellur/disable"));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn test_unified_setup_is_idempotent_and_configures_repo_and_machine() {
     let dir = temp_repo();
     let home = std::env::temp_dir().join(format!(
@@ -1813,6 +1825,10 @@ fn test_unified_setup_is_idempotent_and_configures_repo_and_machine() {
     );
     assert!(home.join(".claude/settings.json").exists());
     assert!(home.join(".codex/plugins/tellur-provenance").exists());
+    let credentials: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.join(".config/tellur/hosts.json")).unwrap())
+            .unwrap();
+    assert_eq!(credentials["unattended_sync_disabled"], true);
 
     let status = tellur()
         .args(["setup", "status"])
@@ -2018,6 +2034,17 @@ fn test_connect_background_installs_and_removes_service() {
     assert!(
         count >= 1,
         "no background service file written in {svc_dir:?}"
+    );
+    let service_files = fs::read_dir(&svc_dir)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| fs::read_to_string(entry.path()).ok())
+        .collect::<Vec<_>>();
+    assert!(
+        service_files
+            .iter()
+            .any(|body| body.contains("TELLUR_UNATTENDED_SYNC")),
+        "background service is not marked as unattended"
     );
 
     let removed = tellur()

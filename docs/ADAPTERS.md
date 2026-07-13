@@ -27,7 +27,8 @@ Last updated: 2026-07-13
   setup machine-wide rather than a repeated per-repository task.
 - A repository can opt out by creating `.tellur/disable`. Agent/editor capture
   stops and managed post-commit/pre-push hooks skip Git-note publication and
-  Team Hub synchronization, including when the file is added after activation.
+  Team Hub synchronization, including timer-based and manual `tellur push`, when
+  the file is added after activation.
 - Imports preserve source `id`, `session_id`, `timestamp`, `event_type`,
   `actor`, and payload content.
 - JSON-stream importers accept JSONL, arrays, single objects, and common

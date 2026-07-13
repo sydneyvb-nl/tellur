@@ -42,9 +42,14 @@ pub(crate) fn cmd_setup(opts: SetupOptions<'_>) -> Result<()> {
     // default without deleting credentials that may still be useful later.
     let selected_default = hub.as_deref().filter(|_| already_logged_in);
     let desired_default = selected_default.map(ToOwned::to_owned);
-    if (opts.local_only || desired_default.is_some()) && credentials.default_host != desired_default
+    let should_persist_selection = opts.local_only || desired_default.is_some();
+    let desired_disabled = opts.local_only;
+    if should_persist_selection
+        && (credentials.default_host != desired_default
+            || credentials.unattended_sync_disabled != desired_disabled)
     {
         credentials.default_host = desired_default;
+        credentials.unattended_sync_disabled = desired_disabled;
         credentials.save()?;
     }
 
@@ -118,6 +123,9 @@ fn choose_hub(opts: &SetupOptions<'_>) -> Result<Option<String>> {
     }
 
     let credentials = Credentials::load()?;
+    if credentials.unattended_sync_disabled {
+        return Ok(None);
+    }
     if let Some(default) = credentials.default_host.as_deref()
         && credentials.get(default).is_some()
     {
