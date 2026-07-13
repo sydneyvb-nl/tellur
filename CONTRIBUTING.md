@@ -85,7 +85,7 @@ The supported end-user onboarding and configuration-reconciliation paths are:
 
 ```bash
 curl -fsSL https://github.com/sydneyvb-nl/tellur/releases/latest/download/install.sh | bash
-tellur setup             # wizard, normally launched by the installer
+tellur setup             # machine-wide wizard, normally launched by installer
 tellur setup update      # refresh generated paths/hooks after a binary upgrade
 tellur setup status      # combined machine/current-repo health
 ```
@@ -105,7 +105,13 @@ tellur setup antigravity # Antigravity hooks/MCP only
 Release packaging is defined in `.github/workflows/release.yml`. Every `v*` tag
 builds platform CLI archives, a version-matched VSIX, a version-matched
 JetBrains ZIP, SHA-256 sidecars, and the two bootstrap installers. CI builds both
-editor packages and runs the Unix installer E2E test before changes can merge.
+editor packages, compiles both Linux release targets, and runs the Unix and
+Windows installer E2E tests before changes can merge.
+
+Repository activation is automatic: global hooks and editor clients call
+`--auto-init`/`tellur init`, which must initialize storage and install managed
+Git automation together. Do not introduce documentation or code paths that
+require users to repeat setup in each repository.
 
 Devin (cloud agent) has no local editor surface; capture it live by POSTing its
 webhook to the local daemon's `POST /webhook/devin` endpoint. JetBrains live

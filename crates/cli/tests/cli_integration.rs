@@ -519,6 +519,8 @@ fn test_hooks_ingest_auto_init_records_event_in_new_repo() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].event_type, EventType::SessionStart);
     assert_eq!(events[0].payload["tool"], "codex");
+    assert!(dir.join(".git/hooks/post-commit").exists());
+    assert!(dir.join(".git/hooks/pre-push").exists());
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1075,6 +1077,10 @@ fn test_init_creates_structure() {
                 || tellur_dir.exists()
         );
     }
+    let post_commit = fs::read_to_string(dir.join(".git/hooks/post-commit")).unwrap();
+    let pre_push = fs::read_to_string(dir.join(".git/hooks/pre-push")).unwrap();
+    assert!(post_commit.contains("notes export"));
+    assert!(pre_push.contains("notes install-config"));
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1774,6 +1780,25 @@ fn test_unified_setup_is_idempotent_and_configures_repo_and_machine() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+        if command == "setup" {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for integration in [
+                "Codex",
+                "Claude Code",
+                "Gemini CLI",
+                "Antigravity",
+                "Cursor",
+                "Windsurf",
+                "VS Code",
+                "JetBrains",
+            ] {
+                assert!(
+                    stdout.contains(integration),
+                    "missing {integration}: {stdout}"
+                );
+            }
+            assert!(stdout.contains("every Git repository activates automatically"));
+        }
     }
 
     assert!(dir.join(".tellur/config.yml").exists());

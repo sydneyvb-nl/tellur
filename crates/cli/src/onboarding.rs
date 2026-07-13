@@ -12,6 +12,7 @@ use tellur_core::storage::RepoStorage;
 
 use crate::connect::{self, ConnectOptions};
 use crate::hub::Credentials;
+use crate::push::cmd_login;
 use crate::setup;
 
 pub(crate) struct SetupOptions<'a> {
@@ -31,19 +32,41 @@ pub(crate) fn cmd_setup(opts: SetupOptions<'_>) -> Result<()> {
     );
 
     let hub = choose_hub(&opts)?;
-    let credentials = Credentials::load()?;
+    let mut credentials = Credentials::load()?;
     let already_logged_in = hub
         .as_deref()
         .is_some_and(|host| credentials.get(host).is_some());
+
+    // The wizard owns the unattended-sync choice. Selecting an existing hub
+    // promotes it to the default; explicitly choosing local-only clears the
+    // default without deleting credentials that may still be useful later.
+    let selected_default = hub.as_deref().filter(|_| already_logged_in);
+    let desired_default = selected_default.map(ToOwned::to_owned);
+    if (opts.local_only || desired_default.is_some()) && credentials.default_host != desired_default
+    {
+        credentials.default_host = desired_default;
+        credentials.save()?;
+    }
+
+    if let Some(host) = hub.as_deref()
+        && !already_logged_in
+        && !opts.update
+    {
+        match cmd_login(Some(host), opts.no_browser) {
+            Ok(()) => {}
+            Err(error) => {
+                println!("⚠ Team Hub login skipped: {error}");
+                println!("  Machine-wide local capture remains active; rerun setup to retry.");
+            }
+        }
+    }
 
     setup::cmd_setup_agents(None)?;
 
     let storage = match RepoStorage::discover() {
         Ok(storage) => storage,
         Err(_) => {
-            println!("\n✓ Machine-wide capture is configured.");
-            println!("  No Git repository was found, so repository automation was skipped.");
-            println!("  Run `tellur setup` once from a repository to add its Git automation.");
+            print_global_activation_summary();
             return Ok(());
         }
     };
@@ -53,7 +76,7 @@ pub(crate) fn cmd_setup(opts: SetupOptions<'_>) -> Result<()> {
     connect::cmd_connect(ConnectOptions {
         hub: hub.as_deref(),
         remote: opts.remote,
-        no_login: hub.is_none() || already_logged_in || opts.update,
+        no_login: true,
         no_agents: true,
         background,
         push_interval: 900,
@@ -62,9 +85,21 @@ pub(crate) fn cmd_setup(opts: SetupOptions<'_>) -> Result<()> {
         remove: false,
     })?;
 
+    print_global_activation_summary();
     println!("\nNext time Tellur itself changes, run `tellur setup update`.");
     println!("Check the complete installation with `tellur setup status`.");
     Ok(())
+}
+
+fn print_global_activation_summary() {
+    println!("\n✓ Tellur is installed once for this machine.");
+    println!("  • Codex and Claude Code: global lifecycle hooks");
+    println!("  • Gemini CLI and Antigravity: global lifecycle hooks + MCP");
+    println!("  • Cursor and Windsurf: global MCP + editor capture settings");
+    println!("  • VS Code and JetBrains: release-installer packages + global capture settings");
+    println!("  • every Git repository activates automatically on first agent/editor use");
+    println!("  • auto-activation also installs commit and pre-push Git automation");
+    println!("  Create .tellur/disable in a repository to opt out.");
 }
 
 fn choose_hub(opts: &SetupOptions<'_>) -> Result<Option<String>> {
@@ -83,6 +118,11 @@ fn choose_hub(opts: &SetupOptions<'_>) -> Result<Option<String>> {
     }
 
     let credentials = Credentials::load()?;
+    if let Some(default) = credentials.default_host.as_deref()
+        && credentials.get(default).is_some()
+    {
+        return Ok(Some(default.to_string()));
+    }
     if credentials.hosts.len() == 1 {
         return Ok(credentials.hosts.keys().next().cloned());
     }
@@ -123,6 +163,7 @@ fn validate_hub_url(hub: &str) -> Result<()> {
 
 pub(crate) fn cmd_setup_status(home: Option<&Path>, remote: &str) -> Result<()> {
     println!("Tellur setup status\n");
+    println!("Repository activation: automatic on first configured agent/editor activity\n");
     setup::cmd_setup_status(home)?;
     match RepoStorage::discover() {
         Ok(storage) => {

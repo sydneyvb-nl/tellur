@@ -10,21 +10,26 @@ use anyhow::Result;
 
 use tellur_core::storage::{RepoStorage, TraceIndex};
 
+use crate::connect::ensure_repo_git_automation;
+
 pub(crate) async fn cmd_init(profile: &str) -> Result<()> {
     validate_init_profile(profile)?;
     let storage = RepoStorage::discover()?;
     if storage.is_initialized() {
-        println!("Tellur already initialized. Run `tellur doctor` to check setup.");
+        let hooks_dir = ensure_repo_git_automation(&storage)?;
+        println!("Tellur already initialized; Git automation is active.");
+        println!("  Hooks: {}", hooks_dir.display());
         return Ok(());
     }
 
     storage.init()?;
+    let hooks_dir = ensure_repo_git_automation(&storage)?;
     println!("✓ Tellur initialized (profile: {})", profile);
     println!("  Config: {}", storage.config_path.display());
     println!("  Policies: {}", storage.policies_dir.display());
     println!("  Traces: {}", storage.traces_dir.display());
-    println!();
-    println!("Next: run `tellur doctor` to verify setup");
+    println!("  Git automation: {}", hooks_dir.display());
+    println!("  Capture starts automatically through configured agents and editors.");
     Ok(())
 }
 
@@ -142,7 +147,7 @@ pub(crate) async fn cmd_doctor() -> Result<()> {
 
     println!();
     if storage.is_initialized() {
-        println!("Setup looks good. Run `tellur watch` to start capturing.");
+        println!("Setup looks good. Configured agents and editors capture automatically.");
     }
 
     Ok(())
