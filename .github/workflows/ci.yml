@@ -98,13 +98,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       # cargo-deny's `advisories` check uses the same RustSec database as
       # cargo-audit, so it also covers vulnerability scanning (no separate audit
-      # step needed).
+      # step needed). Pin the CLI: cargo-deny-action@v2 downloads `latest`, and
+      # its entrypoint became incompatible when cargo-deny 0.20 removed flags.
+      - name: Install pinned cargo-deny
+        run: cargo install cargo-deny --version 0.19.8 --locked
       - name: cargo-deny (licenses + advisories + sources)
-        uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check
+        run: cargo deny check
 
   editor-packages:
     name: editor release packages

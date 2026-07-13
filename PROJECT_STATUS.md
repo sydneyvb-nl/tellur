@@ -98,6 +98,8 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > repository that opts out after activation no longer exports/pushes Git notes
 > or synchronizes events to the Team Hub. A shell-execution regression test
 > covers disabled and re-enabled behavior.
+> The supply-chain job now pins cargo-deny 0.19.8 instead of using an action
+> that downloads an incompatible floating `latest` CLI.
 
 > **2026-07-13 — End-to-end Codex capture and evidence-aware PR provenance.** On
 > `fix/pr-provenance-evidence-states`. Replaced the broken CI use of local-index
