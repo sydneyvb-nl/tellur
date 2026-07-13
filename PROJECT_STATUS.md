@@ -1,9 +1,9 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-07-13 (v0.1.0 release workflow repair)
+**Last updated:** 2026-07-13 (v0.1.0 published and verified)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
-**Branch:** `codex/fix-v0-1-0-release`
+**Branch:** `codex/document-v0-1-0-release`
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
 ## Handover — current state & open work
@@ -55,6 +55,9 @@ timeline are all shipped.
 5. **Broader agent coverage** as more tools expose stable local lifecycle hooks.
 
 **Smaller follow-ups flagged during recent work (nice-to-have, not blocking):**
+- Upgrade first-party GitHub Actions that still declare the deprecated Node 20
+  action runtime. GitHub currently forces these actions onto Node 24, so this
+  did not block `v0.1.0`, but the warnings should not remain indefinitely.
 - Surface the **prompt excerpt as a column in the file-provenance view** (per
   range), not only in the session timeline.
 - Enrich the **Sessions list** with per-session prompt/category indicators.
@@ -94,6 +97,17 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > The VSIX packager was also upgraded to `@vscode/vsce` 3.9.2 with patched
 > `form-data` 4.0.6 and `undici` 6.27.0; the full extension dependency audit now
 > reports zero vulnerabilities.
+
+> **2026-07-13 — v0.1.0 published.** Recreated the previously unpublished tag
+> on PR #54's merge commit (`ed361398`) and completed the release workflow:
+> editor packages, macOS arm64/x64, Linux arm64/x64, Windows x64, and GitHub
+> Release publication all passed. The published release contains 16 assets:
+> both installers, five platform archives, VSIX and JetBrains packages, and
+> seven SHA-256 sidecars. Every checksum was independently verified after
+> downloading the public assets; archive structure was inspected; stable
+> `releases/latest/download` links returned HTTP 200 and matched the versioned
+> installers. A clean temporary-home installation through the public Unix URL
+> installed `tellur 0.1.0` and completed non-interactive global setup.
 
 > **2026-07-13 — Unified setup and reality-aligned product onboarding.** On
 > `codex/unified-setup-wizard`. `tellur setup` is now the supported idempotent
