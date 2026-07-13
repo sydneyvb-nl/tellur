@@ -1,0 +1,87 @@
+.github/workflows/tellur.yml
+  s_1c17e92a7c56ba::t_0b1e5c069d37d4 72-73
+  s_1c17e92a7c56ba::t_282254715cc42a 35
+  s_1c17e92a7c56ba::t_327b638e5d6b7a 30-33
+  s_1c17e92a7c56ba::t_717c4a36e460a8 28
+  s_1c17e92a7c56ba::t_7658ac340c09bf 50
+  s_1c17e92a7c56ba::t_c4b9c758d1f875 78
+  s_1c17e92a7c56ba::t_c9cf751d9f0329 88
+  s_1c17e92a7c56ba::t_fc468532ad3590 42
+Cargo.lock
+  s_1c17e92a7c56ba::t_954fbc200ef0e6 95
+  s_1c17e92a7c56ba::t_9ac9f074f86e48 93
+PROJECT_STATUS.md
+  s_1c17e92a7c56ba::t_849764e4b439f6 63-76
+  s_1c17e92a7c56ba::t_ac27a4edac51d9 6
+  s_1c17e92a7c56ba::t_b2b893b2fc436c 11
+  s_1c17e92a7c56ba::t_e889db35b84ecd 3
+README.md
+  s_1c17e92a7c56ba::t_a58b786ccd1a22 462-465
+  s_1c17e92a7c56ba::t_d0256374554858 449-454
+crates/cli/src/notes.rs
+  s_1c17e92a7c56ba::t_782e292cc4d74a 241-262
+  s_1c17e92a7c56ba::t_b85b7f01f8148a 264
+crates/cli/tests/cli_integration.rs
+  s_1c17e92a7c56ba::t_5f3f40bdb170f3 1238
+  s_1c17e92a7c56ba::t_5f5a100a1a747b 1241-1259
+  s_1c17e92a7c56ba::t_f8ca5b604a1af6 1178
+  s_1c17e92a7c56ba::t_fe9ead03ac83c9 1221-1222
+crates/core/src/report/team_report.rs
+  s_1c17e92a7c56ba::t_04a9839e33af2a 120
+  s_1c17e92a7c56ba::t_059ce07403a897 252-253
+  s_1c17e92a7c56ba::t_09e3e571f5e7b5 450-455
+  s_1c17e92a7c56ba::t_0d7d77d90a17e0 157-167
+  s_1c17e92a7c56ba::t_17d11f061c3b8f 404-405
+  s_1c17e92a7c56ba::t_23397a246b3813 223-235
+  s_1c17e92a7c56ba::t_2f5f793c2f35d6 87-88
+  s_1c17e92a7c56ba::t_3051e529449709 466-473
+  s_1c17e92a7c56ba::t_30826993f102c9 83-85
+  s_1c17e92a7c56ba::t_34310842f8e15f 94
+  s_1c17e92a7c56ba::t_373f67127f935d 106-118
+  s_1c17e92a7c56ba::t_42996979e58dca 139
+  s_1c17e92a7c56ba::t_45f3ddd6beeaab 238-250
+  s_1c17e92a7c56ba::t_4bffdeab885abe 47-51
+  s_1c17e92a7c56ba::t_5a7aa8eebca467 143
+  s_1c17e92a7c56ba::t_6186f33dbaaf1f 177-181
+  s_1c17e92a7c56ba::t_68de0aa85b6474 151-153
+  s_1c17e92a7c56ba::t_7b4d43fbd4c8f5 145
+  s_1c17e92a7c56ba::t_89da6b4736b035 100
+  s_1c17e92a7c56ba::t_9fa301748ec4fa 134-137
+  s_1c17e92a7c56ba::t_bbf0faab1dcc18 436-437
+  s_1c17e92a7c56ba::t_c8040b3e1ac812 201-207
+  s_1c17e92a7c56ba::t_d35a33d9a50ca5 410-411
+  s_1c17e92a7c56ba::t_d37dcf03646d7a 442-443
+  s_1c17e92a7c56ba::t_d7d2bdc74d6abf 422-424
+  s_1c17e92a7c56ba::t_e4fda2e3234e7a 299-349
+  s_1c17e92a7c56ba::t_e8a299f560ec34 23-26
+docs/ADAPTERS.md
+  s_1c17e92a7c56ba::t_66832f29090a7f 70
+docs/examples/README.md
+  s_1c17e92a7c56ba::t_1bbfddd3e2d368 19-21
+  s_1c17e92a7c56ba::t_8d9c8ce99c31e2 17
+docs/examples/github-actions-team-report.yml
+  s_1c17e92a7c56ba::t_6574c027e80e28 51
+  s_1c17e92a7c56ba::t_9ff6dd228579fb 57-58
+  s_1c17e92a7c56ba::t_a42723b7adcc1e 60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "tellur/0.1.0",
+  "base_commit_sha": "7f3f1180b19c2eac81e65d38f42e3fa67682e217",
+  "prompts": {},
+  "humans": {},
+  "sessions": {
+    "s_1c17e92a7c56ba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f57bb-0fda-7dd3-a201-c3970b023ebf",
+        "model": "codex:gpt-5.6-sol"
+      },
+      "human_author": "sydneyvb-nl\n",
+      "custom_attributes": {
+        "tellur.confidence": "1.00",
+        "tellur.evidence_strength": "claimed"
+      }
+    }
+  }
+}
