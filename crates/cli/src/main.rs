@@ -29,6 +29,7 @@ mod hub;
 mod inspect;
 mod maintain;
 mod notes;
+mod onboarding;
 mod policy;
 mod push;
 mod repo;
@@ -182,17 +183,49 @@ async fn main() -> Result<()> {
                 json_response,
             } => hooks::cmd_hooks_ingest(&source, auto_init, json_response),
         },
-        Commands::Setup { action } => match action {
-            SetupActions::Agents { home } => setup::cmd_setup_agents(home.as_deref()),
-            SetupActions::Codex { home } => setup::cmd_setup_codex(home.as_deref()),
-            SetupActions::ClaudeCode { home } => setup::cmd_setup_claude_code(home.as_deref()),
-            SetupActions::Cursor { home } => setup::cmd_setup_cursor(home.as_deref()),
-            SetupActions::Vscode { home } => setup::cmd_setup_vscode(home.as_deref()),
-            SetupActions::Windsurf { home } => setup::cmd_setup_windsurf(home.as_deref()),
-            SetupActions::GeminiCli { home } => setup::cmd_setup_gemini_cli(home.as_deref()),
-            SetupActions::Antigravity { home } => setup::cmd_setup_antigravity(home.as_deref()),
-            SetupActions::Status { home } => setup::cmd_setup_status(home.as_deref()),
-            SetupActions::Uninstall { home } => setup::cmd_setup_uninstall(home.as_deref()),
+        Commands::Setup {
+            action,
+            hub,
+            local_only,
+            remote,
+            no_background,
+            no_browser,
+            yes,
+        } => match action {
+            None => onboarding::cmd_setup(onboarding::SetupOptions {
+                hub: hub.as_deref(),
+                local_only,
+                remote: &remote,
+                no_background,
+                no_browser,
+                yes,
+                update: false,
+            }),
+            Some(SetupActions::Update) => onboarding::cmd_setup(onboarding::SetupOptions {
+                hub: hub.as_deref(),
+                local_only,
+                remote: &remote,
+                no_background,
+                no_browser,
+                yes: true,
+                update: true,
+            }),
+            Some(SetupActions::Agents { home }) => setup::cmd_setup_agents(home.as_deref()),
+            Some(SetupActions::Codex { home }) => setup::cmd_setup_codex(home.as_deref()),
+            Some(SetupActions::ClaudeCode { home }) => {
+                setup::cmd_setup_claude_code(home.as_deref())
+            }
+            Some(SetupActions::Cursor { home }) => setup::cmd_setup_cursor(home.as_deref()),
+            Some(SetupActions::Vscode { home }) => setup::cmd_setup_vscode(home.as_deref()),
+            Some(SetupActions::Windsurf { home }) => setup::cmd_setup_windsurf(home.as_deref()),
+            Some(SetupActions::GeminiCli { home }) => setup::cmd_setup_gemini_cli(home.as_deref()),
+            Some(SetupActions::Antigravity { home }) => {
+                setup::cmd_setup_antigravity(home.as_deref())
+            }
+            Some(SetupActions::Status { home, remote }) => {
+                onboarding::cmd_setup_status(home.as_deref(), &remote)
+            }
+            Some(SetupActions::Uninstall { home }) => setup::cmd_setup_uninstall(home.as_deref()),
         },
     }
 }

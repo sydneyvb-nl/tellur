@@ -59,7 +59,20 @@ troubleshooting.
   Set an absolute path if the CLI is not on the IDE's `PATH`.
 - **Capture file changes on save** — toggles the listener on/off.
 
-## Building
+## Installation
+
+The supported product installer downloads the checksum-verified release ZIP,
+installs it into every detected JetBrains product, installs the Tellur CLI, and
+then starts the setup wizard:
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL https://github.com/sydneyvb-nl/tellur/releases/latest/download/install.sh | bash
+```
+
+Restart an already-running IDE after installation. `tellur setup status`
+reports whether the plugin directory was detected.
+
+## Building for development
 
 The Gradle wrapper is committed (pinned to Gradle 8.9), so no global Gradle
 install is needed. Building requires **JDK 17** and downloads the IntelliJ
@@ -78,8 +91,9 @@ If your default JDK is newer than 17, point Gradle at a JDK 17, e.g.:
 JAVA_HOME=/path/to/jdk-17 ./gradlew buildPlugin
 ```
 
-Install the resulting zip via **Preferences → Plugins → ⚙ → Install Plugin from
-Disk…**.
+For a development build only, install the resulting ZIP via **Preferences →
+Plugins → ⚙ → Install Plugin from Disk…**. End users should use the repository
+installer above.
 
 The plugin declares compatibility with IntelliJ Platform 2024.1 through 2025.3
 (`sinceBuild=241`, `untilBuild=253.*`). It compiles and runs its tests against
