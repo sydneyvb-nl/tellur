@@ -519,6 +519,8 @@ fn test_hooks_ingest_auto_init_records_event_in_new_repo() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].event_type, EventType::SessionStart);
     assert_eq!(events[0].payload["tool"], "codex");
+    assert!(dir.join(".git/hooks/post-commit").exists());
+    assert!(dir.join(".git/hooks/pre-push").exists());
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1075,6 +1077,10 @@ fn test_init_creates_structure() {
                 || tellur_dir.exists()
         );
     }
+    let post_commit = fs::read_to_string(dir.join(".git/hooks/post-commit")).unwrap();
+    let pre_push = fs::read_to_string(dir.join(".git/hooks/pre-push")).unwrap();
+    assert!(post_commit.contains("notes export"));
+    assert!(pre_push.contains("notes install-config"));
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1694,10 +1700,12 @@ fn test_connect_installs_hooks_and_notes_config() {
     let post_commit = fs::read_to_string(dir.join(".git/hooks/post-commit")).unwrap();
     assert!(post_commit.contains("tellur connect (managed)"));
     assert!(post_commit.contains("notes export"));
+    assert!(post_commit.contains(".tellur/disable"));
 
     let pre_push = fs::read_to_string(dir.join(".git/hooks/pre-push")).unwrap();
     assert!(pre_push.contains("tellur connect (managed)"));
     assert!(pre_push.contains("push"));
+    assert!(pre_push.contains(".tellur/disable"));
     assert!(
         pre_push.contains("TELLUR_CONNECT_PREPUSH"),
         "recursion guard missing"
@@ -1744,6 +1752,18 @@ fn test_connect_installs_hooks_and_notes_config() {
 }
 
 #[test]
+fn test_push_honors_repository_disable_file_before_hub_resolution() {
+    let dir = temp_repo();
+    tellur().arg("init").current_dir(&dir).output().unwrap();
+    fs::write(dir.join(".tellur/disable"), "").unwrap();
+
+    let output = tellur().arg("push").current_dir(&dir).output().unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains(".tellur/disable"));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn test_unified_setup_is_idempotent_and_configures_repo_and_machine() {
     let dir = temp_repo();
     let home = std::env::temp_dir().join(format!(
@@ -1774,6 +1794,25 @@ fn test_unified_setup_is_idempotent_and_configures_repo_and_machine() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+        if command == "setup" {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for integration in [
+                "Codex",
+                "Claude Code",
+                "Gemini CLI",
+                "Antigravity",
+                "Cursor",
+                "Windsurf",
+                "VS Code",
+                "JetBrains",
+            ] {
+                assert!(
+                    stdout.contains(integration),
+                    "missing {integration}: {stdout}"
+                );
+            }
+            assert!(stdout.contains("every Git repository activates automatically"));
+        }
     }
 
     assert!(dir.join(".tellur/config.yml").exists());
@@ -1786,6 +1825,10 @@ fn test_unified_setup_is_idempotent_and_configures_repo_and_machine() {
     );
     assert!(home.join(".claude/settings.json").exists());
     assert!(home.join(".codex/plugins/tellur-provenance").exists());
+    let credentials: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.join(".config/tellur/hosts.json")).unwrap())
+            .unwrap();
+    assert_eq!(credentials["unattended_sync_disabled"], true);
 
     let status = tellur()
         .args(["setup", "status"])
@@ -1991,6 +2034,34 @@ fn test_connect_background_installs_and_removes_service() {
     assert!(
         count >= 1,
         "no background service file written in {svc_dir:?}"
+    );
+    let service_files = fs::read_dir(&svc_dir)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| fs::read_to_string(entry.path()).ok())
+        .collect::<Vec<_>>();
+    assert!(
+        service_files
+            .iter()
+            .any(|body| body.contains("TELLUR_UNATTENDED_SYNC")),
+        "background service is not marked as unattended"
+    );
+
+    let local_only = tellur()
+        .args(["setup", "--local-only", "--yes"])
+        .current_dir(&dir)
+        .env("HOME", &home)
+        .env_remove("XDG_CONFIG_HOME")
+        .env("TELLUR_CONNECT_NO_ACTIVATE", "1")
+        .output()
+        .unwrap();
+    assert!(local_only.status.success());
+    let after_local_only = fs::read_dir(&svc_dir)
+        .map(|rd| rd.filter_map(|entry| entry.ok()).count())
+        .unwrap_or(0);
+    assert_eq!(
+        after_local_only, 0,
+        "local-only setup left a background service installed"
     );
 
     let removed = tellur()

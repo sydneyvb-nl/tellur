@@ -1,7 +1,7 @@
 //! `tellur connect` — one-time zero-touch setup that wires hub login, agent
 //! capture, and managed git hooks, plus its `--status` / `--remove` modes.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -77,11 +77,7 @@ pub(crate) fn cmd_connect(opts: ConnectOptions) -> Result<()> {
     }
 
     // 3. Git hooks (chained, never clobbering an existing hook).
-    let exe = tellur_executable_path()?;
-    let exe_quoted = shell_quote(&exe.to_string_lossy());
-    let hooks_dir = git_hooks_dir(&storage.root)?;
-    install_managed_hook(&hooks_dir, "post-commit", &post_commit_block(&exe_quoted))?;
-    install_managed_hook(&hooks_dir, "pre-push", &pre_push_block(&exe_quoted))?;
+    let hooks_dir = ensure_repo_git_automation(&storage)?;
     println!(
         "✓ Installed git hooks in {} (post-commit, pre-push)",
         hooks_dir.display()
@@ -102,6 +98,7 @@ pub(crate) fn cmd_connect(opts: ConnectOptions) -> Result<()> {
 
     // 5. Optional always-on background push service.
     if opts.background {
+        let exe = tellur_executable_path()?;
         let svc = service::install(&storage.root, &exe, opts.push_interval)?;
         println!(
             "✓ Installed background push service '{}' every {}s\n  {}",
@@ -137,9 +134,24 @@ pub(crate) fn cmd_connect(opts: ConnectOptions) -> Result<()> {
     Ok(())
 }
 
+/// Install Tellur's repository-local Git automation.
+///
+/// Global agent/editor integrations auto-initialize every Git repository they
+/// encounter. Sharing this path with `tellur init` ensures those repositories
+/// also gain commit-note generation and pre-push synchronization without a
+/// second, repository-specific setup command.
+pub(crate) fn ensure_repo_git_automation(storage: &RepoStorage) -> Result<PathBuf> {
+    let exe = tellur_executable_path()?;
+    let exe_quoted = shell_quote(&exe.to_string_lossy());
+    let hooks_dir = git_hooks_dir(&storage.root)?;
+    install_managed_hook(&hooks_dir, "post-commit", &post_commit_block(&exe_quoted))?;
+    install_managed_hook(&hooks_dir, "pre-push", &pre_push_block(&exe_quoted))?;
+    Ok(hooks_dir)
+}
+
 fn post_commit_block(exe: &str) -> String {
     format!(
-        "{HOOK_BEGIN}\n# Refresh refs/notes/ai for the new commit (best-effort; never blocks).\n{exe} notes export >/dev/null 2>&1 || true\n{HOOK_END}"
+        "{HOOK_BEGIN}\n# Refresh refs/notes/ai unless this repository opted out.\nif [ ! -e \".tellur/disable\" ]; then\n\t{exe} notes export >/dev/null 2>&1 || true\nfi\n{HOOK_END}"
     )
 }
 
@@ -147,7 +159,7 @@ fn pre_push_block(exe: &str) -> String {
     // git passes the remote name as $1. The recursion guard stops the nested
     // `tellur notes push` (which runs `git push`) from re-entering this hook.
     format!(
-        "{HOOK_BEGIN}\n# Flush events to the hub and publish authorship notes (best-effort; never blocks).\nif [ -z \"$TELLUR_CONNECT_PREPUSH\" ]; then\n\tTELLUR_CONNECT_PREPUSH=1 {exe} notes install-config \"${{1:-origin}}\" >/dev/null 2>&1 || true\n\tTELLUR_CONNECT_PREPUSH=1 {exe} push >/dev/null 2>&1 || true\n\tTELLUR_CONNECT_PREPUSH=1 {exe} notes push \"${{1:-origin}}\" >/dev/null 2>&1 || true\nfi\n{HOOK_END}"
+        "{HOOK_BEGIN}\n# Flush events and notes unless this repository opted out.\nif [ ! -e \".tellur/disable\" ] && [ -z \"$TELLUR_CONNECT_PREPUSH\" ]; then\n\tTELLUR_CONNECT_PREPUSH=1 {exe} notes install-config \"${{1:-origin}}\" >/dev/null 2>&1 || true\n\tTELLUR_CONNECT_PREPUSH=1 {exe} push >/dev/null 2>&1 || true\n\tTELLUR_CONNECT_PREPUSH=1 {exe} notes push \"${{1:-origin}}\" >/dev/null 2>&1 || true\nfi\n{HOOK_END}"
     )
 }
 
@@ -182,8 +194,9 @@ fn splice_managed_block(existing: &str, block: &str) -> String {
 
 fn install_managed_hook(hooks_dir: &Path, name: &str, block: &str) -> Result<()> {
     let path = hooks_dir.join(name);
-    let new_content = match std::fs::read_to_string(&path) {
-        Ok(existing) if !existing.trim().is_empty() => {
+    let existing = std::fs::read_to_string(&path).ok();
+    let new_content = match existing.as_deref() {
+        Some(existing) if !existing.trim().is_empty() => {
             if let Some(first) = existing.lines().next()
                 && first.starts_with("#!")
                 && !first.contains("sh")
@@ -193,12 +206,14 @@ fn install_managed_hook(hooks_dir: &Path, name: &str, block: &str) -> Result<()>
                      add Tellur's commands to it manually"
                 );
             }
-            splice_managed_block(&existing, block)
+            splice_managed_block(existing, block)
         }
         _ => format!("#!/bin/sh\n{block}\n"),
     };
-    std::fs::write(&path, new_content)
-        .with_context(|| format!("failed to write hook {}", path.display()))?;
+    if existing.as_deref() != Some(new_content.as_str()) {
+        std::fs::write(&path, new_content)
+            .with_context(|| format!("failed to write hook {}", path.display()))?;
+    }
     set_executable(&path)?;
     Ok(())
 }
@@ -206,6 +221,9 @@ fn install_managed_hook(hooks_dir: &Path, name: &str, block: &str) -> Result<()>
 #[cfg(unix)]
 fn set_executable(path: &Path) -> Result<()> {
     let mut perms = std::fs::metadata(path)?.permissions();
+    if perms.mode() & 0o111 == 0o111 {
+        return Ok(());
+    }
     perms.set_mode(0o755);
     std::fs::set_permissions(path, perms)
         .with_context(|| format!("failed to chmod {}", path.display()))?;
@@ -296,4 +314,57 @@ pub(crate) fn connect_status(storage: &RepoStorage, remote: &str) -> Result<()> 
         None => println!("  ✗ background push service (add --background)"),
     }
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    #[test]
+    fn managed_hooks_honor_repository_disable_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "tellur-disabled-hooks-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(dir.join(".tellur")).unwrap();
+        std::fs::write(dir.join(".tellur/disable"), "").unwrap();
+
+        let fake = dir.join("fake-tellur");
+        let marker = dir.join("invoked");
+        std::fs::write(
+            &fake,
+            format!("#!/bin/sh\nprintf invoked >> '{}'\n", marker.display()),
+        )
+        .unwrap();
+        set_executable(&fake).unwrap();
+        let quoted = shell_quote(&fake.to_string_lossy());
+
+        for block in [post_commit_block(&quoted), pre_push_block(&quoted)] {
+            assert!(
+                Command::new("sh")
+                    .arg("-c")
+                    .arg(block)
+                    .current_dir(&dir)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        assert!(!marker.exists(), "disabled repository invoked Tellur");
+
+        std::fs::remove_file(dir.join(".tellur/disable")).unwrap();
+        assert!(
+            Command::new("sh")
+                .arg("-c")
+                .arg(post_commit_block(&quoted))
+                .current_dir(&dir)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(marker.exists(), "enabled repository did not invoke Tellur");
+        std::fs::remove_dir_all(dir).ok();
+    }
 }

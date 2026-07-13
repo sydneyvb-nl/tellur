@@ -1,16 +1,16 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-07-13 (Aikido security remediation)
+**Last updated:** 2026-07-13 (Aikido remediation after machine-wide release preparation)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
-**Branch:** `codex/unified-setup-wizard` · **Open PRs:** none before this change
+**Branch:** `codex/security-aikido-remediation` · **PR:** #53
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
 ## Handover — current state & open work
 
-**The adapter/editor compatibility work from PR #48, team-hub UX work from PR
-#49, and evidence-aware provenance reporting from PR #50 are merged to
-`main`.** The
+**PRs #48–#52 are merged to `main`: adapter/editor compatibility, team-hub UX,
+evidence-aware provenance, unified setup/release packaging, and machine-wide
+activation/release readiness.** The
 local pipeline, the team hub
 (`tellur-server`), the CLI hub coupling (`tellur login`/`push`/`logout`), the A12
 source connection + private-repo proxy, prompt excerpts, and the dynamic session
@@ -29,14 +29,7 @@ timeline are all shipped.
   `TELLUR_TEST_DATABASE_URL` (local: `postgres://postgres@127.0.0.1:5433/tellur_test`).
 
 **Open work (priority order):**
-1. **Activate the first public release** — release automation now builds five
-   platform CLI archives, SHA-256 sidecars, a version-matched VSIX, a
-   version-matched JetBrains ZIP, and Unix/Windows bootstrap installers. The
-   installer deploys packages into detected editors and launches the unified
-   wizard; CI builds both packages and exercises the Unix path E2E. Remaining
-   external step: after this PR merges, publish the first `v*` tag from `main`
-   so the stable `/releases/latest/download/install.*` URLs become live.
-2. **Zero-touch + GitHub App** — design merged in
+1. **Zero-touch + GitHub App** — design merged in
    [`docs/proposals/GITHUB_APP.md`](docs/proposals/GITHUB_APP.md). **P1 `tellur
    connect`** is **complete** (git hooks + opt-in `--background` push service).
    **P2 GitHub App installation tokens** for the blob proxy is **complete** (see
@@ -51,15 +44,15 @@ timeline are all shipped.
    tests; a maintainer must verify them against a real GitHub App (App id +
    private key + webhook secret) — there is no live App in CI.
    Live setup walkthrough: [`docs/GITHUB_APP_SETUP.md`](docs/GITHUB_APP_SETUP.md).
-3. **Additional package registries** — the direct GitHub installer is complete;
+2. **Additional package registries** — the direct GitHub installer is complete;
    the npm wrapper and Homebrew formula (`dist/`) remain unfinished optional
    distribution channels.
-4. **`docs/DEPLOYMENT.md`** (Fly.io / Cloud Run + managed Postgres + TLS + OIDC
+3. **`docs/DEPLOYMENT.md`** (Fly.io / Cloud Run + managed Postgres + TLS + OIDC
    walkthrough) and **`docs/SSO.md`** (Keycloak quickstart + the Entra ID
    `email_verified` caveat) — offered, not yet written; the missing piece for
    self-serve "host it as a service".
-5. **Richer policy templates** for security-sensitive repositories.
-6. **Broader agent coverage** as more tools expose stable local lifecycle hooks.
+4. **Richer policy templates** for security-sensitive repositories.
+5. **Broader agent coverage** as more tools expose stable local lifecycle hooks.
 
 **Smaller follow-ups flagged during recent work (nice-to-have, not blocking):**
 - Surface the **prompt excerpt as a column in the file-provenance view** (per
@@ -76,14 +69,15 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > embedded local dashboard by switching all API/import-driven rendering to DOM
 > text nodes; added a regression test that rejects HTML string sinks. Replaced
 > the SQLite hash-chain helper's dynamic table/column strings with a closed enum
-> and static parameterized queries. Pinned the five reported third-party GitHub
-> Actions to full commit SHAs, made release permissions deny-by-default and
+> and static parameterized queries. Pinned every remaining reported third-party
+> GitHub Action to a full commit SHA, retained PR #52's pinned cargo-deny CLI
+> replacement, made release permissions deny-by-default and
 > job-scoped, updated `smallvec` to 1.15.2, and upgraded `notify` to 8.2.0 so
 > vulnerable `mio` 0.8.11 leaves the graph. The 15 path-read alerts were traced
 > to explicit local-user imports or fixed RepoStorage/home paths, not a remote
 > restricted-directory boundary; the non-applicability proof and security
 > invariants are recorded in `docs/security/AIKIDO_2026_07_13.md`. Verified with
-> `cargo fmt --all -- --check`, workspace clippy with warnings denied, all 353
+> `cargo fmt --all -- --check`, workspace clippy with warnings denied, all 359
 > Rust tests, `cargo deny check`, JavaScript/YAML parsing, pinned-SHA resolution,
 > and a real headless-browser injection attempt through the local daemon (the
 > malicious `<img onerror>` remained literal text; zero injected elements and
@@ -106,6 +100,35 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > a Windows installer E2E CI job.
 > Marketplace listing is now optional for discovery rather than a blocker.
 > Granular setup/connect commands remain for compatibility and recovery.
+
+> **2026-07-13 — Machine-wide activation semantics.** On
+> `codex/global-auto-activation`. Corrected the remaining per-repository wording
+> and behavior before v0.1.0: Tellur installs once per machine; Codex, Claude
+> Code, Gemini CLI, Antigravity, Cursor, Windsurf, VS Code, and JetBrains are
+> explicitly reported by the wizard; every Git repo auto-initializes on first
+> configured agent/editor activity. `tellur init` and hook `--auto-init` now
+> install managed post-commit/pre-push hooks through one shared idempotent path,
+> so portable notes and hub sync do not require a second repo setup command.
+> Successful device login now records a validated machine-wide default hub, so
+> unattended pre-push sync remains deterministic when multiple hub credentials
+> exist. PR CI also cross-compiles and packages both Linux release targets;
+> arm64 correctly uses the GNU cross toolchain instead of a GNU linker mislabeled
+> as musl.
+> Codex review P2 fixed: `.tellur/disable` is evaluated at hook runtime, so a
+> repository that opts out after activation no longer exports/pushes Git notes
+> or synchronizes events to the Team Hub. A shell-execution regression test
+> covers disabled and re-enabled behavior.
+> The supply-chain job now pins cargo-deny 0.19.8 instead of using an action
+> that downloads an incompatible floating `latest` CLI.
+> Codex re-review P1s fixed: `cmd_push` itself honors `.tellur/disable`, including
+> timer services, and `--local-only` persists an explicit unattended-sync opt-out.
+> Pre-push/service calls are marked unattended and never fall back to the sole
+> saved host when no default hub is selected.
+> Direct `tellur notes push` now propagates the pre-push recursion guard, avoiding
+> concurrent nested pushes racing to update `refs/notes/ai`.
+> Final Codex P2 fixed: local-only setup removes the current repository's existing
+> background service, while the persisted opt-out also blocks implicit fallback
+> for legacy timers that were created without the unattended marker.
 
 > **2026-07-13 — End-to-end Codex capture and evidence-aware PR provenance.** On
 > `fix/pr-provenance-evidence-states`. Replaced the broken CI use of local-index
@@ -1175,7 +1198,7 @@ Tellur/
 | 16 | Cursor adapter implementation | 8.2 | ✅ Done | Cursor MCP/settings setup, VS Code-compatible extension capture, JSON/JSONL trace parsing, workspace detection, adapter tests |
 | 16a | Codex CLI adapter implementation | 8.2 | ✅ Done | JSONL event stream/session transcript import via `tellur import codex <file>`, command/prompt/file-write normalization, prompt hashing, strict JSONL errors |
 | 16b | GitHub Copilot adapter implementation | 8.2 | ✅ Done | Metadata JSON/JSONL import via `tellur import copilot <file>`, accepted suggestion + prompt metadata normalization, prompt hashing, no raw metadata payload |
-| 16c | Unified agent/editor/repo setup | 8.1/8.3/10/23 | ✅ Done | Single-command release installers deploy the CLI + VSIX + JetBrains ZIP and launch `tellur setup`; wizard + `setup update/status`; optional Team Hub login/background sync; idempotent repo Git hooks and Git-note config; package-aware editor status; granular recovery surfaces; single-owner Codex personal-plugin hooks, user-level Claude/Gemini/Antigravity hooks, MCP/settings generation. First public tag remains an external release step. |
+| 16c | Unified agent/editor/repo setup | 8.1/8.3/10/23 | ✅ Done | Tellur installs once per machine. The release installers deploy the CLI + VSIX + JetBrains ZIP and launch `tellur setup`; the wizard globally configures Codex, Claude Code, Gemini CLI, Antigravity, Cursor, Windsurf, VS Code, JetBrains and optional Team Hub login. Repositories activate on first agent/editor activity, including idempotent Git hooks and notes config; `.tellur/disable` opts a repo out. `setup update/status` reconcile and verify the installation. |
 | 16d | Gemini CLI adapter implementation | 8.2 | ✅ Done | `tellur setup gemini-cli`, `~/.gemini/settings.json` hooks, JSONL import via `tellur import gemini-cli <file>`, prompt hashing and metadata sanitization |
 | 16e | Antigravity 2.0 adapter implementation | 8.2/23 | ✅ Done | `tellur setup antigravity`, `~/.gemini/config/hooks.json`, Antigravity app/CLI MCP configs, JSONL import via `tellur import antigravity <file>` |
 | 16f | Shared import loop | 8.2 | ✅ Done | `crates/adapters/src/import.rs`: tolerant JSONL/array/envelope/single-object reader, line-specific errors, sanitized+prompt-hashed payloads, nested-field extraction, numeric epoch timestamps. Reused by the adoption adapters below |
@@ -1245,10 +1268,10 @@ Tellur/
 
 | # | Module | PRD Sectie | Status | Details |
 |---|--------|-----------|--------|---------|
-| 48 | Cross-compilation | 32.3 | ✅ Done | macOS arm64/x64, Linux musl arm64/x64, Windows x64; canonical archives + SHA-256 sidecars. |
+| 48 | Cross-compilation | 32.3 | ✅ Done | macOS arm64/x64, Linux x64 musl + arm64 GNU, Windows x64; canonical archives + SHA-256 sidecars. Linux release targets compile in PR CI before tag publication. |
 | 49 | Homebrew formula | 32.3 | ⚠️ Template only | `dist/tellur.rb` still has a placeholder checksum and is not a usable published channel; the GitHub installer is supported. |
 | 50 | npm package (CLI wrapper) | 32.3 | ⚠️ Implemented, unpublished | JS wrapper + SHA-256-verifying downloader; unsupported until the package and release assets are published. |
-| 51 | GitHub Release automation | 32.3 | ✅ Done | Five CLI targets + checksums, version-matched VSIX, JetBrains ZIP, Unix/Windows installers. CI builds editor packages and exercises both installers E2E. First `v*` tag from merged `main` remains. |
+| 51 | GitHub Release automation | 32.3 | ✅ Done | Five CLI targets + checksums, version-matched VSIX, JetBrains ZIP, Unix/Windows installers. CI builds editor packages and Linux release binaries and exercises both installers E2E before a `v*` tag publishes the release. |
 
 ---
 
@@ -1259,8 +1282,9 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 1. **Pricing / Business model** (PRD sectie 27-31) — niet relevant voor dev, Sydney beslist
 2. **Enterprise team/server follow-ups** (PRD §6.11 / §16.2 Layer 5 / §32 Step 20)
    — Tier 0 and the self-host hub preview are implemented on both the SQLite and
-   Postgres backends, with enterprise RBAC/SSO/SCIM. Remaining work: durable
-   jobs and SCIM Group-based role sync.
+   Postgres backends, with enterprise RBAC/SSO/SCIM, durable jobs, and
+   SCIM Group-based role sync. Remaining work is production deployment guidance
+   and verification against a real GitHub App installation.
 3. **SOC 2 compliance** (PRD sectie 26) — far future
 4. **Plugin SDK** (PRD sectie 25) — API stabiliteit eerst nodig
 5. **Release signing** (PRD sectie 20) — na v1.0 (SLSA/SPDX *export* is wel klaar)
@@ -1272,7 +1296,7 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-352 Rust tests, 0 failures, 0 clippy warnings; `cargo deny check` green.
+358 Rust tests, 0 failures, 0 clippy warnings; `cargo deny check` green.
 (verified 2026-07-13 via `cargo test`; Postgres tests no-op without `TELLUR_TEST_DATABASE_URL`)
 - core:      77  (75 library + 2 CLI-contract integration: schema/event round-trip, glob, storage, hash-chain verify+reseal,
              index session/attribution round-trip, capture pipeline, attribution,

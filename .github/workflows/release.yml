@@ -23,7 +23,9 @@ jobs:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             name: tellur-linux-x64
-          - target: aarch64-unknown-linux-musl
+          # Ubuntu's supported cross toolchain targets glibc for arm64. Using
+          # it avoids pretending that a GNU linker produced a musl binary.
+          - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             name: tellur-linux-arm64
           - target: x86_64-pc-windows-msvc
@@ -42,10 +44,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
-          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
-            sudo apt-get install -y gcc-aarch64-linux-gnu
-            echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-          fi
+
+      - name: Install GNU arm64 cross linker (Linux)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
 
       - name: Build
         run: cargo build --release --target ${{ matrix.target }} -p tellur-cli --bin tellur
