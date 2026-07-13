@@ -4,8 +4,8 @@ $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $Temp = Join-Path ([IO.Path]::GetTempPath()) ("tellur-installer-test-" + [guid]::NewGuid())
 $Assets = Join-Path $Temp "assets"
 $Repo = Join-Path $Temp "repo"
-$Home = Join-Path $Temp "home"
-New-Item -ItemType Directory -Force -Path $Assets, $Repo, $Home | Out-Null
+$TestHome = Join-Path $Temp "home"
+New-Item -ItemType Directory -Force -Path $Assets, $Repo, $TestHome | Out-Null
 
 function Write-Checksum([string]$Path) {
     $Hash = (Get-FileHash -Algorithm SHA256 $Path).Hash.ToLowerInvariant()
@@ -28,10 +28,10 @@ try {
 
     $env:TELLUR_VERSION = "0.1.0"
     $env:TELLUR_INSTALL_DIR = Join-Path $Temp "install"
-    $env:HOME = $Home
-    $env:USERPROFILE = $Home
-    $env:LOCALAPPDATA = Join-Path $Home "AppData\Local"
-    $env:APPDATA = Join-Path $Home "AppData\Roaming"
+    $env:HOME = $TestHome
+    $env:USERPROFILE = $TestHome
+    $env:LOCALAPPDATA = Join-Path $TestHome "AppData\Local"
+    $env:APPDATA = Join-Path $TestHome "AppData\Roaming"
     New-Item -ItemType Directory -Force -Path (Join-Path $env:APPDATA "JetBrains\IntelliJIdea2025.1") | Out-Null
 
     function global:Invoke-WebRequest {
