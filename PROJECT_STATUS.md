@@ -83,7 +83,10 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > refspec. Added unit/integration coverage for patch-path extraction, live patch
 > attribution, session preservation, exact note export, single-owner Codex setup,
 > and claimed recovery. README and adapter mechanics updated. Open as PR #50.
-> Workspace total: 343 Rust tests, all green.
+> Workspace total: 344 Rust tests, all green. Codex review follow-up: team
+> reports now exclude merge commits, preventing a base-branch merge's
+> first-parent diff from being counted as new PR code; covered by a real
+> base/feature/merge history integration test.
 
 > **2026-06-22 — Maintainability refactor: decomposed the four monolith files.**
 > On branch `refactor/decompose-monoliths`. Behavior-preserving structural split,
@@ -1165,7 +1168,7 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-343 Rust tests, 0 failures, 0 clippy warnings; `cargo deny check` green.
+344 Rust tests, 0 failures, 0 clippy warnings; `cargo deny check` green.
 (verified 2026-07-13 via `cargo test`; Postgres tests no-op without `TELLUR_TEST_DATABASE_URL`)
 - core:      77  (75 library + 2 CLI-contract integration: schema/event round-trip, glob, storage, hash-chain verify+reseal,
              index session/attribution round-trip, capture pipeline, attribution,
@@ -1173,8 +1176,8 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 - adapters:  51  (Claude Code, Aider, Cursor, Codex, Copilot, Gemini CLI,
              Antigravity, Windsurf, JetBrains, Devin, Continue, Cline/Roo, Generic,
              + shared import loop)
-- cli:       49  (14 unit incl. Codex patch-path parsing, push high-water-mark/tombstones,
-             prompt-excerpt redaction, host/segment encoding; 35 integration incl.
+- cli:       50  (14 unit incl. Codex patch-path parsing, push high-water-mark/tombstones,
+             prompt-excerpt redaction, host/segment encoding; 36 integration incl.
              exact/claimed notes, single-owner setup, live hook capture, and policy pull)
 - server:    166 (59 lib unit + 107 integration: auth/BOLA, ingest, repo RBAC,
              OIDC SSO + device login, SCIM users/groups, jobs, dashboard reads,

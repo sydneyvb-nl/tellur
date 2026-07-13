@@ -1452,6 +1452,103 @@ fn test_team_report_aggregates_notes_over_range() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn test_team_report_skips_base_branch_merge_commit_diff() {
+    let dir = temp_repo();
+    fs::write(dir.join("baseline.txt"), "baseline\n").unwrap();
+    Command::new("git")
+        .args(["add", "baseline.txt"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "baseline"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let base_branch = Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let base_branch = String::from_utf8(base_branch.stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+
+    Command::new("git")
+        .args(["switch", "-c", "feature"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    fs::write(dir.join("feature.txt"), "feature\n").unwrap();
+    Command::new("git")
+        .args(["add", "feature.txt"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "feature"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    Command::new("git")
+        .args(["switch", &base_branch])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    fs::write(dir.join("base-only.txt"), "base change\n").unwrap();
+    Command::new("git")
+        .args(["add", "base-only.txt"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "base change"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let base = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let base = String::from_utf8(base.stdout).unwrap().trim().to_string();
+
+    Command::new("git")
+        .args(["switch", "feature"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let merge = Command::new("git")
+        .args(["merge", "--no-edit", &base_branch])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(merge.status.success());
+    require_binary()
+        .arg("init")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    let report = require_binary()
+        .args([
+            "team", "report", "--base", &base, "--head", "HEAD", "--json",
+        ])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(report.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&report.stdout).unwrap();
+    assert_eq!(report["commits_total"], 1);
+    assert_eq!(report["added_lines"], 1);
+    assert_eq!(report["unknown_lines"], 1);
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 fn tellur_server_binary() -> PathBuf {
     let root = workspace_root();
     let release = root.join("target/release/tellur-server");

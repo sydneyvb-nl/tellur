@@ -458,7 +458,9 @@ tellur team report --base main --head HEAD --json
 ```
 
 The report intersects each commit's portable note with its actual zero-context
-Git patch. It reports added/deleted PR lines, AI/human/unknown added lines, a
+Git patch. Base-branch merge commits are excluded so their first-parent merge
+diff cannot inflate PR additions. It reports added/deleted PR lines,
+AI/human/unknown added lines, a
 breakdown by tool/model/author/evidence strength, and both commit and line-level provenance
 coverage. Missing or unparseable notes never become “0% AI”: the affected diff
 lines are explicitly unknown and the report is marked `missing` or `partial`.

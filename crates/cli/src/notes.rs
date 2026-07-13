@@ -377,7 +377,10 @@ pub(crate) fn cmd_notes_install_config(remote: &str, notes_ref: &str) -> Result<
 pub(crate) fn cmd_team_report(base: &str, head: &str, notes_ref: &str, json: bool) -> Result<()> {
     let storage = RepoStorage::discover()?;
     let range = format!("{base}..{head}");
-    let revs = git_output(&storage.root, &["rev-list", &range])
+    // A merge of the base branch is history topology, not new PR authorship.
+    // Its first-parent patch can contain every base-branch change since the
+    // branch point, so including merge commits inflates PR line accounting.
+    let revs = git_output(&storage.root, &["rev-list", "--no-merges", &range])
         .with_context(|| format!("failed to list commits in range {range}"))?;
     let commits: Vec<tellur_core::report::TeamCommitNote> = revs
         .lines()

@@ -111,7 +111,7 @@ Use this map before changing code so you land changes in the right layer.
 | Policy / redaction | `crates/core/src/policy/`, `crates/core/src/redaction/` | YAML policy rules + sensitive paths; regex secret detection/redaction. |
 | Export | `crates/core/src/storage/export.rs`, `crates/core/src/export/` | Provenance bundles + SLSA v1.0 / SPDX 2.3 export profiles. |
 | Reports | `crates/core/src/report/` | PR risk report generation + markdown rendering. |
-| Git notes | `crates/core/src/notes.rs` + `crates/cli/src/notes.rs` | `refs/notes/ai` Git AI-compatible authorship notes (`tellur notes …`). Normal export is commit-scoped: ranges must match the commit's blob and additions. `notes attest-ai` is an explicit missed-capture recovery and is labelled `claimed`; team reports expose evidence strength. |
+| Git notes | `crates/core/src/notes.rs` + `crates/cli/src/notes.rs` | `refs/notes/ai` Git AI-compatible authorship notes (`tellur notes …`). Normal export is commit-scoped: ranges must match the commit's blob and additions. `notes attest-ai` is an explicit missed-capture recovery and is labelled `claimed`; team reports expose evidence strength and exclude base-branch merge commits so first-parent merge diffs cannot inflate PR additions. |
 | Git remapping | `crates/core/src/remap/` | SHA remap across rebase/amend via `git diff-tree`. |
 | Glob matching | `crates/core/src/glob.rs` | Path glob matcher shared by policy/capture filters. |
 | Local daemon | `crates/core/src/daemon/` | `mod.rs`: loopback-only, token-auth HTTP API (events, sessions, export, dashboard). `webhook.rs`: normalizes cloud-agent (Devin) native payloads on `POST /webhook/{source}` and recomputes the hash chain. |
