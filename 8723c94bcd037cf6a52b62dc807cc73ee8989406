@@ -1,0 +1,123 @@
+.github/workflows/ci.yml
+  s_ddaf17e2383a7e::t_0b829550d46562 51
+  s_ddaf17e2383a7e::t_607945f434aed0 79
+  s_ddaf17e2383a7e::t_92701b9755960a 41
+  s_ddaf17e2383a7e::t_e2d0e6dbb22cc7 148-149
+  s_ddaf17e2383a7e::t_eb309a828fc345 70-71
+  s_ddaf17e2383a7e::t_eb79dd381ee862 38
+  s_ddaf17e2383a7e::t_f27feca30b2cb5 105
+.github/workflows/release.yml
+  s_ddaf17e2383a7e::t_6fdc58e9fc0265 12-13
+  s_ddaf17e2383a7e::t_927c9eebe177ea 125-126
+  s_ddaf17e2383a7e::t_95544c5fe3d89b 134
+  s_ddaf17e2383a7e::t_a7931d17bde13e 83-84
+  s_ddaf17e2383a7e::t_d3eb03a061a111 8
+Cargo.lock
+  s_ddaf17e2383a7e::t_0153987b802aac 1195-1204
+  s_ddaf17e2383a7e::t_0642ea5567e8fb 1638
+  s_ddaf17e2383a7e::t_072c161b1ef041 2727
+  s_ddaf17e2383a7e::t_0d56dc2d0a4010 2154
+  s_ddaf17e2383a7e::t_1758c417e07042 2610
+  s_ddaf17e2383a7e::t_1bbbab1a33dd57 1186
+  s_ddaf17e2383a7e::t_1ea257e1f11ec2 2855
+  s_ddaf17e2383a7e::t_279240cb576f68 2852-2853
+  s_ddaf17e2383a7e::t_2e415148086373 2792-2793
+  s_ddaf17e2383a7e::t_322462da91a95c 1174
+  s_ddaf17e2383a7e::t_3598c9a4f2ca1a 2738
+  s_ddaf17e2383a7e::t_46dc27c0e4bcc1 2795
+  s_ddaf17e2383a7e::t_5256a1d9825dc3 2740
+  s_ddaf17e2383a7e::t_526523ba93276e 2815-2820
+  s_ddaf17e2383a7e::t_592e9fa72f8f36 1891
+  s_ddaf17e2383a7e::t_5a39c72a5863cd 2867
+  s_ddaf17e2383a7e::t_5a6794b5ae9189 2840-2841
+  s_ddaf17e2383a7e::t_5d633e99b16286 2804-2805
+  s_ddaf17e2383a7e::t_5e5a421e07deb4 1163
+  s_ddaf17e2383a7e::t_61717cea7a69e0 1030
+  s_ddaf17e2383a7e::t_6290f7548df3f2 492
+  s_ddaf17e2383a7e::t_71049f30489301 2769-2770
+  s_ddaf17e2383a7e::t_749edc5a91ca53 2772-2783
+  s_ddaf17e2383a7e::t_7c51b112869f46 1184
+  s_ddaf17e2383a7e::t_86b10834fc3fe8 2843
+  s_ddaf17e2383a7e::t_875dcccd7a5599 957
+  s_ddaf17e2383a7e::t_87904123f0798c 2761
+  s_ddaf17e2383a7e::t_8a5aa88e190c8c 1182
+  s_ddaf17e2383a7e::t_8ddbecd3e3dc36 2736
+  s_ddaf17e2383a7e::t_90fb959ac34b83 2875-2880
+  s_ddaf17e2383a7e::t_a6eba965b2bb47 968
+  s_ddaf17e2383a7e::t_a95274ab2b8370 2828-2829
+  s_ddaf17e2383a7e::t_ac49d0769ad5e1 970
+  s_ddaf17e2383a7e::t_b18c67da4a9884 1527
+  s_ddaf17e2383a7e::t_b3531ff1042f4f 1889
+  s_ddaf17e2383a7e::t_b5f5061cf33039 2831
+  s_ddaf17e2383a7e::t_b6f9d932155f5a 2954
+  s_ddaf17e2383a7e::t_bb9612b61cc833 1590
+  s_ddaf17e2383a7e::t_cd9591b909d0fa 959
+  s_ddaf17e2383a7e::t_dabb8b0794594a 2729
+  s_ddaf17e2383a7e::t_db45d965476ed7 2864-2865
+  s_ddaf17e2383a7e::t_dec2f93737a2be 1265
+  s_ddaf17e2383a7e::t_e4d386ea89eb60 961
+  s_ddaf17e2383a7e::t_ea570b61def35b 2731
+  s_ddaf17e2383a7e::t_ed1a0085c6506c 1192-1193
+  s_ddaf17e2383a7e::t_f46b443028364a 2807
+PROJECT_STATUS.md
+  s_ddaf17e2383a7e::t_2bb1daba3de7eb 3
+  s_ddaf17e2383a7e::t_e27bc66938214e 74-91
+README.md
+  s_ddaf17e2383a7e::t_2324da0e092c13 310-312
+  s_ddaf17e2383a7e::t_ce0d374d412727 306-307
+SECURITY.md
+  s_ddaf17e2383a7e::t_7740d95288cd0d 48-52
+crates/cli/Cargo.toml
+  s_ddaf17e2383a7e::t_a0216ebbeb40a7 22
+crates/core/src/daemon/mod.rs
+  s_ddaf17e2383a7e::t_84777a14cd25f0 484-496
+crates/server/src/storage/chain.rs
+  s_ddaf17e2383a7e::t_8dd941faafe63e 24-33
+  s_ddaf17e2383a7e::t_b9a68c1b825c8b 14-19
+  s_ddaf17e2383a7e::t_db0fed1a0245fc 35
+  s_ddaf17e2383a7e::t_fcb6a7ee5a4873 50-64
+crates/server/src/storage/sqlite/audit.rs
+  s_ddaf17e2383a7e::t_60ee8338a701b8 132
+  s_ddaf17e2383a7e::t_7fe330186784b1 92
+crates/server/src/storage/sqlite/events.rs
+  s_ddaf17e2383a7e::t_5582a3973759cc 31
+  s_ddaf17e2383a7e::t_be82aae55f8b6d 93
+docs/FINDINGS.md
+  s_ddaf17e2383a7e::t_130d9d6b51c812 3-10
+docs/THREAT_MODEL.md
+  s_ddaf17e2383a7e::t_2b0e17426a1421 221-223
+  s_ddaf17e2383a7e::t_b700ac1bd114e8 3-4
+  s_ddaf17e2383a7e::t_e753c335ee0b59 193-196
+docs/security/AIKIDO_2026_07_13.md
+  s_ddaf17e2383a7e::t_752113f3394eb6 1-59
+web/index.html
+  s_ddaf17e2383a7e::t_15a4ae7be738f4 478-512
+  s_ddaf17e2383a7e::t_230d9f018ee0e3 601-603
+  s_ddaf17e2383a7e::t_2f17b52ce591c4 475
+  s_ddaf17e2383a7e::t_4541948530c5eb 564-591
+  s_ddaf17e2383a7e::t_5e10e686f50625 389-404
+  s_ddaf17e2383a7e::t_62a10158dd21b0 455-463
+  s_ddaf17e2383a7e::t_9b496078268511 229-230
+  s_ddaf17e2383a7e::t_fb4764e22a0a93 406-415
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "tellur/0.1.0",
+  "base_commit_sha": "8723c94bcd037cf6a52b62dc807cc73ee8989406",
+  "prompts": {},
+  "humans": {},
+  "sessions": {
+    "s_ddaf17e2383a7e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "sess_codex_aikido_remediation",
+        "model": "openai:gpt-5"
+      },
+      "human_author": "sydneyvb-nl",
+      "custom_attributes": {
+        "tellur.confidence": "1.00",
+        "tellur.evidence_strength": "claimed"
+      }
+    }
+  }
+}
