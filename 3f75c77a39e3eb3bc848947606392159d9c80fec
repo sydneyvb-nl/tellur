@@ -1,0 +1,35 @@
+AGENTS.md
+  s_1c17e92a7c56ba::t_993a177ad42015 114
+PROJECT_STATUS.md
+  s_1c17e92a7c56ba::t_032d64296f350c 1171
+  s_1c17e92a7c56ba::t_39ee1e1e9df89e 86-89
+  s_1c17e92a7c56ba::t_cc082be0884cf7 1179-1180
+README.md
+  s_1c17e92a7c56ba::t_8ccfc5f9610ff1 461-463
+crates/cli/src/notes.rs
+  s_1c17e92a7c56ba::t_5365b53d51d77f 380-383
+crates/cli/tests/cli_integration.rs
+  s_1c17e92a7c56ba::t_423162fba599b7 1455-1551
+docs/ADAPTERS.md
+  s_1c17e92a7c56ba::t_de756aa02568cf 75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "tellur/0.1.0",
+  "base_commit_sha": "3f75c77a39e3eb3bc848947606392159d9c80fec",
+  "prompts": {},
+  "humans": {},
+  "sessions": {
+    "s_1c17e92a7c56ba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f57bb-0fda-7dd3-a201-c3970b023ebf",
+        "model": "codex:gpt-5.6-sol"
+      },
+      "custom_attributes": {
+        "tellur.confidence": "1.00",
+        "tellur.evidence_strength": "recorded"
+      }
+    }
+  }
+}
