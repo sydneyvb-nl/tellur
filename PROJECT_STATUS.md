@@ -1,17 +1,16 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-07-13 (PR #49 synchronized with adapter/editor compatibility on `main`)
+**Last updated:** 2026-07-13 (end-to-end Codex capture + commit-scoped provenance on `fix/pr-provenance-evidence-states`)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
-**Branch:** `feat/team-hub-jtbd-ux` · **Open PRs:** #49 (team-hub JTBD overview),
-#50 (provenance reporting)
+**Branch:** `fix/pr-provenance-evidence-states` · **Open PRs:** #50 (provenance reporting)
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
 ## Handover — current state & open work
 
-**The adapter/editor compatibility work from PR #48 is merged to `main`.** The
-current team-hub UX milestone remains on `feat/team-hub-jtbd-ux` as PR #49;
-provenance reporting is open as PR #50. The local pipeline, the team hub
+**The adapter/editor compatibility work from PR #48 and team-hub UX work from
+PR #49 are merged to `main`.** Provenance reporting remains open as PR #50. The
+local pipeline, the team hub
 (`tellur-server`), the CLI hub coupling (`tellur login`/`push`/`logout`), the A12
 source connection + private-repo proxy, prompt excerpts, and the dynamic session
 timeline are all shipped.
@@ -63,6 +62,34 @@ has **no marking workflow on purpose** — review marking does not belong in the
 hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 "mark reviewed" action.
 
+> **2026-07-13 — End-to-end Codex capture and evidence-aware PR provenance.** On
+> `fix/pr-provenance-evidence-states`. Replaced the broken CI use of local-index
+> `tellur pr-report`: a fresh Actions checkout cannot contain the developer's
+> local SQLite attribution and previously rendered that missing evidence as
+> “Low risk / 0% AI / 0 total lines”. The workflow now fetches `refs/notes/ai`
+> and runs the git-native team report against the immutable PR base/head SHAs.
+> Team reporting parses each commit's zero-context patch, intersects portable
+> authorship ranges with the actual added lines, reports deletions separately,
+> and exposes `complete`/`partial`/`missing`/`empty` line-coverage states. Missing
+> or invalid notes turn real additions into `unknown`; they can never produce a
+> false 0% AI conclusion. Follow-up root-cause work fixed the capture/transport
+> path itself: Codex `apply_patch` payloads now yield every concrete patch path;
+> setup uses the personal plugin as the sole Codex hook owner and removes legacy
+> duplicate `~/.codex/hooks.json` handlers; repeated hooks preserve the original
+> session start/model; normal note export requires an exact commit blob and
+> intersects only the commit's additions, so stale index ranges cannot leak into
+> another commit. Missed historical capture has an explicit `notes attest-ai`
+> recovery path whose lines are visibly `claimed`, and team reports break AI
+> lines down by evidence strength. The local CLI was reinstalled and `tellur
+> connect --no-login` installed the missing post-commit/pre-push hooks plus notes
+> refspec. Added unit/integration coverage for patch-path extraction, live patch
+> attribution, session preservation, exact note export, single-owner Codex setup,
+> and claimed recovery. README and adapter mechanics updated. Open as PR #50.
+> Workspace total: 344 Rust tests, all green. Codex review follow-up: team
+> reports now exclude merge commits, preventing a base-branch merge's
+> first-parent diff from being counted as new PR code; covered by a real
+> base/feature/merge history integration test.
+>
 > **2026-07-12 — Team hub JTBD overview + responsive governance navigation.**
 > On `feat/team-hub-jtbd-ux`, started the evidence-based hub UX pass for the SMB
 > and corporate jobs in `TEAM_DASHBOARD_UI.md`. The old Overview led with generic
@@ -1103,7 +1130,7 @@ Tellur/
 | 16 | Cursor adapter implementation | 8.2 | ✅ Done | Cursor MCP/settings setup, VS Code-compatible extension capture, JSON/JSONL trace parsing, workspace detection, adapter tests |
 | 16a | Codex CLI adapter implementation | 8.2 | ✅ Done | JSONL event stream/session transcript import via `tellur import codex <file>`, command/prompt/file-write normalization, prompt hashing, strict JSONL errors |
 | 16b | GitHub Copilot adapter implementation | 8.2 | ✅ Done | Metadata JSON/JSONL import via `tellur import copilot <file>`, accepted suggestion + prompt metadata normalization, prompt hashing, no raw metadata payload |
-| 16c | Global agent/editor setup | 8.1/8.3/10/23 | ✅ Done | `tellur setup agents/status/uninstall/cursor/vscode/windsurf/gemini-cli/antigravity`, user-level Codex/Claude/Gemini/Antigravity hooks, Codex personal plugin scaffold, Antigravity MCP, Cursor MCP/settings, VS Code settings, Windsurf MCP/settings, extension save capture, generic hook ingest with auto-init |
+| 16c | Global agent/editor setup | 8.1/8.3/10/23 | ✅ Done | `tellur setup agents/status/uninstall/cursor/vscode/windsurf/gemini-cli/antigravity`; single-owner Codex personal-plugin hooks (legacy duplicate user hooks removed), user-level Claude/Gemini/Antigravity hooks, Antigravity MCP, Cursor MCP/settings, VS Code settings, Windsurf MCP/settings, extension save capture, generic hook ingest with auto-init |
 | 16d | Gemini CLI adapter implementation | 8.2 | ✅ Done | `tellur setup gemini-cli`, `~/.gemini/settings.json` hooks, JSONL import via `tellur import gemini-cli <file>`, prompt hashing and metadata sanitization |
 | 16e | Antigravity 2.0 adapter implementation | 8.2/23 | ✅ Done | `tellur setup antigravity`, `~/.gemini/config/hooks.json`, Antigravity app/CLI MCP configs, JSONL import via `tellur import antigravity <file>` |
 | 16f | Shared import loop | 8.2 | ✅ Done | `crates/adapters/src/import.rs`: tolerant JSONL/array/envelope/single-object reader, line-specific errors, sanitized+prompt-hashed payloads, nested-field extraction, numeric epoch timestamps. Reused by the adoption adapters below |
@@ -1200,18 +1227,18 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-313 Rust tests, 0 failures, 0 clippy warnings. `cargo deny check` green.
-(verified 2026-06-12 via `cargo test --workspace` with TELLUR_TEST_DATABASE_URL set)
-- core:      75  (schema/event round-trip, glob, storage, hash-chain verify+reseal,
+344 Rust tests, 0 failures, 0 clippy warnings; `cargo deny check` green.
+(verified 2026-07-13 via `cargo test`; Postgres tests no-op without `TELLUR_TEST_DATABASE_URL`)
+- core:      77  (75 library + 2 CLI-contract integration: schema/event round-trip, glob, storage, hash-chain verify+reseal,
              index session/attribution round-trip, capture pipeline, attribution,
              redaction, policy, export, PR report, team report, daemon/webhook)
-- adapters:  47  (Claude Code, Aider, Cursor, Codex, Copilot, Gemini CLI,
+- adapters:  51  (Claude Code, Aider, Cursor, Codex, Copilot, Gemini CLI,
              Antigravity, Windsurf, JetBrains, Devin, Continue, Cline/Roo, Generic,
              + shared import loop)
-- cli:       41  (12 unit incl. push high-water-mark/tombstones, prompt-excerpt
-             redaction, host/segment encoding; 29 integration incl. policy pull
-             from a live hub)
-- server:    150 (49 lib unit + 101 integration: auth/BOLA, ingest, repo RBAC,
+- cli:       50  (14 unit incl. Codex patch-path parsing, push high-water-mark/tombstones,
+             prompt-excerpt redaction, host/segment encoding; 36 integration incl.
+             exact/claimed notes, single-owner setup, live hook capture, and policy pull)
+- server:    166 (59 lib unit + 107 integration: auth/BOLA, ingest, repo RBAC,
              OIDC SSO + device login, SCIM users/groups, jobs, dashboard reads,
              attribution + tombstones, A12 source/blob proxy, dashboard routes,
              Postgres surface — Postgres tests run only with TELLUR_TEST_DATABASE_URL)

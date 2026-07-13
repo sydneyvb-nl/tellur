@@ -14,11 +14,11 @@ Usage:
    (or via `tellur notes install-config` for automatic fetch/rewrite).
 3. Open a PR — the workflow fetches `refs/notes/ai`, aggregates the range, and
    upserts a single comment with AI involvement by tool/model/author plus
-   provenance coverage.
+   commit- and line-level provenance coverage.
 
-It degrades gracefully: if Tellur is not yet installed/released, or no notes
-exist on the remote, the workflow skips or reports "without provenance" instead
-of failing the build.
+It degrades honestly: if no notes exist, actual added PR lines are reported as
+unknown with a `provenance unavailable` warning. Missing evidence is never
+presented as 0% AI involvement.
 
 See also the per-PR risk-report workflow in
 [`.github/workflows/tellur.yml`](../../.github/workflows/tellur.yml).

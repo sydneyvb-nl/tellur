@@ -270,6 +270,27 @@ pub(crate) enum NotesActions {
         #[arg(long)]
         print: bool,
     },
+    /// Explicitly attest that a missed commit's added lines were AI-authored
+    AttestAi {
+        /// Commit to annotate
+        #[arg(default_value = "HEAD")]
+        commit: String,
+        /// AI session that produced the commit
+        #[arg(long)]
+        session: String,
+        /// Agent/tool identifier
+        #[arg(long)]
+        agent: String,
+        /// Model identifier when known
+        #[arg(long, default_value = "unknown")]
+        model: String,
+        /// Notes ref to write
+        #[arg(long, default_value = tellur_core::notes::GIT_AI_NOTES_REF)]
+        notes_ref: String,
+        /// Replace an existing authorship note
+        #[arg(long)]
+        force: bool,
+    },
     /// Show and parse the authorship note for a commit
     Show {
         /// Commit to inspect

@@ -138,6 +138,7 @@ fn test_notes_help_lists_git_ai_commands() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("export"));
+    assert!(stdout.contains("attest-ai"));
     assert!(stdout.contains("show"));
     assert!(stdout.contains("refs/notes/ai"));
 }
@@ -165,6 +166,12 @@ fn test_setup_agents_installs_user_level_agent_editor_integrations() {
     fs::create_dir_all(&home).unwrap();
     fs::create_dir_all(home.join(".gemini/antigravity")).unwrap();
     fs::create_dir_all(home.join(".gemini/antigravity-cli")).unwrap();
+    fs::create_dir_all(home.join(".codex")).unwrap();
+    fs::write(
+        home.join(".codex/hooks.json"),
+        r#"{"hooks":{"PostToolUse":[{"hooks":[{"type":"command","command":"/tmp/tellur hooks ingest --source codex --auto-init"}]},{"hooks":[{"type":"command","command":"echo keep-me"}]}]}}"#,
+    )
+    .unwrap();
     fs::write(home.join(".gemini/antigravity/mcp_config.json"), "").unwrap();
     fs::write(home.join(".gemini/antigravity-cli/mcp_config.json"), " \n").unwrap();
 
@@ -180,10 +187,9 @@ fn test_setup_agents_installs_user_level_agent_editor_integrations() {
     assert_hook_command(&claude_settings, "UserPromptSubmit", "claude-code");
     assert_hook_command(&claude_settings, "PostToolUse", "claude-code");
 
-    let codex_hooks: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(home.join(".codex/hooks.json")).unwrap()).unwrap();
-    assert_hook_command(&codex_hooks, "UserPromptSubmit", "codex");
-    assert_hook_command(&codex_hooks, "PostToolUse", "codex");
+    let codex_hooks = fs::read_to_string(home.join(".codex/hooks.json")).unwrap();
+    assert!(!codex_hooks.contains("hooks ingest --source codex"));
+    assert!(codex_hooks.contains("echo keep-me"));
 
     let codex_plugin = home.join(".codex/plugins/tellur-provenance/.codex-plugin/plugin.json");
     assert!(codex_plugin.exists());
@@ -316,7 +322,7 @@ fn test_setup_agents_installs_user_level_agent_editor_integrations() {
     assert!(status.status.success());
     let status_stdout = String::from_utf8_lossy(&status.stdout);
     assert!(status_stdout.contains("Claude Code global hooks: installed"));
-    assert!(status_stdout.contains("Codex global hooks: installed"));
+    assert!(status_stdout.contains("Codex hook delivery: installed (personal plugin)"));
     assert!(status_stdout.contains("Codex personal plugin: installed"));
     assert!(status_stdout.contains("Cursor global integration: installed"));
     assert!(status_stdout.contains("VS Code global integration: installed"));
@@ -336,7 +342,7 @@ fn test_setup_agents_installs_user_level_agent_editor_integrations() {
     assert!(status.status.success());
     let status_stdout = String::from_utf8_lossy(&status.stdout);
     assert!(status_stdout.contains("Claude Code global hooks: missing"));
-    assert!(status_stdout.contains("Codex global hooks: missing"));
+    assert!(status_stdout.contains("Codex hook delivery: missing"));
     assert!(status_stdout.contains("Codex personal plugin: missing"));
     assert!(status_stdout.contains("Cursor global integration: missing"));
     assert!(status_stdout.contains("VS Code global integration: missing"));
@@ -594,6 +600,66 @@ fn test_hooks_ingest_post_tool_without_file_path_does_not_capture_whole_tree() {
 }
 
 #[test]
+fn test_hooks_ingest_codex_apply_patch_captures_listed_files() {
+    let dir = temp_repo();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(dir.join("src/lib.rs"), "fn before() {}\n").unwrap();
+    Command::new("git")
+        .args(["add", "src/lib.rs"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "baseline"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    require_binary()
+        .arg("init")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    fs::write(dir.join("src/lib.rs"), "fn after() {}\n").unwrap();
+
+    let mut child = require_binary()
+        .args(["hooks", "ingest", "--source", "codex", "--auto-init"])
+        .current_dir(&dir)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            serde_json::json!({
+                "session_id": "sess_apply_patch",
+                "hook_event_name": "PostToolUse",
+                "cwd": dir,
+                "model": "codex:gpt-5.6-sol",
+                "tool_name": "apply_patch",
+                "tool_input": {
+                    "patch": "*** Begin Patch\n*** Update File: src/lib.rs\n@@\n*** End Patch"
+                }
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap();
+    assert!(child.wait_with_output().unwrap().status.success());
+
+    let storage = RepoStorage::from_git_root(&dir).unwrap();
+    let index = TraceIndex::open(&storage.index_path).unwrap();
+    let attrs = index.get_file_attributions("src/lib.rs").unwrap();
+    assert_eq!(attrs.len(), 1);
+    assert_eq!(attrs[0].1.session_id, "sess_apply_patch");
+    assert_eq!(attrs[0].1.origin, Origin::Ai);
+    assert_eq!(attrs[0].1.model_id.as_deref(), Some("codex:gpt-5.6-sol"));
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn test_hooks_ingest_gemini_event_mapping_returns_json_response() {
     let dir = temp_repo();
     let mut child = require_binary()
@@ -775,6 +841,12 @@ fn test_notes_export_prints_and_writes_git_ai_note() {
 
     let storage = RepoStorage::from_git_root(&dir).unwrap();
     let index = TraceIndex::open(&storage.index_path).unwrap();
+    let blob = Command::new("git")
+        .args(["rev-parse", "HEAD:src.rs"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let blob = String::from_utf8(blob.stdout).unwrap().trim().to_string();
     index
         .index_attribution(
             &AttributionRange {
@@ -800,9 +872,34 @@ fn test_notes_export_prints_and_writes_git_ai_note() {
                 reviewed_at: None,
             },
             "src.rs",
-            "blob",
+            &blob,
             "2026-05-31T00:00:00Z",
         )
+        .unwrap();
+    let stale = AttributionRange {
+        range_id: "rng_stale".to_string(),
+        start_line: 1,
+        end_line: 1,
+        origin: Origin::Ai,
+        evidence_strength: EvidenceStrength::Recorded,
+        confidence: 1.0,
+        state: AttributionState::Exact,
+        session_id: "sess_stale".to_string(),
+        event_ids: vec![],
+        agent_id: "stale-agent".to_string(),
+        model_id: None,
+        prompt_hash: None,
+        context_set_id: None,
+        policy_tags: vec![],
+        risk_tags: vec![],
+        risk_level: None,
+        tests_run: vec![],
+        tests_passed: false,
+        reviewer: None,
+        reviewed_at: None,
+    };
+    index
+        .index_attribution(&stale, "src.rs", "old-blob", "2026-05-30T00:00:00Z")
         .unwrap();
 
     let printed = require_binary()
@@ -815,6 +912,7 @@ fn test_notes_export_prints_and_writes_git_ai_note() {
     assert!(stdout.contains("src.rs"));
     assert!(stdout.contains("\"schema_version\": \"authorship/3.0.0\""));
     assert!(stdout.contains("\"tool\": \"codex\""));
+    assert!(!stdout.contains("stale-agent"));
 
     let written = require_binary()
         .args(["notes", "export"])
@@ -841,6 +939,94 @@ fn test_notes_export_prints_and_writes_git_ai_note() {
     assert!(imported.status.success());
     let import_stdout = String::from_utf8_lossy(&imported.stdout);
     assert!(import_stdout.contains("Imported 1 attribution range"));
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_notes_attest_ai_marks_claimed_evidence_in_team_report() {
+    let dir = temp_repo();
+    fs::write(dir.join("baseline.txt"), "baseline\n").unwrap();
+    Command::new("git")
+        .args(["add", "baseline.txt"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "baseline"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    fs::write(dir.join("claimed.rs"), "fn ai_generated() {}\n").unwrap();
+    Command::new("git")
+        .args(["add", "claimed.rs"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "claimed change"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    require_binary()
+        .arg("init")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    let output = require_binary()
+        .args([
+            "notes",
+            "attest-ai",
+            "HEAD",
+            "--session",
+            "sess_claimed",
+            "--agent",
+            "codex",
+            "--model",
+            "gpt-5",
+        ])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("evidence: claimed"));
+    let duplicate = require_binary()
+        .args([
+            "notes",
+            "attest-ai",
+            "HEAD",
+            "--session",
+            "sess_other",
+            "--agent",
+            "codex",
+        ])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(!duplicate.status.success());
+    assert!(String::from_utf8_lossy(&duplicate.stderr).contains("pass --force"));
+
+    let base = Command::new("git")
+        .args(["rev-parse", "HEAD^"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let base = String::from_utf8(base.stdout).unwrap().trim().to_string();
+    let report = require_binary()
+        .args(["team", "report", "--base", &base, "--head", "HEAD"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        report.status.success(),
+        "{}",
+        String::from_utf8_lossy(&report.stderr)
+    );
+    let report = String::from_utf8_lossy(&report.stdout);
+    assert!(report.contains("AI-assisted lines: 1 (100.0%"), "{report}");
+    assert!(report.contains("claimed: 1"), "{report}");
+    assert!(report.contains("| Test | 1 | 0 |"), "{report}");
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1170,12 +1356,18 @@ fn test_team_report_aggregates_notes_over_range() {
 
     let storage = RepoStorage::from_git_root(&dir).unwrap();
     let index = TraceIndex::open(&storage.index_path).unwrap();
+    let blob = Command::new("git")
+        .args(["rev-parse", "HEAD:src.rs"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let blob = String::from_utf8(blob.stdout).unwrap().trim().to_string();
     index
         .index_attribution(
             &AttributionRange {
                 range_id: "rng_team".to_string(),
                 start_line: 1,
-                end_line: 5,
+                end_line: 1,
                 origin: Origin::Ai,
                 evidence_strength: EvidenceStrength::Recorded,
                 confidence: 1.0,
@@ -1195,7 +1387,7 @@ fn test_team_report_aggregates_notes_over_range() {
                 reviewed_at: None,
             },
             "src.rs",
-            "blob",
+            &blob,
             "2026-06-03T00:00:00Z",
         )
         .unwrap();
@@ -1218,7 +1410,8 @@ fn test_team_report_aggregates_notes_over_range() {
     let stdout = String::from_utf8_lossy(&report.stdout);
     assert!(stdout.contains("Tellur Team AI-Involvement Report"));
     assert!(stdout.contains("With provenance: 1"));
-    assert!(stdout.contains("AI-assisted lines: 5"));
+    assert!(stdout.contains("AI-assisted lines: 1"));
+    assert!(stdout.contains("100.0% coverage"));
     assert!(stdout.contains("claude-code"));
     assert!(stdout.contains("alice"));
 
@@ -1234,8 +1427,124 @@ fn test_team_report_aggregates_notes_over_range() {
     let parsed: serde_json::Value =
         serde_json::from_slice(&json.stdout).expect("team report --json must be valid JSON");
     assert_eq!(parsed["schema"], "tellur.team-report.v1");
-    assert_eq!(parsed["ai_lines"], 5);
+    assert_eq!(parsed["ai_lines"], 1);
     assert_eq!(parsed["commits_with_provenance"], 1);
+
+    // Removing the portable note must produce an explicit unknown state based
+    // on the real Git diff, never a false "0% AI" conclusion.
+    Command::new("git")
+        .args(["notes", "--ref", "refs/notes/ai", "remove", "HEAD"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let missing = require_binary()
+        .args(["team", "report", "--base", &base_sha, "--head", "HEAD"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(missing.status.success());
+    let missing_stdout = String::from_utf8_lossy(&missing.stdout);
+    assert!(missing_stdout.contains("Provenance unavailable"));
+    assert!(missing_stdout.contains("Unattributed added lines: 1"));
+    assert!(missing_stdout.contains("AI-assisted lines: **unknown**"));
+    assert!(!missing_stdout.contains("AI-assisted lines: 0"));
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_team_report_skips_base_branch_merge_commit_diff() {
+    let dir = temp_repo();
+    fs::write(dir.join("baseline.txt"), "baseline\n").unwrap();
+    Command::new("git")
+        .args(["add", "baseline.txt"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "baseline"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let base_branch = Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let base_branch = String::from_utf8(base_branch.stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+
+    Command::new("git")
+        .args(["switch", "-c", "feature"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    fs::write(dir.join("feature.txt"), "feature\n").unwrap();
+    Command::new("git")
+        .args(["add", "feature.txt"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "feature"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    Command::new("git")
+        .args(["switch", &base_branch])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    fs::write(dir.join("base-only.txt"), "base change\n").unwrap();
+    Command::new("git")
+        .args(["add", "base-only.txt"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "base change"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let base = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let base = String::from_utf8(base.stdout).unwrap().trim().to_string();
+
+    Command::new("git")
+        .args(["switch", "feature"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let merge = Command::new("git")
+        .args(["merge", "--no-edit", &base_branch])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(merge.status.success());
+    require_binary()
+        .arg("init")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+
+    let report = require_binary()
+        .args([
+            "team", "report", "--base", &base, "--head", "HEAD", "--json",
+        ])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(report.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&report.stdout).unwrap();
+    assert_eq!(report["commits_total"], 1);
+    assert_eq!(report["added_lines"], 1);
+    assert_eq!(report["unknown_lines"], 1);
 
     let _ = fs::remove_dir_all(&dir);
 }

@@ -312,11 +312,13 @@ or plugin in every project:
 tellur setup agents
 ```
 
-This installs global hooks for Claude Code (`~/.claude/settings.json`) and Codex
-(`~/.codex/hooks.json`). It publishes a local Codex personal plugin under
-`~/.codex/plugins/tellur-provenance` with a marketplace entry in
+This installs global hooks for Claude Code (`~/.claude/settings.json`). Codex
+hook delivery lives in one place: the generated personal plugin under
+`~/.codex/plugins/tellur-provenance`, enabled through the marketplace entry in
 `~/.agents/plugins/marketplace.json` for manual workflows such as status,
-verification, and PR reporting. It writes Gemini CLI hooks to
+verification, and PR reporting. Setup removes older Tellur entries from
+`~/.codex/hooks.json` so plugin and user-level hooks cannot double-record the
+same event. It writes Gemini CLI hooks to
 `~/.gemini/settings.json`, Antigravity hooks to `~/.gemini/config/hooks.json`,
 Antigravity MCP config to `~/.gemini/antigravity/mcp_config.json` and
 `~/.gemini/antigravity-cli/mcp_config.json`, Cursor MCP/settings
@@ -335,7 +337,9 @@ When a hook runs outside a Git repository it no-ops. When it runs inside a Git
 repository without `.tellur/`, `--auto-init` creates the local Tellur storage
 with safe defaults. To disable capture for a repository, create
 `.tellur/disable`. Invalid hook payloads no-op, and tool hooks only capture
-working-tree changes when the hook payload includes a concrete file path.
+working-tree changes when the hook payload includes a concrete file path. For
+Codex `apply_patch`, Tellur parses the patch envelope and captures every listed
+file; it still refuses to capture the whole tree when no path can be proven.
 
 Use `tellur setup status` to inspect installed global integrations and
 `tellur setup uninstall` to remove Tellur-installed global hooks and the local
@@ -353,7 +357,7 @@ run inside it, including Cline / Roo Code and Continue.
 | Surface | Setup command | Files written | Runtime behavior |
 | --- | --- | --- | --- |
 | Claude Code | `tellur setup claude-code` or `tellur setup agents` | `~/.claude/settings.json` | Lifecycle hooks call `tellur hooks ingest --source claude-code --auto-init`; project hooks remain available via `tellur hooks install claude-code`. |
-| Codex CLI/App | `tellur setup codex` or `tellur setup agents` | `~/.codex/hooks.json`, `~/.codex/plugins/tellur-provenance`, `~/.agents/plugins/marketplace.json` | User hooks call `tellur hooks ingest --source codex --auto-init`; local plugin exposes manual Tellur workflows through Codex's plugin directory. |
+| Codex CLI/App | `tellur setup codex` or `tellur setup agents` | `~/.codex/plugins/tellur-provenance`, `~/.agents/plugins/marketplace.json`, Codex `config.toml` plugin enablement | The personal plugin owns lifecycle hooks and calls `tellur hooks ingest --source codex --auto-init`; setup removes obsolete duplicate Tellur handlers from `~/.codex/hooks.json`. |
 | Gemini CLI | `tellur setup gemini-cli` or `tellur setup agents` | `~/.gemini/settings.json` | Gemini `BeforeTool`/`AfterTool`/agent/session hooks call `tellur hooks ingest --source gemini-cli --auto-init --json-response`. |
 | Antigravity 2.0 | `tellur setup antigravity` or `tellur setup agents` | `~/.gemini/config/hooks.json`, `~/.gemini/antigravity/mcp_config.json`, `~/.gemini/antigravity-cli/mcp_config.json` | Antigravity lifecycle hooks call `tellur hooks ingest --source antigravity --auto-init --json-response`; MCP exposes Tellur tools to Antigravity agents. |
 | Cursor | `tellur setup cursor` or `tellur setup agents` | `~/.cursor/mcp.json`, Cursor user `settings.json` | Cursor can call Tellur MCP tools; the installed Tellur extension uses auto-init, watch, and save capture with source `cursor`. |
@@ -443,7 +447,9 @@ AI-compatible `refs/notes/ai` namespace:
 
 ```bash
 tellur notes export --print   # inspect the note payload
-tellur notes export           # attach it to HEAD
+tellur notes export           # attach exact, blob-matched attribution to HEAD
+tellur notes attest-ai HEAD --session <id> --agent <tool> --model <model>
+                              # explicit recovery claim when live capture was missed
 tellur notes push             # publish refs/notes/ai
 tellur notes fetch            # fetch refs/notes/ai
 tellur notes import           # import a note back into Tellur's local index
@@ -452,7 +458,12 @@ tellur notes import           # import a note back into Tellur's local index
 Git notes are treated as an interoperability and transport layer, not as
 Tellur's primary database. Prompts, transcripts, redaction state, replay data,
 and policy evidence remain in Tellur's local/private storage; notes contain only
-line ranges, lightweight session metadata, and commit-scoped attribution.
+line ranges, lightweight session metadata, evidence strength, and commit-scoped
+attribution. Normal export only includes ranges whose file blob matches the
+commit and intersects that commit's added lines, preventing stale index state
+from being attached to a later commit. `attest-ai` is deliberately explicit and
+renders as `claimed`, never as live `recorded` evidence.
+It refuses to replace an existing note unless `--force` is passed.
 
 ## Team Reports (no server)
 
@@ -466,16 +477,24 @@ tellur team report --base main --head HEAD      # Markdown summary
 tellur team report --base main --head HEAD --json
 ```
 
-The report shows AI-assisted vs. human lines, a breakdown by tool / model /
-author, and provenance coverage (which commits in the range carry a note). It is
-tolerant: commits with no note — or an unparseable one — are listed under
-"without provenance" rather than failing the report. This is the no-server
+The report intersects each commit's portable note with its actual zero-context
+Git patch. Base-branch merge commits are excluded so their first-parent merge
+diff cannot inflate PR additions. It reports added/deleted PR lines,
+AI/human/unknown added lines, a
+breakdown by tool/model/author/evidence strength, and both commit and line-level provenance
+coverage. Missing or unparseable notes never become “0% AI”: the affected diff
+lines are explicitly unknown and the report is marked `missing` or `partial`.
+This is the no-server
 ("Tier 0") slice of the team/server roadmap; see
 [`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md).
 
 To post the report automatically on pull requests, copy the example workflow in
 [`docs/examples/github-actions-team-report.yml`](docs/examples/github-actions-team-report.yml)
 into `.github/workflows/`.
+
+The repository's own PR workflow uses this Git-notes report. It deliberately
+does not run the local-index `tellur pr-report` command in CI: a fresh checkout
+does not contain a developer's local SQLite attribution index.
 
 ## Self-Hosted Team Hub (preview)
 

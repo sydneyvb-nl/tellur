@@ -196,11 +196,15 @@ impl TraceIndex {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, COALESCE((SELECT event_count FROM sessions WHERE id = ?1), 0))
              ON CONFLICT(id) DO UPDATE SET
                 repo_id = excluded.repo_id,
-                started_at = excluded.started_at,
-                ended_at = excluded.ended_at,
+                started_at = CASE
+                    WHEN sessions.started_at = 'unknown' THEN excluded.started_at
+                    WHEN excluded.started_at < sessions.started_at THEN excluded.started_at
+                    ELSE sessions.started_at
+                END,
+                ended_at = COALESCE(excluded.ended_at, sessions.ended_at),
                 agent_id = excluded.agent_id,
                 agent_name = excluded.agent_name,
-                model_name = excluded.model_name,
+                model_name = COALESCE(excluded.model_name, sessions.model_name),
                 status = excluded.status",
             params![
                 session.id,
@@ -648,6 +652,48 @@ mod tests {
         assert_eq!(got[0].file_path, "src/lib.rs");
         assert_eq!(got[0].git_blob_sha, "blob_all");
         assert_eq!(got[0].range.range_id, "rng_all");
+    }
+
+    #[test]
+    fn reindexing_hook_session_preserves_original_start_and_model() {
+        use crate::schema::types::*;
+        let index = TraceIndex::open_in_memory().unwrap();
+        let actor = Actor {
+            name: "dev".to_string(),
+            email: None,
+            email_hash: None,
+            actor_type: EventActor::Human,
+        };
+        let agent = AgentInfo {
+            id: "codex".to_string(),
+            name: "Codex".to_string(),
+            version: None,
+        };
+        let mut first = Session::new("repo".to_string(), actor.clone(), agent.clone());
+        first.id = "sess_hook".to_string();
+        first.started_at = "2026-07-12T20:00:00Z".to_string();
+        first.model = Some(ModelInfo {
+            provider: "openai".to_string(),
+            name: "gpt-5".to_string(),
+            version: None,
+        });
+        index.index_session(&first).unwrap();
+
+        let mut later = Session::new("repo".to_string(), actor, agent);
+        later.id = "sess_hook".to_string();
+        later.started_at = "2026-07-12T20:10:00Z".to_string();
+        index.index_session(&later).unwrap();
+
+        let (started_at, model): (String, Option<String>) = index
+            .conn
+            .query_row(
+                "SELECT started_at, model_name FROM sessions WHERE id = 'sess_hook'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(started_at, "2026-07-12T20:00:00Z");
+        assert_eq!(model.as_deref(), Some("openai:gpt-5"));
     }
 
     #[test]

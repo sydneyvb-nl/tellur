@@ -141,6 +141,14 @@ async fn main() -> Result<()> {
                 notes_ref,
                 print,
             } => notes::cmd_notes_export(&commit, &notes_ref, print),
+            NotesActions::AttestAi {
+                commit,
+                session,
+                agent,
+                model,
+                notes_ref,
+                force,
+            } => notes::cmd_notes_attest_ai(&commit, &notes_ref, &session, &agent, &model, force),
             NotesActions::Show {
                 commit,
                 notes_ref,

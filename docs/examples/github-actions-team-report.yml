@@ -48,15 +48,16 @@ jobs:
         if: ${{ env.skip != 'true' }}
         run: |
           # Notes are not fetched by default; pull them if any contributor pushed.
-          git fetch origin "refs/notes/ai:refs/notes/ai" || \
+          git fetch origin "+refs/notes/ai:refs/notes/ai" || \
             echo "No refs/notes/ai on origin yet — report will show 'without provenance'."
 
       - name: Generate team report
         if: ${{ env.skip != 'true' }}
         env:
-          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          tellur team report --base "origin/$BASE_REF" --head HEAD > team-report.md || \
+          tellur team report --base "$BASE_SHA" --head "$HEAD_SHA" > team-report.md || \
             echo "_Tellur team report could not be generated._" > team-report.md
 
       - name: Comment PR
