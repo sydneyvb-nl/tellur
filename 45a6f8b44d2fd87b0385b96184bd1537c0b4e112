@@ -1,0 +1,95 @@
+.github/workflows/ci.yml
+  s_7a75557532985c::t_1af2679fd6dc25 154-187
+.github/workflows/release.yml
+  s_7a75557532985c::t_11f21661d00e41 25-27
+  s_7a75557532985c::t_db7d26e88f0a1b 46-52
+AGENTS.md
+  s_7a75557532985c::t_77b2b9e6969351 127
+CONTRIBUTING.md
+  s_7a75557532985c::t_16efe060e64419 108-114
+  s_7a75557532985c::t_605e0dcac602d7 88
+PROJECT_STATUS.md
+  s_7a75557532985c::t_27799e2a9db289 84-97
+  s_7a75557532985c::t_27d07faba171c2 3
+  s_7a75557532985c::t_3bff1ac67a99e9 1264
+  s_7a75557532985c::t_4957ca65266b5c 6
+  s_7a75557532985c::t_5f01869d23e2c3 53-54
+  s_7a75557532985c::t_757e4ce7adbf1a 1239
+  s_7a75557532985c::t_79d71b523bf89e 1166
+  s_7a75557532985c::t_9a138d82ed0bf0 11-12
+  s_7a75557532985c::t_9d79191c685db5 46
+  s_7a75557532985c::t_b7441dac3163cc 49
+  s_7a75557532985c::t_b90f8a10b5020b 1236
+  s_7a75557532985c::t_c6c11b25a77db4 31
+  s_7a75557532985c::t_ede743e77346d9 1250-1252
+README.md
+  s_7a75557532985c::t_418bfb7155f7c8 47-58
+  s_7a75557532985c::t_662951f8035026 61-65
+  s_7a75557532985c::t_8b31e231e22c1a 15-17
+  s_7a75557532985c::t_c115284bbf4203 23-27
+  s_7a75557532985c::t_ea3c94e0c6b282 88
+crates/cli/src/connect.rs
+  s_7a75557532985c::t_079170cb531051 4
+  s_7a75557532985c::t_3e4bfafaabcf16 80
+  s_7a75557532985c::t_5b7ca3e9361f2d 224-226
+  s_7a75557532985c::t_6cd2da78ad0c72 101
+  s_7a75557532985c::t_99c6feac44002e 137-151
+  s_7a75557532985c::t_f3e56d9c02214f 197-199
+  s_7a75557532985c::t_f8117a4a3e2e1d 213-216
+  s_7a75557532985c::t_fc20e1278e00e5 209
+crates/cli/src/hooks.rs
+  s_7a75557532985c::t_8179a590419eaf 10
+  s_7a75557532985c::t_aa53dfb2dcf729 400-402
+crates/cli/src/hub.rs
+  s_7a75557532985c::t_0ae7aee8fd6e27 36-37
+  s_7a75557532985c::t_b8f080cb9c0332 32-33
+crates/cli/src/onboarding.rs
+  s_7a75557532985c::t_03871fb27ce0f8 121-125
+  s_7a75557532985c::t_337e4dd2c06eb9 15
+  s_7a75557532985c::t_363dbe6c959fb1 35
+  s_7a75557532985c::t_5e1fc17a0ec91e 40-63
+  s_7a75557532985c::t_786c87b55fe2d0 94-104
+  s_7a75557532985c::t_9d9d9eca50a615 69
+  s_7a75557532985c::t_9f32eed16ab2e1 88
+  s_7a75557532985c::t_cc2c36c7918252 166
+  s_7a75557532985c::t_e2b36cc7f1131a 79
+crates/cli/src/push.rs
+  s_7a75557532985c::t_13144e7878baf4 457-494
+  s_7a75557532985c::t_4199f634d4a8c1 107-109
+  s_7a75557532985c::t_78fb82fbca3aa9 13-15
+  s_7a75557532985c::t_8ec1a275180924 23-28
+  s_7a75557532985c::t_9d4106ba357012 141-147
+crates/cli/src/repo.rs
+  s_7a75557532985c::t_2af8e88a0b3a18 26
+  s_7a75557532985c::t_582d2b5e4e4ca1 13-14
+  s_7a75557532985c::t_648e1f24e5b657 31-32
+  s_7a75557532985c::t_7c94879b8f55c5 150
+  s_7a75557532985c::t_c37dc3d65a34bd 19-21
+crates/cli/tests/cli_integration.rs
+  s_7a75557532985c::t_42175999f50300 1783-1801
+  s_7a75557532985c::t_9b1d0246698da5 522-523
+  s_7a75557532985c::t_c89215cdf4b330 1080-1083
+docs/ADAPTERS.md
+  s_7a75557532985c::t_26feb79b46eba6 25-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "tellur/0.1.0",
+  "base_commit_sha": "45a6f8b44d2fd87b0385b96184bd1537c0b4e112",
+  "prompts": {},
+  "humans": {},
+  "sessions": {
+    "s_7a75557532985c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "sess_codex_pr52_release_readiness",
+        "model": "openai:gpt-5"
+      },
+      "human_author": "sydneyvb-nl",
+      "custom_attributes": {
+        "tellur.confidence": "1.00",
+        "tellur.evidence_strength": "claimed"
+      }
+    }
+  }
+}
