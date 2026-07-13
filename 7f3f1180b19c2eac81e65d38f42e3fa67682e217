@@ -77,7 +77,7 @@ docs/examples/github-actions-team-report.yml
         "id": "019f57bb-0fda-7dd3-a201-c3970b023ebf",
         "model": "codex:gpt-5.6-sol"
       },
-      "human_author": "sydneyvb-nl\n",
+      "human_author": "sydneyvb-nl",
       "custom_attributes": {
         "tellur.confidence": "1.00",
         "tellur.evidence_strength": "claimed"
