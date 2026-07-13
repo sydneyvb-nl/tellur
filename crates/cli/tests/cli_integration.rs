@@ -1803,6 +1803,58 @@ fn test_unified_setup_is_idempotent_and_configures_repo_and_machine() {
     let _ = fs::remove_dir_all(&home);
 }
 
+#[cfg(unix)]
+#[test]
+fn test_setup_status_distinguishes_editor_packages_from_settings() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = temp_repo();
+    let home = std::env::temp_dir().join(format!(
+        "tellur-package-status-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let bin = home.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let code = bin.join("code");
+    fs::write(&code, "#!/bin/sh\nprintf 'tellur.tellur-vscode\\n'\n").unwrap();
+    let mut permissions = fs::metadata(&code).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&code, permissions).unwrap();
+
+    let jetbrains_root = if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/JetBrains/IntelliJIdea2025.1")
+    } else {
+        home.join(".local/share/JetBrains/IntelliJIdea2025.1")
+    };
+    fs::create_dir_all(jetbrains_root.join("plugins/tellur-jetbrains")).unwrap();
+
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let output = tellur()
+        .args(["setup", "status", "--home", home.to_str().unwrap()])
+        .current_dir(&dir)
+        .env("HOME", &home)
+        .env("PATH", path)
+        .env_remove("XDG_DATA_HOME")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("VS Code extension package: installed"));
+    assert!(stdout.contains("JetBrains plugin package: installed"));
+    assert!(stdout.contains("VS Code extension settings: missing"));
+
+    let _ = fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(&home);
+}
+
 #[test]
 fn test_connect_without_remote_does_not_create_phantom_remote() {
     // A fresh repo with no `origin`: connect must not write remote.origin.fetch,

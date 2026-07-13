@@ -84,7 +84,8 @@ section of [`AGENTS.md`](./AGENTS.md) for details.
 The supported end-user onboarding and configuration-reconciliation paths are:
 
 ```bash
-tellur setup             # machine + current repo + optional Team Hub
+curl -fsSL https://github.com/sydneyvb-nl/tellur/releases/latest/download/install.sh | bash
+tellur setup             # wizard, normally launched by the installer
 tellur setup update      # refresh generated paths/hooks after a binary upgrade
 tellur setup status      # combined machine/current-repo health
 ```
@@ -100,6 +101,11 @@ tellur setup windsurf    # Windsurf MCP/settings only
 tellur setup gemini-cli  # Gemini CLI hooks only
 tellur setup antigravity # Antigravity hooks/MCP only
 ```
+
+Release packaging is defined in `.github/workflows/release.yml`. Every `v*` tag
+builds platform CLI archives, a version-matched VSIX, a version-matched
+JetBrains ZIP, SHA-256 sidecars, and the two bootstrap installers. CI builds both
+editor packages and runs the Unix installer E2E test before changes can merge.
 
 Devin (cloud agent) has no local editor surface; capture it live by POSTing its
 webhook to the local daemon's `POST /webhook/devin` endpoint. JetBrains live

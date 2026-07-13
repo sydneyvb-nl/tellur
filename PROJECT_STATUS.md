@@ -29,13 +29,13 @@ timeline are all shipped.
   `TELLUR_TEST_DATABASE_URL` (local: `postgres://postgres@127.0.0.1:5433/tellur_test`).
 
 **Open work (priority order):**
-1. **Marketplace distribution + unified installation** — the CLI now has one
-   idempotent `tellur setup` wizard for machine integrations, current-repo Git
-   automation, optional Team Hub login, and background synchronization, plus
-   `tellur setup update` for path/config reconciliation. Remaining: publish
-   signed VS Code and JetBrains marketplace packages and teach setup to verify
-   or install them. Until then, settings are reported as prepared rather than
-   an extension being falsely reported as installed.
+1. **Activate the first public release** — release automation now builds five
+   platform CLI archives, SHA-256 sidecars, a version-matched VSIX, a
+   version-matched JetBrains ZIP, and Unix/Windows bootstrap installers. The
+   installer deploys packages into detected editors and launches the unified
+   wizard; CI builds both packages and exercises the Unix path E2E. Remaining
+   external step: after this PR merges, publish the first `v*` tag from `main`
+   so the stable `/releases/latest/download/install.*` URLs become live.
 2. **Zero-touch + GitHub App** — design merged in
    [`docs/proposals/GITHUB_APP.md`](docs/proposals/GITHUB_APP.md). **P1 `tellur
    connect`** is **complete** (git hooks + opt-in `--background` push service).
@@ -51,8 +51,9 @@ timeline are all shipped.
    tests; a maintainer must verify them against a real GitHub App (App id +
    private key + webhook secret) — there is no live App in CI.
    Live setup walkthrough: [`docs/GITHUB_APP_SETUP.md`](docs/GITHUB_APP_SETUP.md).
-3. **Packaged releases** — GitHub Release automation exists; the **npm wrapper +
-   Homebrew formula** (`dist/`) are not finished.
+3. **Additional package registries** — the direct GitHub installer is complete;
+   the npm wrapper and Homebrew formula (`dist/`) remain unfinished optional
+   distribution channels.
 4. **`docs/DEPLOYMENT.md`** (Fly.io / Cloud Run + managed Postgres + TLS + OIDC
    walkthrough) and **`docs/SSO.md`** (Keycloak quickstart + the Entra ID
    `email_verified` caveat) — offered, not yet written; the missing piece for
@@ -80,9 +81,13 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > health. The pre-push hook now configures Git-note fetch/rewrite support itself
 > when a remote is added after onboarding, and notes config writes are
 > idempotent. Rewrote the README around this single journey and removed false
-> distribution claims: VS Code settings can be prepared, but neither the VS Code
-> nor JetBrains package is publicly listed yet. Granular setup/connect commands
-> remain for compatibility and recovery.
+> distribution claims. Follow-up packaging in the same PR adds a single stable
+> install URL per operating-system family, checksum-verified binary downloads,
+> version-matched VSIX and JetBrains ZIP assets, automatic installation into
+> detected editors, package-aware setup status, a Unix installer E2E test, and
+> a Windows installer E2E CI job.
+> Marketplace listing is now optional for discovery rather than a blocker.
+> Granular setup/connect commands remain for compatibility and recovery.
 
 > **2026-07-13 — End-to-end Codex capture and evidence-aware PR provenance.** On
 > `fix/pr-provenance-evidence-states`. Replaced the broken CI use of local-index
@@ -1152,7 +1157,7 @@ Tellur/
 | 16 | Cursor adapter implementation | 8.2 | ✅ Done | Cursor MCP/settings setup, VS Code-compatible extension capture, JSON/JSONL trace parsing, workspace detection, adapter tests |
 | 16a | Codex CLI adapter implementation | 8.2 | ✅ Done | JSONL event stream/session transcript import via `tellur import codex <file>`, command/prompt/file-write normalization, prompt hashing, strict JSONL errors |
 | 16b | GitHub Copilot adapter implementation | 8.2 | ✅ Done | Metadata JSON/JSONL import via `tellur import copilot <file>`, accepted suggestion + prompt metadata normalization, prompt hashing, no raw metadata payload |
-| 16c | Unified agent/editor/repo setup | 8.1/8.3/10/23 | ✅ Done | `tellur setup` wizard + `setup update/status`; optional Team Hub login/background sync; idempotent repo Git hooks and Git-note config; granular `setup agents/uninstall/cursor/vscode/windsurf/gemini-cli/antigravity` recovery surfaces; single-owner Codex personal-plugin hooks, user-level Claude/Gemini/Antigravity hooks, MCP/settings generation. VS Code/JetBrains marketplace distribution remains open. |
+| 16c | Unified agent/editor/repo setup | 8.1/8.3/10/23 | ✅ Done | Single-command release installers deploy the CLI + VSIX + JetBrains ZIP and launch `tellur setup`; wizard + `setup update/status`; optional Team Hub login/background sync; idempotent repo Git hooks and Git-note config; package-aware editor status; granular recovery surfaces; single-owner Codex personal-plugin hooks, user-level Claude/Gemini/Antigravity hooks, MCP/settings generation. First public tag remains an external release step. |
 | 16d | Gemini CLI adapter implementation | 8.2 | ✅ Done | `tellur setup gemini-cli`, `~/.gemini/settings.json` hooks, JSONL import via `tellur import gemini-cli <file>`, prompt hashing and metadata sanitization |
 | 16e | Antigravity 2.0 adapter implementation | 8.2/23 | ✅ Done | `tellur setup antigravity`, `~/.gemini/config/hooks.json`, Antigravity app/CLI MCP configs, JSONL import via `tellur import antigravity <file>` |
 | 16f | Shared import loop | 8.2 | ✅ Done | `crates/adapters/src/import.rs`: tolerant JSONL/array/envelope/single-object reader, line-specific errors, sanitized+prompt-hashed payloads, nested-field extraction, numeric epoch timestamps. Reused by the adoption adapters below |
@@ -1215,17 +1220,17 @@ Tellur/
 | 43 | SLSA/SPDX export | 20 | ✅ Done | SLSA v1.0 provenance + SPDX 2.3 SBOM with AI metadata, 2 tests | |
 | 44 | HTTP daemon (axum) | 22 | ✅ Done | `tellur daemon` (loopback-only, token-auth, Host check). Server **recomputes the hash chain** via EventWriter — clients cannot forge provenance. 7 endpoints incl. `POST /webhook/{source}` for cloud-agent (Devin) live capture. |
 | 45 | MCP server | 23 | ✅ Done | `tellur mcp` — real stdio JSON-RPC 2.0 (initialize/tools/list/tools/call). 6 tools backed by actual index/policy/verify queries. |
-| 46 | Team/server mode | §6.11 / §16.2 L5 / §32 Step 20 | ✅ In preview | Tier 0 (`tellur team report`) and Tier 1 self-host hub (`crates/server` / `tellur-server`) are implemented through ingest/read/report/policy/export, metrics, Docker packaging, policy pull, and repo SLSA/SPDX export, on **either SQLite (default) or Postgres** (`TELLUR_DATABASE_URL`), plus enterprise per-repo RBAC, OIDC SSO, and SCIM user provisioning. Remaining: durable jobs and SCIM Group sync. |
+| 46 | Team/server mode | §6.11 / §16.2 L5 / §32 Step 20 | ✅ In preview | Tier 0 and the self-host hub include ingest/read/report/policy/export, SQLite/Postgres, per-repo RBAC, OIDC SSO/device login, SCIM users + role groups, durable jobs, source proxy, GitHub App integration, and the embedded dashboard. Production deployment docs and hosted operations remain open. |
 | 47 | Plugin/adapter SDK | §8.3 / §32 Step 18 | ❌ Not started | Requires stable adapter/event API |
 
 ### Phase 7: Distribution (PRD sectie 32.3)
 
 | # | Module | PRD Sectie | Status | Details |
 |---|--------|-----------|--------|---------|
-| 48 | Cross-compilation | 32.3 | ✅ Done | mac arm64/x64 + linux x64 (musl), 3.7-4.4MB binaries | |
-| 49 | Homebrew formula | 32.3 | ✅ Done | `dist/tellur.rb` (build-from-source; `sha256` placeholder to fill at release tag) |
-| 50 | npm package (CLI wrapper) | 32.3 | ✅ Done | JS API wrapper + CLI runner + post-install downloader that **verifies SHA-256** against the release `.sha256` sidecar before installing |
-| 51 | GitHub Release automation | 32.3 | ✅ Done | 5-target matrix build on tag push | |
+| 48 | Cross-compilation | 32.3 | ✅ Done | macOS arm64/x64, Linux musl arm64/x64, Windows x64; canonical archives + SHA-256 sidecars. |
+| 49 | Homebrew formula | 32.3 | ⚠️ Template only | `dist/tellur.rb` still has a placeholder checksum and is not a usable published channel; the GitHub installer is supported. |
+| 50 | npm package (CLI wrapper) | 32.3 | ⚠️ Implemented, unpublished | JS wrapper + SHA-256-verifying downloader; unsupported until the package and release assets are published. |
+| 51 | GitHub Release automation | 32.3 | ✅ Done | Five CLI targets + checksums, version-matched VSIX, JetBrains ZIP, Unix/Windows installers. CI builds editor packages and exercises both installers E2E. First `v*` tag from merged `main` remains. |
 
 ---
 
@@ -1249,17 +1254,19 @@ Deze onderdelen staan in de PRD maar zijn bewust overgeslagen of vereisen Sydney
 ## Huidige Test Status
 
 ```
-344 Rust tests, 0 failures, 0 clippy warnings; `cargo deny check` green.
+352 Rust tests, 0 failures, 0 clippy warnings; `cargo deny check` green.
 (verified 2026-07-13 via `cargo test`; Postgres tests no-op without `TELLUR_TEST_DATABASE_URL`)
 - core:      77  (75 library + 2 CLI-contract integration: schema/event round-trip, glob, storage, hash-chain verify+reseal,
              index session/attribution round-trip, capture pipeline, attribution,
              redaction, policy, export, PR report, team report, daemon/webhook)
-- adapters:  51  (Claude Code, Aider, Cursor, Codex, Copilot, Gemini CLI,
+- adapters:  56  (Claude Code, Aider, Cursor, Codex, Copilot, Gemini CLI,
              Antigravity, Windsurf, JetBrains, Devin, Continue, Cline/Roo, Generic,
              + shared import loop)
-- cli:       50  (14 unit incl. Codex patch-path parsing, push high-water-mark/tombstones,
-             prompt-excerpt redaction, host/segment encoding; 36 integration incl.
-             exact/claimed notes, single-owner setup, live hook capture, and policy pull)
+- cli:       53  (15 unit incl. setup URL validation, Codex patch-path parsing,
+             push high-water-mark/tombstones, prompt-excerpt redaction,
+             host/segment encoding; 38 integration incl. unified setup/package
+             status, exact/claimed notes, single-owner setup, live hook capture,
+             and policy pull)
 - server:    166 (59 lib unit + 107 integration: auth/BOLA, ingest, repo RBAC,
              OIDC SSO + device login, SCIM users/groups, jobs, dashboard reads,
              attribution + tombstones, A12 source/blob proxy, dashboard routes,
@@ -1328,13 +1335,13 @@ ad1131c Merge #38 fix(dashboard): serve app shell for file-provenance deep links
    any VS Code-family editor; JetBrains live via the `editor/tellur-jetbrains`
    IntelliJ plugin (`VFS_CHANGES` → `hooks ingest`); Devin live via the daemon
    `POST /webhook/devin` endpoint. Remaining (optional): lifecycle-hook capture
-   for Windsurf/JetBrains if/when they document a local hook API; publish the
-   JetBrains plugin to the Marketplace.
+   for Windsurf/JetBrains if/when they document a local hook API. Marketplace
+   publication is optional discovery work; direct release packages are built.
 8. **Team/server mode** — proposal
    [`docs/proposals/TEAM_SERVER_MODE.md`](docs/proposals/TEAM_SERVER_MODE.md);
    reconciled with PRD §6.11 / §16.2 Layer 5 / §32 Step 20.
    **Tier 0 ✅ done** (`tellur team report` + example PR CI).
-   **Tier 1 in progress** per
+   **Tier 1 implementation complete/in preview** per
    [`docs/proposals/TEAM_SERVER_IMPLEMENTATION.md`](docs/proposals/TEAM_SERVER_IMPLEMENTATION.md)
    (B0–B6). **B0 ✅** scaffolding (config, errors, Store+SQLite, health, SECURITY/
    STRIDE/cargo-deny/CI). **B1 ✅** (branch `feat/server-b1-identity-tenancy`):

@@ -4,6 +4,7 @@
 //! plugin hook surface.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{Context, Result};
 
@@ -58,7 +59,7 @@ pub(crate) fn cmd_setup_agents(home: Option<&Path>) -> Result<()> {
         cursor_mcp_path(&home).display()
     );
     println!(
-        "  VS Code extension settings (extension distributed separately): {}",
+        "  VS Code extension settings: {}",
         vscode_user_settings_path(&home).display()
     );
     println!(
@@ -208,7 +209,68 @@ pub(crate) fn cmd_setup_status(home: Option<&Path>) -> Result<()> {
         "Antigravity global integration: {}",
         if antigravity { "installed" } else { "missing" }
     );
+    for (label, command) in [
+        ("VS Code extension package", "code"),
+        ("Cursor extension package", "cursor"),
+        ("Windsurf extension package", "windsurf"),
+    ] {
+        let status = match editor_extension_status(command) {
+            Some(true) => "installed",
+            Some(false) => "missing",
+            None => "editor CLI not detected",
+        };
+        println!("{label}: {status}");
+    }
+    println!(
+        "JetBrains plugin package: {}",
+        if jetbrains_plugin_status(&home) {
+            "installed"
+        } else {
+            "not detected"
+        }
+    );
     Ok(())
+}
+
+fn editor_extension_status(command: &str) -> Option<bool> {
+    let output = Command::new(command)
+        .arg("--list-extensions")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return Some(false);
+    }
+    Some(
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .any(|extension| {
+                extension
+                    .trim()
+                    .eq_ignore_ascii_case("tellur.tellur-vscode")
+            }),
+    )
+}
+
+fn jetbrains_plugin_status(home: &Path) -> bool {
+    let roots = if cfg!(target_os = "macos") {
+        vec![home.join("Library/Application Support/JetBrains")]
+    } else if cfg!(windows) {
+        vec![home.join("AppData/Roaming/JetBrains")]
+    } else {
+        vec![
+            std::env::var_os("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join(".local/share"))
+                .join("JetBrains"),
+        ]
+    };
+    roots.into_iter().any(|root| {
+        std::fs::read_dir(root).is_ok_and(|products| {
+            products
+                .filter_map(Result::ok)
+                .any(|product| product.path().join("plugins/tellur-jetbrains").is_dir())
+        })
+    })
 }
 
 pub(crate) fn cmd_setup_uninstall(home: Option<&Path>) -> Result<()> {

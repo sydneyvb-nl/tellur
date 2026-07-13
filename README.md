@@ -11,21 +11,31 @@ Tellur is local-first. Capture and inspection work without a cloud account. An
 optional self-hosted Team Hub adds shared policy, repository access controls,
 central reporting, SSO/SCIM, audit history, and organization-wide provenance.
 
-> **Project status:** Tellur is pre-release software. The source builds and test
-> suites are the supported distribution today; public CLI packages and editor
-> marketplace listings have not been released yet. See
+> **Project status:** Tellur is pre-release software. The repository contains a
+> verified release pipeline and single-command installers; the first public tag
+> still needs to be published from `main`. Marketplace listings are optional:
+> the installer uses GitHub-hosted, checksum-verified VSIX and JetBrains ZIP
+> release assets directly. See
 > [PROJECT_STATUS.md](PROJECT_STATUS.md) for the dated implementation status and
 > known blockers.
 
 ## The one setup flow
 
-Install the CLI from this checkout, enter the Git repository you want Tellur to
-protect, and run the setup wizard:
+Open a terminal in the Git repository you want Tellur to protect, then run the
+installer for your platform. It downloads a checksum-verified CLI, installs the
+Tellur package into detected VS Code, Cursor, Windsurf, and JetBrains products,
+and immediately starts the setup wizard.
+
+macOS or Linux:
 
 ```bash
-cargo install --path crates/cli --locked
-cd /path/to/your/repository
-tellur setup
+curl --proto '=https' --tlsv1.2 -fsSL https://github.com/sydneyvb-nl/tellur/releases/latest/download/install.sh | bash
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://github.com/sydneyvb-nl/tellur/releases/latest/download/install.ps1 | iex
 ```
 
 That is the normal setup path. The wizard is safe to run again and:
@@ -52,16 +62,17 @@ tellur setup --hub https://tellur.example.com --yes --no-browser
 The wizard accepts HTTPS Team Hub URLs. Plain HTTP is accepted only for
 `localhost` and `127.0.0.1` development hubs.
 
-After replacing or moving the CLI binary, reconcile every generated command,
-Git hook, and existing background service with:
+To update Tellur, rerun the same installer. It replaces the CLI, updates the
+editor packages, and starts the idempotent wizard. If you only moved an existing
+binary, reconcile every generated command, Git hook, and background service
+without downloading anything:
 
 ```bash
 tellur setup update
 ```
 
-This updates the **configuration to the currently running binary**. It does not
-download a new Tellur release; there is no public release channel yet. Reinstall
-the newer source/package first, then run `tellur setup update`.
+`tellur setup update` updates the **configuration to the currently running
+binary**; the installer is the product-update mechanism.
 
 Inspect the complete machine and current-repository setup at any time:
 
@@ -79,10 +90,12 @@ pushes flush local events to the configured Team Hub. Hub failures never block
 Prompt content is not stored by default. Tellur stores prompt hashes and
 redacted metadata; a repository must explicitly enable redacted prompt excerpts.
 
-### Editor distribution status
+### Editor package installation
 
-The setup wizard writes the supported hook, MCP, and editor settings, but it
-does not pretend that an editor extension package was installed:
+Release assets contain one VSIX for VS Code-compatible editors and one JetBrains
+plugin ZIP. The installer detects installed products and deploys those packages
+before the wizard writes their settings. `tellur setup status` checks package
+presence separately from configuration presence.
 
 | Surface | Capture mechanism | Setup status |
 | --- | --- | --- |
@@ -92,15 +105,15 @@ does not pretend that an editor extension package was installed:
 | Antigravity | Native hooks + MCP | Configured automatically |
 | Cursor | MCP + VS Code-compatible settings | Configured automatically |
 | Windsurf | MCP + VS Code-compatible settings | Configured automatically |
-| VS Code | Tellur extension settings | Prepared; extension is not yet on the Marketplace |
-| JetBrains IDEs | Tellur plugin | Source build exists; plugin is not yet on Marketplace |
+| VS Code | Tellur extension save/watch capture | Release VSIX installed automatically when `code` is detected |
+| JetBrains IDEs | Tellur VFS plugin | Release ZIP installed automatically into detected products |
 | Aider, Copilot logs, Continue, Cline | Explicit import | Available, not live lifecycle capture |
 | Devin | Authenticated daemon webhook | Available when a webhook is configured |
 
-The VS Code extension and JetBrains plugin live in `editor/`. Until signed
-marketplace packages exist, source builds are development/verification paths,
-not a production installation promise. The exact mechanics and limitations for
-every adapter are documented in [docs/ADAPTERS.md](docs/ADAPTERS.md).
+The VS Code extension and JetBrains plugin live in `editor/`. Marketplace
+publication can improve discovery later, but is not required for the supported
+installer path. The exact mechanics and limitations for every adapter are
+documented in [docs/ADAPTERS.md](docs/ADAPTERS.md).
 
 ## What Tellur gives developers
 
@@ -243,6 +256,13 @@ cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test
 cargo deny check
+```
+
+For source development, install the current CLI checkout with:
+
+```bash
+cargo install --path crates/cli --locked --force
+tellur setup update
 ```
 
 The dashboard, VS Code extension, and JetBrains plugin use their own toolchains.

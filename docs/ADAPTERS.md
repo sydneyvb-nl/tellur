@@ -12,9 +12,11 @@ Last updated: 2026-07-13
   `tellur setup update` re-resolves every generated command to the currently
   running binary. Granular `tellur setup <tool>` commands are recovery and
   development surfaces, not the normal user journey.
-- Setup prepares VS Code-family settings but does not install an extension
-  package. The VS Code and JetBrains packages are not yet publicly listed in
-  their marketplaces, so status must not report those packages as installed.
+- GitHub Releases publish a VS Code-compatible VSIX and JetBrains plugin ZIP.
+  The single-command installer deploys them into detected products before
+  starting `tellur setup`; setup status reports package presence separately
+  from settings. Marketplace listings are not required for this release-asset
+  path.
 - The VS Code-family extension declares itself a workspace extension and waits
   for Workspace Trust before running the CLI. It initializes/watches every
   workspace root independently and follows roots added or removed at runtime.
@@ -61,7 +63,7 @@ Last updated: 2026-07-13
 | Gemini CLI | User hooks and JSONL import | `tellur setup gemini-cli` writes Gemini's documented `~/.gemini/settings.json` hooks for `BeforeTool`, `AfterTool`, agent, and session events. Hook commands return `{}` on stdout as Gemini requires. |
 | Google Antigravity 2.0 | User hooks, MCP, JSONL import | `tellur setup antigravity` writes Antigravity hooks under `~/.gemini/config/hooks.json` and MCP configs under `~/.gemini/antigravity*/mcp_config.json`. |
 | Cursor IDE/CLI | VS Code-compatible extension capture, global MCP, JSON/JSONL import | `tellur setup cursor` writes Cursor user settings and `~/.cursor/mcp.json`. Cursor does not currently expose a documented local IDE lifecycle hook equivalent to Codex hooks, so live capture is handled by the extension save/watch path and Cursor CLI traces can still be imported. |
-| VS Code/Copilot | VS Code extension save/watch capture, metadata JSON/JSONL import | `tellur setup` writes settings for the extension but does not install its package. Once installed, the extension can auto-init, watch, and capture saved files in every Git workspace. Prompt capture remains explicit because VS Code does not expose arbitrary Copilot prompts to extensions. |
+| VS Code/Copilot | VS Code extension save/watch capture, metadata JSON/JSONL import | The release installer installs the checksum-verified VSIX when the `code` CLI is detected, then `tellur setup` writes settings so the extension can auto-init, watch, and capture saved files in every Git workspace. Prompt capture remains explicit because VS Code does not expose arbitrary Copilot prompts to extensions. |
 | GitHub Copilot | Metadata JSON/JSONL/array/envelope import | Import-only. Handles editor/telemetry harness wrappers and preserves completion/suggestion correlation metadata. Does not intercept Copilot prompts directly because VS Code does not expose that API to extensions. |
 | Windsurf / Cascade | VS Code-compatible extension capture, global MCP, JSON/JSONL session import | `tellur setup windsurf` writes Windsurf user settings and `~/.codeium/windsurf/mcp_config.json`. Windsurf is a VS Code-compatible editor, so live capture is handled by the extension save/watch path (source `windsurf`); Cascade session exports can still be imported. |
 | JetBrains AI Assistant / Junie | JetBrains plugin save/watch capture + JSON/JSONL action-log import | The `editor/tellur-jetbrains` plugin subscribes to IDE virtual-file changes, coalesces duplicate file events, and routes saved/created files through a disposable bounded single-worker queue to `tellur hooks ingest --source jetbrains --auto-init`, capturing AI Assistant and Junie edits live. If a duplicate arrives while capture is already running, one follow-up capture is queued so the final file state is not dropped. Non-zero CLI exits and timeouts are logged. Exported action logs can still be imported. JetBrains MCP is configured in-IDE, not through a stable global config file, so Tellur does not auto-write it. |
@@ -119,8 +121,9 @@ Next candidates, when they expose durable capture surfaces:
    document a local hook API (today only Codex, Claude Code, Gemini CLI, and
    Antigravity do); the JetBrains plugin's VFS capture is the current best
    available surface.
-2. Publishing signed JetBrains Marketplace and VS Code Marketplace packages,
-   then teaching the unified setup wizard to verify those installed packages.
+2. Optional JetBrains Marketplace and VS Code Marketplace publication for
+   discovery. Direct, checksum-verified release-package installation is already
+   the supported zero-touch path.
 
 ## Known Limits
 

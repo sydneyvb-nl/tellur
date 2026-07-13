@@ -106,6 +106,51 @@ jobs:
         with:
           command: check
 
+  editor-packages:
+    name: editor release packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: editor/tellur-vscode/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+      - name: Validate installers
+        run: |
+          bash -n install.sh
+          bash dist/tests/install-sh-e2e.sh
+          pwsh -NoProfile -Command '$null = [scriptblock]::Create((Get-Content -Raw install.ps1))'
+      - name: Build VS Code-compatible VSIX
+        working-directory: editor/tellur-vscode
+        run: |
+          npm ci
+          npm run test:unit
+          npx vsce package --no-dependencies --out ../../tellur-vscode.vsix
+          test -s ../../tellur-vscode.vsix
+      - name: Build JetBrains plugin ZIP
+        working-directory: editor/tellur-jetbrains
+        run: |
+          ./gradlew buildPlugin
+          cp build/distributions/*.zip ../../tellur-jetbrains.zip
+          test -s ../../tellur-jetbrains.zip
+
+  windows-installer:
+    name: Windows installer E2E
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p tellur-cli --bin tellur
+      - run: ./dist/tests/install-ps1-e2e.ps1
+        shell: pwsh
+
   docker:
     name: build tellur-server image
     runs-on: ubuntu-latest

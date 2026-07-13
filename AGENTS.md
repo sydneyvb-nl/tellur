@@ -130,7 +130,7 @@ Use this map before changing code so you land changes in the right layer.
 | Security policy / threat model | `SECURITY.md`, `docs/THREAT_MODEL.md` | Coordinated disclosure + CRA reporting; STRIDE analysis. Update the threat model when trust boundaries/endpoints change. |
 | Supply-chain gate | `deny.toml`, `.github/workflows/ci.yml` | `cargo-deny` (licenses/advisories/sources) + `cargo-audit` + fmt/clippy/test in CI. |
 | Web dashboard | `web/index.html` | Static dashboard client backed by daemon endpoints. |
-| Packaging | `dist/`, `.github/workflows/` | npm wrapper, Homebrew formula, release and CI workflows. |
+| Packaging | `install.sh`, `install.ps1`, `dist/`, `.github/workflows/` | Single-command macOS/Linux and Windows installers; versioned, checksum-verified CLI archives; VSIX + JetBrains ZIP release assets; npm wrapper, Homebrew formula, release and CI workflows. The installer deploys detected editor packages then launches the unified setup wizard. |
 | User docs | `README.md`, `docs/ADAPTERS.md`, `docs/FINDINGS.md` | Public commands/mechanisms/limits; adapter mechanics; historical review notes. |
 | Project source of truth | `PROJECT_STATUS.md` | Implementation status, open work, test counts, roadmap, blockers, changelog. |
 
