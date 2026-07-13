@@ -19,7 +19,7 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 chrono = { workspace = true }
 tokio = { version = "1", features = ["full"] }
-notify = "6"
+notify = "8.2"
 ctrlc = "3"
 # Small blocking HTTP client for the hub commands (`tellur login`, `push`,
 # `policy pull`). The `tls` feature enables HTTPS via rustls + webpki-roots —

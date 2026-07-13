@@ -89,11 +89,7 @@ impl SqliteStore {
             .context("failed to begin audit transaction")?;
 
         let audit_key: i64 = 1;
-        let head = chain::HeadRef {
-            table: "audit_head",
-            key_col: "id",
-            key: &audit_key,
-        };
+        let head = chain::HeadRef::Audit(&audit_key);
         let (prev, count) = chain::read_head(&tx, &head)?;
 
         let entry_hash = audit_hash(
@@ -133,11 +129,7 @@ impl SqliteStore {
     pub(crate) fn verify_audit_chain(&self) -> Result<bool> {
         let conn = self.conn()?;
         let audit_key: i64 = 1;
-        let head = chain::HeadRef {
-            table: "audit_head",
-            key_col: "id",
-            key: &audit_key,
-        };
+        let head = chain::HeadRef::Audit(&audit_key);
         // Seed the walk from the sealed checkpoint (genesis when nothing sealed).
         let (sealed_hash, sealed_count) = audit_checkpoint(&conn)?;
         chain::verify(

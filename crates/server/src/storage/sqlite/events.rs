@@ -28,11 +28,7 @@ impl SqliteStore {
         }
 
         // The head checkpoint is the authoritative chain tip + length.
-        let head = chain::HeadRef {
-            table: "event_head",
-            key_col: "repo_id",
-            key: &repo_id,
-        };
+        let head = chain::HeadRef::Event(&repo_id);
         let (mut prev, mut count) = chain::read_head(&tx, &head)?;
 
         let mut new_ids = Vec::with_capacity(events.len());
@@ -94,11 +90,7 @@ impl SqliteStore {
 
     pub(crate) fn verify_event_chain(&self, org_id: &str, repo_id: &str) -> Result<bool> {
         let conn = self.conn()?;
-        let head = chain::HeadRef {
-            table: "event_head",
-            key_col: "repo_id",
-            key: &repo_id,
-        };
+        let head = chain::HeadRef::Event(&repo_id);
         chain::verify(
             &conn,
             "SELECT id, session_id, ts, event_type, actor, payload, prev_hash, entry_hash

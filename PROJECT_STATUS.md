@@ -1,15 +1,16 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-07-13 (machine-wide auto-activation + v0.1.0 release preparation)
+**Last updated:** 2026-07-13 (Aikido remediation after machine-wide release preparation)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
-**Branch:** `codex/global-auto-activation` · **PR:** release-readiness follow-up
+**Branch:** `codex/security-aikido-remediation` · **PR:** #53
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
 ## Handover — current state & open work
 
-**PRs #48–#51 are merged to `main`: adapter/editor compatibility, team-hub UX,
-evidence-aware provenance, unified setup, and release packaging.** The
+**PRs #48–#52 are merged to `main`: adapter/editor compatibility, team-hub UX,
+evidence-aware provenance, unified setup/release packaging, and machine-wide
+activation/release readiness.** The
 local pipeline, the team hub
 (`tellur-server`), the CLI hub coupling (`tellur login`/`push`/`logout`), the A12
 source connection + private-repo proxy, prompt excerpts, and the dynamic session
@@ -62,6 +63,25 @@ timeline are all shipped.
 has **no marking workflow on purpose** — review marking does not belong in the
 hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 "mark reviewed" action.
+
+> **2026-07-13 — Aikido security remediation.** On
+> `codex/security-aikido-remediation`. Removed confirmed DOM XSS sinks from the
+> embedded local dashboard by switching all API/import-driven rendering to DOM
+> text nodes; added a regression test that rejects HTML string sinks. Replaced
+> the SQLite hash-chain helper's dynamic table/column strings with a closed enum
+> and static parameterized queries. Pinned every remaining reported third-party
+> GitHub Action to a full commit SHA, retained PR #52's pinned cargo-deny CLI
+> replacement, made release permissions deny-by-default and
+> job-scoped, updated `smallvec` to 1.15.2, and upgraded `notify` to 8.2.0 so
+> vulnerable `mio` 0.8.11 leaves the graph. The 15 path-read alerts were traced
+> to explicit local-user imports or fixed RepoStorage/home paths, not a remote
+> restricted-directory boundary; the non-applicability proof and security
+> invariants are recorded in `docs/security/AIKIDO_2026_07_13.md`. Verified with
+> `cargo fmt --all -- --check`, workspace clippy with warnings denied, all 359
+> Rust tests, `cargo deny check`, JavaScript/YAML parsing, pinned-SHA resolution,
+> and a real headless-browser injection attempt through the local daemon (the
+> malicious `<img onerror>` remained literal text; zero injected elements and
+> no handler execution).
 
 > **2026-07-13 — Unified setup and reality-aligned product onboarding.** On
 > `codex/unified-setup-wizard`. `tellur setup` is now the supported idempotent

@@ -5,11 +5,12 @@ on:
     tags:
       - 'v*'
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   build:
+    permissions:
+      contents: read
     strategy:
       matrix:
         include:
@@ -84,6 +85,8 @@ jobs:
   editors:
     name: Build editor release packages
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
@@ -124,6 +127,8 @@ jobs:
   release:
     needs: [build, editors]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
@@ -131,7 +136,7 @@ jobs:
           path: artifacts
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: |
             artifacts/**/*
