@@ -1,0 +1,100 @@
+AGENTS.md
+  s_1c17e92a7c56ba::t_a9009b910e8d47 114
+  s_1c17e92a7c56ba::t_bf544bde6f2c8e 127
+PROJECT_STATUS.md
+  s_1c17e92a7c56ba::t_24847f440dc6a1 63
+  s_1c17e92a7c56ba::t_359804a1c93805 1176-1179
+  s_1c17e92a7c56ba::t_680fbcc72bc68e 3
+  s_1c17e92a7c56ba::t_93817ac822f027 1168-1170
+  s_1c17e92a7c56ba::t_98c16491d395a6 1173
+  s_1c17e92a7c56ba::t_bd3ca6ecbe00d9 73-86
+  s_1c17e92a7c56ba::t_f133f8fffe08e5 1071
+README.md
+  s_1c17e92a7c56ba::t_1580c6bffa9bc5 299-301
+  s_1c17e92a7c56ba::t_396ae9587b14a4 340
+  s_1c17e92a7c56ba::t_5e02c956635190 462
+  s_1c17e92a7c56ba::t_c2a415d2479296 430-432
+  s_1c17e92a7c56ba::t_cedb9c9c06610f 295-297
+  s_1c17e92a7c56ba::t_ef8bada2700710 320-322
+  s_1c17e92a7c56ba::t_f930c6f6eb64b2 441-446
+crates/cli/src/cli.rs
+  s_1c17e92a7c56ba::t_c83d071fb8ca45 273-293
+crates/cli/src/hooks.rs
+  s_1c17e92a7c56ba::t_17af1624ea5268 502-503
+  s_1c17e92a7c56ba::t_1e1b26f7db12d7 193-214
+  s_1c17e92a7c56ba::t_439dfa0e2a57df 581-586
+  s_1c17e92a7c56ba::t_d3f6ef2eec341b 600-637
+  s_1c17e92a7c56ba::t_ec5778d508a20f 510
+  s_1c17e92a7c56ba::t_edc6f81fa1da1d 230-301
+crates/cli/src/main.rs
+  s_1c17e92a7c56ba::t_92f9ab6324e964 144-151
+crates/cli/src/notes.rs
+  s_1c17e92a7c56ba::t_5531fffc83e2f4 19-21
+  s_1c17e92a7c56ba::t_90641038f23a64 4
+  s_1c17e92a7c56ba::t_dbd87657f4198d 49-192
+  s_1c17e92a7c56ba::t_e92aeed377601f 23
+crates/cli/src/setup.rs
+  s_1c17e92a7c56ba::t_38c2f1ac8e0844 162
+  s_1c17e92a7c56ba::t_578fb6b9b8e538 175-184
+  s_1c17e92a7c56ba::t_5993faba1f3a95 53
+  s_1c17e92a7c56ba::t_786edefa68d71a 83
+  s_1c17e92a7c56ba::t_7f29acc85aebef 3-4
+  s_1c17e92a7c56ba::t_b11380366bee44 87
+  s_1c17e92a7c56ba::t_c2817fabf8336b 35-38
+crates/cli/tests/cli_integration.rs
+  s_1c17e92a7c56ba::t_2d8d1552828287 190-192
+  s_1c17e92a7c56ba::t_43de3bc9a86bf7 877-901
+  s_1c17e92a7c56ba::t_4de644a87bc450 873
+  s_1c17e92a7c56ba::t_519b2b567aad29 141
+  s_1c17e92a7c56ba::t_71786aa745c734 602-659
+  s_1c17e92a7c56ba::t_7aa5960a318417 169-174
+  s_1c17e92a7c56ba::t_7f05b8a2d80a3c 842-847
+  s_1c17e92a7c56ba::t_ad800d54d5b4d7 345
+  s_1c17e92a7c56ba::t_ae06459d902a32 944-1031
+  s_1c17e92a7c56ba::t_c045345bf8b692 1357-1362
+  s_1c17e92a7c56ba::t_c584fc320c2940 913
+  s_1c17e92a7c56ba::t_d3c1a569288a65 325
+  s_1c17e92a7c56ba::t_efca45971afcc5 1388
+crates/core/src/notes.rs
+  s_1c17e92a7c56ba::t_3a83acc5f65e17 201-207
+  s_1c17e92a7c56ba::t_f328d482f3ce41 184-187
+crates/core/src/report/team_report.rs
+  s_1c17e92a7c56ba::t_2e98d1b1feb84a 144
+  s_1c17e92a7c56ba::t_3304b917b29806 281-288
+  s_1c17e92a7c56ba::t_5b6c6d0faad97d 60-61
+  s_1c17e92a7c56ba::t_6732ad3b9dd14d 196
+  s_1c17e92a7c56ba::t_729b1c5b212dfc 137-140
+  s_1c17e92a7c56ba::t_c9a5e031e0abe1 81
+crates/core/src/storage/index.rs
+  s_1c17e92a7c56ba::t_27ed20b7043633 207
+  s_1c17e92a7c56ba::t_b95cc1197a6932 199-204
+  s_1c17e92a7c56ba::t_cacfc6efad7743 657-698
+docs/ADAPTERS.md
+  s_1c17e92a7c56ba::t_02262093fd1ede 68-69
+  s_1c17e92a7c56ba::t_0b580f58cefe70 7-9
+  s_1c17e92a7c56ba::t_8323e643c7427d 32-34
+  s_1c17e92a7c56ba::t_b2c1bc16e8bf02 47
+  s_1c17e92a7c56ba::t_b3a2a5a7c92387 36-38
+  s_1c17e92a7c56ba::t_e9b0f282bbf3d0 3
+  s_1c17e92a7c56ba::t_fff36c061be4b9 75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "tellur/0.1.0",
+  "base_commit_sha": "37d988f9476adfd0b3b18ffe30da6f718303bb09",
+  "prompts": {},
+  "humans": {},
+  "sessions": {
+    "s_1c17e92a7c56ba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f57bb-0fda-7dd3-a201-c3970b023ebf",
+        "model": "unknown"
+      },
+      "custom_attributes": {
+        "tellur.confidence": "1.00",
+        "tellur.evidence_strength": "recorded"
+      }
+    }
+  }
+}
