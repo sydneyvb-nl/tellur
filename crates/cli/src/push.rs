@@ -29,8 +29,11 @@ fn unattended_sync() -> bool {
 }
 
 fn resolve_saved_hub(creds: &hub::Credentials, unattended: bool) -> Result<String> {
-    if unattended && creds.unattended_sync_disabled {
-        bail!("automatic Team Hub sync is disabled by `tellur setup --local-only`");
+    if creds.unattended_sync_disabled {
+        bail!(
+            "implicit Team Hub sync is disabled by `tellur setup --local-only`; \
+             pass --hub to push explicitly"
+        );
     }
     if let Some(default) = creds.default_host.as_deref() {
         let normalized = hub::normalize_host(default);
@@ -518,8 +521,9 @@ mod tests {
         let mut creds = test_credentials(&["https://one.test"], None);
         creds.unattended_sync_disabled = true;
         assert!(resolve_saved_hub(&creds, true).is_err());
+        assert!(resolve_saved_hub(&creds, false).is_err());
         assert_eq!(
-            resolve_saved_hub(&creds, false).unwrap(),
+            resolve_hub(Some("https://one.test"), &creds).unwrap(),
             "https://one.test"
         );
     }

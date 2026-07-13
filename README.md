@@ -47,7 +47,8 @@ That is the normal setup path. The wizard is safe to run again and:
 - performs machine-wide browser-based Team Hub device login when selected;
 - remembers the most recently selected Team Hub as the default for unattended
   Git automation, even when credentials for multiple hubs are saved (`--local-only`
-  explicitly disables unattended sync without deleting saved logins);
+  explicitly disables implicit sync and removes the current repository's
+  background service without deleting saved logins);
 - makes every activated repository sync to that hub during `git push`;
 - optionally installs interval-based background sync for the repository that is
   open while setup runs;

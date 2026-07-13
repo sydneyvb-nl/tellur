@@ -2047,6 +2047,23 @@ fn test_connect_background_installs_and_removes_service() {
         "background service is not marked as unattended"
     );
 
+    let local_only = tellur()
+        .args(["setup", "--local-only", "--yes"])
+        .current_dir(&dir)
+        .env("HOME", &home)
+        .env_remove("XDG_CONFIG_HOME")
+        .env("TELLUR_CONNECT_NO_ACTIVATE", "1")
+        .output()
+        .unwrap();
+    assert!(local_only.status.success());
+    let after_local_only = fs::read_dir(&svc_dir)
+        .map(|rd| rd.filter_map(|entry| entry.ok()).count())
+        .unwrap_or(0);
+    assert_eq!(
+        after_local_only, 0,
+        "local-only setup left a background service installed"
+    );
+
     let removed = tellur()
         .args(["connect", "--remove"])
         .current_dir(&dir)

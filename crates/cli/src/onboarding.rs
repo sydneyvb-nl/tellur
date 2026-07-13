@@ -76,6 +76,12 @@ pub(crate) fn cmd_setup(opts: SetupOptions<'_>) -> Result<()> {
         }
     };
 
+    if opts.local_only
+        && let Some(path) = crate::service::remove(&storage.root)?
+    {
+        println!("✓ Removed background Team Hub sync ({})", path.display());
+    }
+
     let had_service = crate::service::status(&storage.root).is_some();
     let background = hub.is_some() && !opts.no_background && (!opts.update || had_service);
     connect::cmd_connect(ConnectOptions {

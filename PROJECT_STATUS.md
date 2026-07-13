@@ -106,6 +106,9 @@ hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 > saved host when no default hub is selected.
 > Direct `tellur notes push` now propagates the pre-push recursion guard, avoiding
 > concurrent nested pushes racing to update `refs/notes/ai`.
+> Final Codex P2 fixed: local-only setup removes the current repository's existing
+> background service, while the persisted opt-out also blocks implicit fallback
+> for legacy timers that were created without the unattended marker.
 
 > **2026-07-13 — End-to-end Codex capture and evidence-aware PR provenance.** On
 > `fix/pr-provenance-evidence-states`. Replaced the broken CI use of local-index
