@@ -1,0 +1,26 @@
+crates/cli/src/hooks.rs
+  s_1c17e92a7c56ba::t_01bbfe7f68f3a6 501-502
+crates/cli/tests/cli_integration.rs
+  s_1c17e92a7c56ba::t_26a5b552a03ebf 639
+  s_1c17e92a7c56ba::t_63cf2281e18a2b 657
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "tellur/0.1.0",
+  "base_commit_sha": "1cc97e1c62306557ddac698a85229ea67db4b215",
+  "prompts": {},
+  "humans": {},
+  "sessions": {
+    "s_1c17e92a7c56ba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f57bb-0fda-7dd3-a201-c3970b023ebf",
+        "model": "codex:gpt-5.6-sol"
+      },
+      "custom_attributes": {
+        "tellur.confidence": "1.00",
+        "tellur.evidence_strength": "recorded"
+      }
+    }
+  }
+}
