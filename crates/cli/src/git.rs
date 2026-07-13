@@ -92,9 +92,18 @@ pub(crate) fn read_git_note(repo_root: &Path, notes_ref: &str, commit: &str) -> 
 }
 
 pub(crate) fn run_git(repo_root: &Path, args: &[&str]) -> Result<()> {
+    run_git_with_env(repo_root, args, &[])
+}
+
+pub(crate) fn run_git_with_env(
+    repo_root: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> Result<()> {
     let output = std::process::Command::new("git")
         .args(args)
         .current_dir(repo_root)
+        .envs(env.iter().copied())
         .output()
         .with_context(|| format!("failed to run git {}", args.join(" ")))?;
     if !output.status.success() {
@@ -125,4 +134,36 @@ pub(crate) fn git_output(repo_root: &Path, args: &[&str]) -> Result<String> {
 
 pub(crate) fn short_sha(sha: &str) -> String {
     sha.chars().take(8).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_git_with_env_passes_recursion_guard_to_hooks() {
+        let dir = std::env::temp_dir().join(format!(
+            "tellur-git-env-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        run_git(&dir, &["init", "-q"]).unwrap();
+        run_git(
+            &dir,
+            &[
+                "config",
+                "alias.check-tellur-guard",
+                "!test \"$TELLUR_CONNECT_PREPUSH\" = 1",
+            ],
+        )
+        .unwrap();
+        run_git_with_env(
+            &dir,
+            &["check-tellur-guard"],
+            &[("TELLUR_CONNECT_PREPUSH", "1")],
+        )
+        .unwrap();
+        std::fs::remove_dir_all(dir).ok();
+    }
 }

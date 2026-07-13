@@ -6,8 +6,8 @@ use anyhow::{Context, Result, bail};
 use tellur_core::storage::{RepoStorage, TraceIndex};
 
 use crate::git::{
-    git_config_get_all, git_output, read_git_note, resolve_commit, run_git, short_sha,
-    write_git_note,
+    git_config_get_all, git_output, read_git_note, resolve_commit, run_git, run_git_with_env,
+    short_sha, write_git_note,
 };
 use crate::util::sanitize_id;
 
@@ -346,7 +346,14 @@ pub(crate) fn cmd_notes_fetch(remote: &str, notes_ref: &str) -> Result<()> {
 
 pub(crate) fn cmd_notes_push(remote: &str, notes_ref: &str) -> Result<()> {
     let storage = RepoStorage::discover()?;
-    run_git(&storage.root, &["push", remote, notes_ref])?;
+    // A direct notes push also runs the repository's pre-push hook. Mark this
+    // child push as guarded so Tellur's managed hook does not recursively start
+    // another notes push and race the same remote ref.
+    run_git_with_env(
+        &storage.root,
+        &["push", remote, notes_ref],
+        &[("TELLUR_CONNECT_PREPUSH", "1")],
+    )?;
     println!("Pushed {} to {}", notes_ref, remote);
     Ok(())
 }
