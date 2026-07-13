@@ -178,10 +178,28 @@ pub(crate) enum Commands {
         action: HookActions,
     },
 
-    /// Install one-time global integrations for AI coding agents
+    /// Set up Tellur for this machine, repository, and optional Team Hub
     Setup {
         #[command(subcommand)]
-        action: SetupActions,
+        action: Option<SetupActions>,
+        /// Team Hub URL; omit to choose interactively or stay local-only
+        #[arg(long, conflicts_with = "local_only")]
+        hub: Option<String>,
+        /// Configure local capture without connecting a Team Hub
+        #[arg(long)]
+        local_only: bool,
+        /// Git remote used for provenance notes
+        #[arg(long, default_value = "origin")]
+        remote: String,
+        /// Do not install the background Team Hub sync service
+        #[arg(long)]
+        no_background: bool,
+        /// Do not open a browser during Team Hub login
+        #[arg(long)]
+        no_browser: bool,
+        /// Accept safe defaults and do not prompt (for automation)
+        #[arg(long)]
+        yes: bool,
     },
 
     /// One-time zero-touch setup: hub login, agent capture, and auto-push git hooks
@@ -388,6 +406,8 @@ pub(crate) enum HookActions {
 
 #[derive(Subcommand)]
 pub(crate) enum SetupActions {
+    /// Reconcile integrations and automation after upgrading Tellur
+    Update,
     /// Install global Codex, Claude Code, Cursor, and VS Code integrations
     Agents {
         /// Override home directory, intended for tests and portable installs
@@ -436,11 +456,14 @@ pub(crate) enum SetupActions {
         #[arg(long)]
         home: Option<PathBuf>,
     },
-    /// Show global integration status
+    /// Show global integration and current-repository status
     Status {
         /// Override home directory, intended for tests and portable installs
         #[arg(long)]
         home: Option<PathBuf>,
+        /// Git remote used for provenance notes
+        #[arg(long, default_value = "origin")]
+        remote: String,
     },
     /// Remove global integrations installed by Tellur
     Uninstall {

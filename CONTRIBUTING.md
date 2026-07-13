@@ -81,12 +81,21 @@ so no global Gradle is needed. It is **not** built by `cargo`/the Rust CI, so
 verify plugin changes by building/running it with Gradle. See the Verification
 section of [`AGENTS.md`](./AGENTS.md) for details.
 
-Global editor/agent setup is configured through:
+The supported end-user onboarding and configuration-reconciliation paths are:
 
 ```bash
-tellur setup agents      # Codex, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI, Antigravity
+tellur setup             # machine + current repo + optional Team Hub
+tellur setup update      # refresh generated paths/hooks after a binary upgrade
+tellur setup status      # combined machine/current-repo health
+```
+
+The granular commands below exist for integration development and recovery;
+do not present them as the normal README setup journey:
+
+```bash
+tellur setup agents      # all hook/MCP/settings generators
 tellur setup cursor      # Cursor MCP/settings only
-tellur setup vscode      # VS Code settings only
+tellur setup vscode      # VS Code extension settings only; no VSIX install
 tellur setup windsurf    # Windsurf MCP/settings only
 tellur setup gemini-cli  # Gemini CLI hooks only
 tellur setup antigravity # Antigravity hooks/MCP only

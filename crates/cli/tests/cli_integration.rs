@@ -325,7 +325,7 @@ fn test_setup_agents_installs_user_level_agent_editor_integrations() {
     assert!(status_stdout.contains("Codex hook delivery: installed (personal plugin)"));
     assert!(status_stdout.contains("Codex personal plugin: installed"));
     assert!(status_stdout.contains("Cursor global integration: installed"));
-    assert!(status_stdout.contains("VS Code global integration: installed"));
+    assert!(status_stdout.contains("VS Code extension settings: prepared"));
     assert!(status_stdout.contains("Windsurf global integration: installed"));
     assert!(status_stdout.contains("Gemini CLI global integration: installed"));
     assert!(status_stdout.contains("Antigravity global integration: installed"));
@@ -345,7 +345,7 @@ fn test_setup_agents_installs_user_level_agent_editor_integrations() {
     assert!(status_stdout.contains("Codex hook delivery: missing"));
     assert!(status_stdout.contains("Codex personal plugin: missing"));
     assert!(status_stdout.contains("Cursor global integration: missing"));
-    assert!(status_stdout.contains("VS Code global integration: missing"));
+    assert!(status_stdout.contains("VS Code extension settings: missing"));
     assert!(status_stdout.contains("Windsurf global integration: missing"));
     assert!(status_stdout.contains("Gemini CLI global integration: missing"));
     assert!(status_stdout.contains("Antigravity global integration: missing"));
@@ -1721,7 +1721,86 @@ fn test_connect_installs_hooks_and_notes_config() {
         .unwrap();
     assert!(String::from_utf8_lossy(&cfg.stdout).contains("refs/notes/ai"));
 
+    tellur()
+        .args(["connect", "--no-login", "--no-agents"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let cfg = Command::new("git")
+        .args(["config", "--get-all", "remote.origin.fetch"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&cfg.stdout)
+            .lines()
+            .filter(|line| line.contains("refs/notes/ai"))
+            .count(),
+        1,
+        "setup duplicated the notes fetch refspec"
+    );
+
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_unified_setup_is_idempotent_and_configures_repo_and_machine() {
+    let dir = temp_repo();
+    let home = std::env::temp_dir().join(format!(
+        "tellur-setup-home-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&home).unwrap();
+
+    for command in ["setup", "update"] {
+        let mut invocation = tellur();
+        if command == "setup" {
+            invocation.args(["setup", "--local-only", "--yes"]);
+        } else {
+            invocation.args(["setup", "update"]);
+        }
+        let output = invocation
+            .current_dir(&dir)
+            .env("HOME", &home)
+            .env_remove("XDG_CONFIG_HOME")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    assert!(dir.join(".tellur/config.yml").exists());
+    let pre_push = fs::read_to_string(dir.join(".git/hooks/pre-push")).unwrap();
+    assert_eq!(
+        pre_push
+            .matches("# >>> tellur connect (managed) >>>")
+            .count(),
+        1
+    );
+    assert!(home.join(".claude/settings.json").exists());
+    assert!(home.join(".codex/plugins/tellur-provenance").exists());
+
+    let status = tellur()
+        .args(["setup", "status"])
+        .current_dir(&dir)
+        .env("HOME", &home)
+        .env_remove("XDG_CONFIG_HOME")
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    let stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(stdout.contains("Tellur setup status"));
+    assert!(stdout.contains("post-commit hook"));
+
+    let _ = fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]

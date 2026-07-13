@@ -97,10 +97,7 @@ pub(crate) fn cmd_connect(opts: ConnectOptions) -> Result<()> {
             "• Skipped notes fetch config: remote '{}' does not exist yet.",
             opts.remote
         );
-        println!(
-            "  After `git remote add {} <url>`, run `tellur notes install-config {}` (or `tellur connect` again).",
-            opts.remote, opts.remote
-        );
+        println!("  The pre-push hook will configure it automatically after the remote is added.");
     }
 
     // 5. Optional always-on background push service.
@@ -114,10 +111,17 @@ pub(crate) fn cmd_connect(opts: ConnectOptions) -> Result<()> {
         );
     }
 
-    println!("\n✓ Zero-touch capture is active for this repository.");
+    let hub_connected = hub::Credentials::load()
+        .map(|credentials| !credentials.hosts.is_empty())
+        .unwrap_or(false);
+
+    println!("\n✓ Automatic capture is active for this repository.");
     println!("  • each commit refreshes refs/notes/ai locally");
+    if hub_connected {
+        println!("  • each `git push` flushes events to the Team Hub");
+    }
     println!(
-        "  • each `git push` flushes events to the hub and pushes notes to '{}'",
+        "  • each `git push` publishes provenance notes to '{}'",
         opts.remote
     );
     if opts.background {
@@ -126,7 +130,7 @@ pub(crate) fn cmd_connect(opts: ConnectOptions) -> Result<()> {
             opts.push_interval
         );
     } else {
-        println!("  • add --background for an always-on pusher (between pushes); not installed");
+        println!("  • background Team Hub sync is not installed");
     }
     println!("\nNote: pushing notes publishes commit-level AI attribution to anyone with");
     println!("repo read access. Undo any time with `tellur connect --remove`.");
@@ -143,7 +147,7 @@ fn pre_push_block(exe: &str) -> String {
     // git passes the remote name as $1. The recursion guard stops the nested
     // `tellur notes push` (which runs `git push`) from re-entering this hook.
     format!(
-        "{HOOK_BEGIN}\n# Flush events to the hub and push authorship notes (best-effort; never blocks).\nif [ -z \"$TELLUR_CONNECT_PREPUSH\" ]; then\n\tTELLUR_CONNECT_PREPUSH=1 {exe} push >/dev/null 2>&1 || true\n\tTELLUR_CONNECT_PREPUSH=1 {exe} notes push \"${{1:-origin}}\" >/dev/null 2>&1 || true\nfi\n{HOOK_END}"
+        "{HOOK_BEGIN}\n# Flush events to the hub and publish authorship notes (best-effort; never blocks).\nif [ -z \"$TELLUR_CONNECT_PREPUSH\" ]; then\n\tTELLUR_CONNECT_PREPUSH=1 {exe} notes install-config \"${{1:-origin}}\" >/dev/null 2>&1 || true\n\tTELLUR_CONNECT_PREPUSH=1 {exe} push >/dev/null 2>&1 || true\n\tTELLUR_CONNECT_PREPUSH=1 {exe} notes push \"${{1:-origin}}\" >/dev/null 2>&1 || true\nfi\n{HOOK_END}"
     )
 }
 
@@ -260,7 +264,7 @@ fn connect_remove(storage: &RepoStorage, remote: &str) -> Result<()> {
     Ok(())
 }
 
-fn connect_status(storage: &RepoStorage, remote: &str) -> Result<()> {
+pub(crate) fn connect_status(storage: &RepoStorage, remote: &str) -> Result<()> {
     let hooks_dir = git_hooks_dir(&storage.root)?;
     let mark = |present: bool| if present { "✓" } else { "✗" };
 

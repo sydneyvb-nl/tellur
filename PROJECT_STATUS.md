@@ -1,15 +1,16 @@
 # Tellur — Project Status & Agent Guide
 
-**Last updated:** 2026-07-13 (end-to-end Codex capture + commit-scoped provenance on `fix/pr-provenance-evidence-states`)
+**Last updated:** 2026-07-13 (unified setup wizard + reality-aligned README)
 **Maintained by:** agents — alle agents mogen dit updaten
 **Repo:** github.com/sydneyvb-nl/tellur
-**Branch:** `fix/pr-provenance-evidence-states` · **Open PRs:** #50 (provenance reporting)
+**Branch:** `codex/unified-setup-wizard` · **Open PRs:** none before this change
 **License:** Apache-2.0 (core) · FSL-1.1-ALv2 (`crates/server`)
 
 ## Handover — current state & open work
 
-**The adapter/editor compatibility work from PR #48 and team-hub UX work from
-PR #49 are merged to `main`.** Provenance reporting remains open as PR #50. The
+**The adapter/editor compatibility work from PR #48, team-hub UX work from PR
+#49, and evidence-aware provenance reporting from PR #50 are merged to
+`main`.** The
 local pipeline, the team hub
 (`tellur-server`), the CLI hub coupling (`tellur login`/`push`/`logout`), the A12
 source connection + private-repo proxy, prompt excerpts, and the dynamic session
@@ -28,7 +29,14 @@ timeline are all shipped.
   `TELLUR_TEST_DATABASE_URL` (local: `postgres://postgres@127.0.0.1:5433/tellur_test`).
 
 **Open work (priority order):**
-1. **Zero-touch + GitHub App** — design merged in
+1. **Marketplace distribution + unified installation** — the CLI now has one
+   idempotent `tellur setup` wizard for machine integrations, current-repo Git
+   automation, optional Team Hub login, and background synchronization, plus
+   `tellur setup update` for path/config reconciliation. Remaining: publish
+   signed VS Code and JetBrains marketplace packages and teach setup to verify
+   or install them. Until then, settings are reported as prepared rather than
+   an extension being falsely reported as installed.
+2. **Zero-touch + GitHub App** — design merged in
    [`docs/proposals/GITHUB_APP.md`](docs/proposals/GITHUB_APP.md). **P1 `tellur
    connect`** is **complete** (git hooks + opt-in `--background` push service).
    **P2 GitHub App installation tokens** for the blob proxy is **complete** (see
@@ -43,14 +51,14 @@ timeline are all shipped.
    tests; a maintainer must verify them against a real GitHub App (App id +
    private key + webhook secret) — there is no live App in CI.
    Live setup walkthrough: [`docs/GITHUB_APP_SETUP.md`](docs/GITHUB_APP_SETUP.md).
-2. **Packaged releases** — GitHub Release automation exists; the **npm wrapper +
+3. **Packaged releases** — GitHub Release automation exists; the **npm wrapper +
    Homebrew formula** (`dist/`) are not finished.
-3. **`docs/DEPLOYMENT.md`** (Fly.io / Cloud Run + managed Postgres + TLS + OIDC
+4. **`docs/DEPLOYMENT.md`** (Fly.io / Cloud Run + managed Postgres + TLS + OIDC
    walkthrough) and **`docs/SSO.md`** (Keycloak quickstart + the Entra ID
    `email_verified` caveat) — offered, not yet written; the missing piece for
    self-serve "host it as a service".
-4. **Richer policy templates** for security-sensitive repositories.
-5. **Broader agent coverage** as more tools expose stable local lifecycle hooks.
+5. **Richer policy templates** for security-sensitive repositories.
+6. **Broader agent coverage** as more tools expose stable local lifecycle hooks.
 
 **Smaller follow-ups flagged during recent work (nice-to-have, not blocking):**
 - Surface the **prompt excerpt as a column in the file-provenance view** (per
@@ -61,6 +69,20 @@ timeline are all shipped.
 has **no marking workflow on purpose** — review marking does not belong in the
 hub (user decision). Leave it as a forward-looking metric; do not add a hub-side
 "mark reviewed" action.
+
+> **2026-07-13 — Unified setup and reality-aligned product onboarding.** On
+> `codex/unified-setup-wizard`. `tellur setup` is now the supported idempotent
+> entry point for machine-wide hook/MCP/settings generation, current-repository
+> initialization, non-clobbering Git automation, optional secure Team Hub
+> device login, and automatic background synchronization. `tellur setup update`
+> reconciles generated absolute binary paths, Git hooks, and an existing push
+> service after an upgrade; `tellur setup status` combines machine and repository
+> health. The pre-push hook now configures Git-note fetch/rewrite support itself
+> when a remote is added after onboarding, and notes config writes are
+> idempotent. Rewrote the README around this single journey and removed false
+> distribution claims: VS Code settings can be prepared, but neither the VS Code
+> nor JetBrains package is publicly listed yet. Granular setup/connect commands
+> remain for compatibility and recovery.
 
 > **2026-07-13 — End-to-end Codex capture and evidence-aware PR provenance.** On
 > `fix/pr-provenance-evidence-states`. Replaced the broken CI use of local-index
@@ -1130,7 +1152,7 @@ Tellur/
 | 16 | Cursor adapter implementation | 8.2 | ✅ Done | Cursor MCP/settings setup, VS Code-compatible extension capture, JSON/JSONL trace parsing, workspace detection, adapter tests |
 | 16a | Codex CLI adapter implementation | 8.2 | ✅ Done | JSONL event stream/session transcript import via `tellur import codex <file>`, command/prompt/file-write normalization, prompt hashing, strict JSONL errors |
 | 16b | GitHub Copilot adapter implementation | 8.2 | ✅ Done | Metadata JSON/JSONL import via `tellur import copilot <file>`, accepted suggestion + prompt metadata normalization, prompt hashing, no raw metadata payload |
-| 16c | Global agent/editor setup | 8.1/8.3/10/23 | ✅ Done | `tellur setup agents/status/uninstall/cursor/vscode/windsurf/gemini-cli/antigravity`; single-owner Codex personal-plugin hooks (legacy duplicate user hooks removed), user-level Claude/Gemini/Antigravity hooks, Antigravity MCP, Cursor MCP/settings, VS Code settings, Windsurf MCP/settings, extension save capture, generic hook ingest with auto-init |
+| 16c | Unified agent/editor/repo setup | 8.1/8.3/10/23 | ✅ Done | `tellur setup` wizard + `setup update/status`; optional Team Hub login/background sync; idempotent repo Git hooks and Git-note config; granular `setup agents/uninstall/cursor/vscode/windsurf/gemini-cli/antigravity` recovery surfaces; single-owner Codex personal-plugin hooks, user-level Claude/Gemini/Antigravity hooks, MCP/settings generation. VS Code/JetBrains marketplace distribution remains open. |
 | 16d | Gemini CLI adapter implementation | 8.2 | ✅ Done | `tellur setup gemini-cli`, `~/.gemini/settings.json` hooks, JSONL import via `tellur import gemini-cli <file>`, prompt hashing and metadata sanitization |
 | 16e | Antigravity 2.0 adapter implementation | 8.2/23 | ✅ Done | `tellur setup antigravity`, `~/.gemini/config/hooks.json`, Antigravity app/CLI MCP configs, JSONL import via `tellur import antigravity <file>` |
 | 16f | Shared import loop | 8.2 | ✅ Done | `crates/adapters/src/import.rs`: tolerant JSONL/array/envelope/single-object reader, line-specific errors, sanitized+prompt-hashed payloads, nested-field extraction, numeric epoch timestamps. Reused by the adoption adapters below |

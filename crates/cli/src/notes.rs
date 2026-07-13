@@ -5,7 +5,10 @@ use anyhow::{Context, Result, bail};
 
 use tellur_core::storage::{RepoStorage, TraceIndex};
 
-use crate::git::{git_output, read_git_note, resolve_commit, run_git, short_sha, write_git_note};
+use crate::git::{
+    git_config_get_all, git_output, read_git_note, resolve_commit, run_git, short_sha,
+    write_git_note,
+};
 use crate::util::sanitize_id;
 
 pub(crate) fn cmd_notes_export(commit: &str, notes_ref: &str, print: bool) -> Result<()> {
@@ -350,19 +353,20 @@ pub(crate) fn cmd_notes_push(remote: &str, notes_ref: &str) -> Result<()> {
 
 pub(crate) fn cmd_notes_install_config(remote: &str, notes_ref: &str) -> Result<()> {
     let storage = RepoStorage::discover()?;
-    run_git(
-        &storage.root,
-        &[
-            "config",
-            "--add",
-            &format!("remote.{}.fetch", remote),
-            &format!("+{}:{}", notes_ref, notes_ref),
-        ],
-    )?;
-    run_git(
-        &storage.root,
-        &["config", "--add", "notes.rewriteRef", notes_ref],
-    )?;
+    let fetch_key = format!("remote.{remote}.fetch");
+    let fetch_value = format!("+{notes_ref}:{notes_ref}");
+    if !git_config_get_all(&storage.root, &fetch_key).contains(&fetch_value) {
+        run_git(
+            &storage.root,
+            &["config", "--add", &fetch_key, &fetch_value],
+        )?;
+    }
+    if !git_config_get_all(&storage.root, "notes.rewriteRef").contains(&notes_ref.to_string()) {
+        run_git(
+            &storage.root,
+            &["config", "--add", "notes.rewriteRef", notes_ref],
+        )?;
+    }
     run_git(
         &storage.root,
         &["config", "notes.rewriteMode", "concatenate"],

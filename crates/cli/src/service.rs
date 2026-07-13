@@ -3,8 +3,9 @@
 //! Registers a per-repository OS service that runs `tellur push` on an interval,
 //! so locally-captured events reach the hub **without** waiting for a `git push`
 //! (the `pre-push` hook covers the push-time flush; this covers idle machines).
-//! It is the optional always-on half of the zero-touch story — opt-in, because
-//! installing a login-start service is an intrusive system change.
+//! It is the always-on half of Team Hub onboarding. The unified setup wizard
+//! installs it when a hub is selected unless the user passes `--no-background`;
+//! the legacy `tellur connect` surface retains its explicit `--background` flag.
 //!
 //! Backends: launchd (macOS), systemd `--user` (Linux). Other platforms return a
 //! clear "unsupported" error. The activation step (`launchctl`/`systemctl`) is

@@ -43,7 +43,7 @@ pub(crate) fn cmd_setup_agents(home: Option<&Path>) -> Result<()> {
     install_gemini_cli_integration(&home)?;
     install_antigravity_integration(&home, &tellur_exe)?;
     println!(
-        "✓ Installed Tellur global integrations for Claude Code, Codex, Cursor, VS Code, Windsurf, Gemini CLI, and Antigravity"
+        "✓ Configured Tellur capture for Claude Code, Codex, Cursor, VS Code, Windsurf, Gemini CLI, and Antigravity"
     );
     println!(
         "  Claude Code hooks: {}",
@@ -58,7 +58,7 @@ pub(crate) fn cmd_setup_agents(home: Option<&Path>) -> Result<()> {
         cursor_mcp_path(&home).display()
     );
     println!(
-        "  VS Code settings: {}",
+        "  VS Code extension settings (extension distributed separately): {}",
         vscode_user_settings_path(&home).display()
     );
     println!(
@@ -113,8 +113,9 @@ pub(crate) fn cmd_setup_vscode(home: Option<&Path>) -> Result<()> {
     let home = home_dir_override(home)?;
     let tellur_exe = tellur_executable_path()?;
     install_vscode_integration(&home, &tellur_exe)?;
-    println!("✓ Installed Tellur global VS Code integration");
+    println!("✓ Prepared Tellur settings for the VS Code extension");
     println!("  Settings: {}", vscode_user_settings_path(&home).display());
+    println!("  Note: this does not install the extension package.");
     Ok(())
 }
 
@@ -192,8 +193,8 @@ pub(crate) fn cmd_setup_status(home: Option<&Path>) -> Result<()> {
         if cursor { "installed" } else { "missing" }
     );
     println!(
-        "VS Code global integration: {}",
-        if vscode { "installed" } else { "missing" }
+        "VS Code extension settings: {}",
+        if vscode { "prepared" } else { "missing" }
     );
     println!(
         "Windsurf global integration: {}",
