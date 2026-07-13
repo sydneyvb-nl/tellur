@@ -498,7 +498,8 @@ pub(crate) fn cmd_hooks_ingest(source: &str, auto_init: bool, json_response: boo
             index.index_event(&event)?;
 
             let policy = load_policy(&storage);
-            let ctx = CaptureContext::recorded_ai(&session_id, source);
+            let mut ctx = CaptureContext::recorded_ai(&session_id, source);
+            ctx.model_id = payload.model.clone();
             let file_paths = payload.file_paths();
             if !file_paths.is_empty() {
                 let _ = capture_working_changes_for_paths(

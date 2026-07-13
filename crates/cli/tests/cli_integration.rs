@@ -636,6 +636,7 @@ fn test_hooks_ingest_codex_apply_patch_captures_listed_files() {
                 "session_id": "sess_apply_patch",
                 "hook_event_name": "PostToolUse",
                 "cwd": dir,
+                "model": "codex:gpt-5.6-sol",
                 "tool_name": "apply_patch",
                 "tool_input": {
                     "patch": "*** Begin Patch\n*** Update File: src/lib.rs\n@@\n*** End Patch"
@@ -653,6 +654,7 @@ fn test_hooks_ingest_codex_apply_patch_captures_listed_files() {
     assert_eq!(attrs.len(), 1);
     assert_eq!(attrs[0].1.session_id, "sess_apply_patch");
     assert_eq!(attrs[0].1.origin, Origin::Ai);
+    assert_eq!(attrs[0].1.model_id.as_deref(), Some("codex:gpt-5.6-sol"));
 
     let _ = fs::remove_dir_all(&dir);
 }
