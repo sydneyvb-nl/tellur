@@ -22,3 +22,5 @@ target/
 .tellur/index/
 .tellur/daemon.token
 .tellur/push_state.json
+# VS Code extension integration-test runtime
+editor/tellur-vscode/.vscode-test/

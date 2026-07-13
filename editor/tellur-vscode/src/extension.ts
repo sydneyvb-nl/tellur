@@ -9,6 +9,7 @@ import { registerCommands } from './commands';
 import { resolveConfiguredVSCodeModel } from './vscodeModels';
 import { resolveModelSelection } from './modelMetadata';
 import { listVSCodeLanguageModels } from './vscodeModels';
+import { configuredEditorIdentity } from './editorIdentity';
 
 let client: TellurClient;
 let sessionProvider: SessionProvider;
@@ -45,15 +46,21 @@ export function activate(context: vscode.ExtensionContext) {
         );
     }
 
-    // Auto-init and auto-watch
-    if (config.get('autoInit', true)) {
-        client.ensureInitialized().catch(err => {
-            console.warn(`Tellur auto-init failed: ${err?.message || err}`);
-        });
+    // One CLI watcher per workspace folder. VS Code can add/remove roots without
+    // restarting the extension host, so keep the processes in sync explicitly.
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+        startWorkspaceCapture(folder);
     }
-    if (config.get('autoWatch', true)) {
-        startVSCodeWatch(config);
-    }
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeWorkspaceFolders(event => {
+            for (const folder of event.removed) {
+                client.stopWatch(folder.uri.fsPath);
+            }
+            for (const folder of event.added) {
+                startWorkspaceCapture(folder);
+            }
+        })
+    );
 
     // Status bar
     const statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -68,19 +75,33 @@ export function deactivate() {
     client?.stopWatch();
 }
 
-async function startVSCodeWatch(config: vscode.WorkspaceConfiguration): Promise<void> {
+async function startWorkspaceCapture(folder: vscode.WorkspaceFolder): Promise<void> {
+    const config = vscode.workspace.getConfiguration('tellur', folder.uri);
+    const identity = configuredEditorIdentity(
+        vscode.env.appName,
+        config.get('vscodeAgentId', ''),
+        config.get('vscodeAgentName', ''),
+    );
     if (config.get('autoInit', true)) {
-        await client.ensureInitialized();
+        try {
+            await client.ensureInitialized(folder.uri.fsPath);
+        } catch (err: any) {
+            console.warn(`Tellur auto-init failed for ${folder.name}: ${err?.message || err}`);
+            return;
+        }
     }
-    client.startWatch({
-        agentId: config.get('vscodeAgentId', defaultEditorSource()),
-        agentName: config.get('vscodeAgentName', defaultEditorName()),
+    if (!config.get('autoWatch', true)) {
+        return;
+    }
+    client.startWatch(folder.uri.fsPath, {
+        agentId: identity.source,
+        agentName: identity.name,
         modelId: await resolveConfiguredVSCodeModel(),
     });
 }
 
 async function captureSavedDocument(document: vscode.TextDocument): Promise<void> {
-    if (document.uri.scheme !== 'file' || document.isUntitled) {
+    if (document.isUntitled) {
         return;
     }
     const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
@@ -88,11 +109,15 @@ async function captureSavedDocument(document: vscode.TextDocument): Promise<void
         return;
     }
     const config = vscode.workspace.getConfiguration('tellur', document.uri);
-    const source = config.get('vscodeAgentId', defaultEditorSource());
+    const identity = configuredEditorIdentity(
+        vscode.env.appName,
+        config.get('vscodeAgentId', ''),
+        config.get('vscodeAgentName', ''),
+    );
     try {
-        await client.ingestHook(source, {
+        await client.ingestHook(identity.source, {
             event: 'PostToolUse',
-            session_id: config.get('vscodePromptSessionId', source),
+            session_id: config.get('vscodePromptSessionId', '').trim() || identity.source,
             cwd: workspaceFolder.uri.fsPath,
             model: await resolveConfiguredVSCodeModel(),
             tool: {
@@ -105,14 +130,6 @@ async function captureSavedDocument(document: vscode.TextDocument): Promise<void
     } catch (err: any) {
         console.warn(`Tellur save capture failed: ${err?.message || err}`);
     }
-}
-
-function defaultEditorSource(): string {
-    return vscode.env.appName.toLowerCase().includes('cursor') ? 'cursor' : 'vscode';
-}
-
-function defaultEditorName(): string {
-    return vscode.env.appName.toLowerCase().includes('cursor') ? 'Cursor' : 'VS Code AI';
 }
 
 async function updateStatusItem(statusItem: vscode.StatusBarItem): Promise<void> {

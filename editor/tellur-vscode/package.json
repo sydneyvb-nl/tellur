@@ -12,6 +12,19 @@
   "engines": {
     "vscode": "^1.85.0"
   },
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Tellur requires a filesystem-backed Git checkout so the CLI can write repository-local provenance data."
+    },
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Tellur runs the configured CLI and writes provenance data in the workspace, so the workspace must be trusted first."
+    }
+  },
   "categories": [
     "Programming Languages",
     "Debuggers",
@@ -136,13 +149,13 @@
         },
         "tellur.vscodeAgentId": {
           "type": "string",
-          "default": "vscode-ai",
-          "description": "Agent/tool identifier used for VS Code AI/BYOK watch sessions"
+          "default": "",
+          "description": "Optional agent/tool identifier override. Empty automatically selects vscode, cursor, or windsurf from the host editor."
         },
         "tellur.vscodeAgentName": {
           "type": "string",
-          "default": "VS Code AI",
-          "description": "Human-readable agent/tool name used for VS Code AI/BYOK watch sessions"
+          "default": "",
+          "description": "Optional human-readable agent/tool name override. Empty uses the detected host editor name."
         },
         "tellur.vscodeModelId": {
           "type": "string",
@@ -151,8 +164,8 @@
         },
         "tellur.vscodePromptSessionId": {
           "type": "string",
-          "default": "vscode-ai",
-          "description": "Session ID used when recording VS Code AI prompt hashes manually"
+          "default": "",
+          "description": "Optional session ID used when recording prompt hashes. Empty uses the detected or configured editor source."
         }
       }
     }

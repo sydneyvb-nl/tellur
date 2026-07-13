@@ -230,11 +230,11 @@ tellur verify                       # Verify hash-chain integrity
 | Gemini CLI | User lifecycle hooks, JSONL import | Working |
 | Google Antigravity 2.0 | User hooks, MCP config, JSONL import | Working |
 | Cursor IDE/CLI | Cursor MCP/settings, VS Code-compatible extension save/watch capture, JSON/JSONL import | Working |
-| VS Code/Copilot | VS Code extension auto-init, watch, save capture, explicit prompt hashing, metadata import | Working with VS Code API limits |
+| VS Code/Copilot | Trusted-workspace extension auto-init, per-root watch, save capture, explicit prompt hashing, metadata import | Working with VS Code API limits |
 | Aider | Git commit attribution import | Working |
 | GitHub Copilot | Metadata JSON/JSONL import | Working |
-| Windsurf / Cascade | Windsurf MCP/settings, VS Code-compatible extension save/watch capture, Cascade session JSON/JSONL import | Working |
-| JetBrains AI Assistant / Junie | JetBrains plugin save/watch capture (`editor/tellur-jetbrains`) + action-log JSON/JSONL import | Working |
+| Windsurf / Cascade | Windsurf MCP/settings, host-detected VS Code-compatible extension save/watch capture, Cascade session JSON/JSONL import | Working |
+| JetBrains AI Assistant / Junie | JetBrains plugin save/watch capture (`editor/tellur-jetbrains`, platform builds 241–253) + action-log JSON/JSONL import | Working |
 | Devin | Live capture via daemon webhook (`POST /webhook/devin`) + cloud agent run/session export import | Working |
 | Continue | `dev_data` JSONL import; live save/watch capture when running in a VS Code-family editor | Working |
 | Cline / Roo Code | Task-history JSON/JSONL import; live save/watch capture when running in a VS Code-family editor | Working |
@@ -243,8 +243,22 @@ tellur verify                       # Verify hash-chain integrity
 Import adapters preserve source event IDs, source timestamps, session IDs, actor,
 event type, and payload while recomputing Tellur's local hash chain. Invalid
 non-empty JSON/JSONL lines fail the import instead of being silently skipped.
+Codex, Claude Code, and Copilot imports accept JSONL, top-level arrays, single
+events, and common envelope exports (`events`, `messages`, `records`, and related
+keys), so the same adapter works with raw CLI transcripts and editor/telemetry
+harnesses. String timestamps and Unix epoch seconds/milliseconds are normalized;
+wrapper session/model metadata is inherited by child events without overriding
+event-local fields.
 Prompt-like fields are stored as hashes, not raw prompt text; secret-looking
 strings in retained metadata are redacted.
+
+The VS Code-family extension runs as a workspace extension so its `tellur` CLI
+process is colocated with local, SSH, WSL, container, or Codespaces workspaces.
+It requires Workspace Trust before executing the CLI, starts one watcher per
+workspace root, tracks roots added or removed at runtime, and detects VS Code,
+Cursor, and Windsurf host identity unless setup supplied an explicit override.
+Browser-only virtual workspaces without a runnable workspace-side CLI are not
+supported. See [`docs/GUI_COMPATIBILITY.md`](docs/GUI_COMPATIBILITY.md).
 
 `tellur import aider <source>` expects `<source>` to be a Git repository path.
 Other import adapters expect a file path unless the adapter-specific docs say

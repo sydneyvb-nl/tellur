@@ -13,6 +13,7 @@ import {
     modelKey,
     resolveConfiguredVSCodeModel,
 } from './vscodeModels';
+import { configuredEditorIdentity } from './editorIdentity';
 
 export function registerCommands(
     context: vscode.ExtensionContext,
@@ -125,14 +126,21 @@ export function registerCommands(
     // Start watch
     context.subscriptions.push(
         vscode.commands.registerCommand('tellur.startWatch', async () => {
-            const config = vscode.workspace.getConfiguration('tellur');
-                const modelId = await resolveConfiguredVSCodeModel();
-                await client.ensureInitialized();
-                client.startWatch({
-                    agentId: config.get('vscodeAgentId', 'vscode-ai'),
-                    agentName: config.get('vscodeAgentName', 'VS Code AI'),
-                modelId,
-            });
+            const modelId = await resolveConfiguredVSCodeModel();
+            for (const folder of vscode.workspace.workspaceFolders ?? []) {
+                const config = vscode.workspace.getConfiguration('tellur', folder.uri);
+                const identity = configuredEditorIdentity(
+                    vscode.env.appName,
+                    config.get('vscodeAgentId', ''),
+                    config.get('vscodeAgentName', ''),
+                );
+                await client.ensureInitialized(folder.uri.fsPath);
+                client.startWatch(folder.uri.fsPath, {
+                    agentId: identity.source,
+                    agentName: identity.name,
+                    modelId,
+                });
+            }
             vscode.window.showInformationMessage(
                 modelId ? `Tellur: Watching started (${modelId})` : 'Tellur: Watching started'
             );
@@ -206,16 +214,22 @@ export function registerCommands(
             });
             if (!prompt) return;
 
-            const config = vscode.workspace.getConfiguration('tellur');
+            const resource = vscode.window.activeTextEditor?.document.uri;
+            const config = vscode.workspace.getConfiguration('tellur', resource);
+            const identity = configuredEditorIdentity(
+                vscode.env.appName,
+                config.get('vscodeAgentId', ''),
+                config.get('vscodeAgentName', ''),
+            );
             const modelId = await resolveConfiguredVSCodeModel();
             const promptHash = `sha256:${createHash('sha256').update(prompt).digest('hex')}`;
-            const session = config.get('vscodePromptSessionId', 'vscode-ai');
+            const session = config.get('vscodePromptSessionId', '').trim() || identity.source;
 
             try {
                 await client.event('prompt.submitted', session, {
                     prompt_hash: promptHash,
                     model_id: modelId,
-                    tool: 'vscode',
+                    tool: identity.source,
                     source: 'manual-vscode-command',
                 });
                 vscode.window.showInformationMessage(`Tellur: Recorded prompt ${promptHash.slice(0, 19)}...`);
