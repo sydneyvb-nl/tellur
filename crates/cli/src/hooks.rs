@@ -190,24 +190,28 @@ impl AgentHookPayload {
         self.hook_event_name.clone()
     }
 
-    fn file_path(&self) -> Option<String> {
-        self.tool_input
-            .as_ref()
-            .and_then(|v| find_first_string_key(v, &["file_path", "filePath", "path"], 4))
-            .or_else(|| {
-                first_string(
-                    &self.raw,
-                    &[
-                        &["file_path"],
-                        &["filePath"],
-                        &["tool", "file_path"],
-                        &["tool", "filePath"],
-                        &["tool_use", "file_path"],
-                        &["toolUse", "filePath"],
-                    ],
-                )
-            })
-            .map(ToString::to_string)
+    fn file_paths(&self) -> Vec<String> {
+        let mut paths = Vec::new();
+        if let Some(input) = self.tool_input.as_ref() {
+            collect_file_paths(input, 5, &mut paths);
+            collect_patch_paths(input, &mut paths);
+        }
+        if let Some(path) = first_string(
+            &self.raw,
+            &[
+                &["file_path"],
+                &["filePath"],
+                &["tool", "file_path"],
+                &["tool", "filePath"],
+                &["tool_use", "file_path"],
+                &["toolUse", "filePath"],
+            ],
+        ) {
+            paths.push(path.to_string());
+        }
+        paths.sort();
+        paths.dedup();
+        paths
     }
 
     fn command(&self) -> Option<String> {
@@ -221,6 +225,78 @@ impl AgentHookPayload {
     fn prompt_text(&self) -> Option<&str> {
         self.prompt.as_deref().or(self.message.as_deref())
     }
+}
+
+fn collect_file_paths(value: &serde_json::Value, max_depth: usize, out: &mut Vec<String>) {
+    if max_depth == 0 {
+        return;
+    }
+    match value {
+        serde_json::Value::Object(map) => {
+            for key in ["file_path", "filePath", "path"] {
+                if let Some(path) = map.get(key).and_then(serde_json::Value::as_str) {
+                    out.push(path.to_string());
+                }
+            }
+            for key in ["files", "file_paths", "filePaths", "paths"] {
+                if let Some(items) = map.get(key).and_then(serde_json::Value::as_array) {
+                    out.extend(
+                        items
+                            .iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .map(ToString::to_string),
+                    );
+                }
+            }
+            for child in map.values() {
+                collect_file_paths(child, max_depth - 1, out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for child in items {
+                collect_file_paths(child, max_depth - 1, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_patch_paths(value: &serde_json::Value, out: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, value) in map {
+                if matches!(key.as_str(), "patch" | "diff" | "input")
+                    && let Some(patch) = value.as_str()
+                {
+                    out.extend(parse_patch_paths(patch));
+                }
+                collect_patch_paths(value, out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_patch_paths(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn parse_patch_paths(patch: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    for line in patch.lines() {
+        for marker in ["*** Add File: ", "*** Update File: ", "*** Delete File: "] {
+            if let Some(path) = line.strip_prefix(marker) {
+                paths.push(path.trim().to_string());
+            }
+        }
+        if let Some(rest) = line.strip_prefix("diff --git a/")
+            && let Some((path, _)) = rest.split_once(" b/")
+        {
+            paths.push(path.to_string());
+        }
+    }
+    paths
 }
 
 fn first_object_value<'a>(
@@ -423,14 +499,15 @@ pub(crate) fn cmd_hooks_ingest(source: &str, auto_init: bool, json_response: boo
 
             let policy = load_policy(&storage);
             let ctx = CaptureContext::recorded_ai(&session_id, source);
-            if let Some(file_path) = payload.file_path() {
+            let file_paths = payload.file_paths();
+            if !file_paths.is_empty() {
                 let _ = capture_working_changes_for_paths(
                     &storage,
                     &mut writer,
                     &index,
                     policy.as_ref(),
                     &ctx,
-                    &[file_path],
+                    &file_paths,
                 )?;
             }
         }
@@ -501,8 +578,12 @@ fn hook_tool_payload(
         "tool_name": payload.tool_name,
         "model": payload.model,
     });
-    if let Some(file_path) = payload.file_path() {
-        out["file_path"] = serde_json::Value::String(file_path);
+    let file_paths = payload.file_paths();
+    if let Some(file_path) = file_paths.first() {
+        out["file_path"] = serde_json::Value::String(file_path.clone());
+    }
+    if file_paths.len() > 1 {
+        out["file_paths"] = serde_json::json!(file_paths);
     }
     if let Some(command) = payload.command() {
         out["command"] = serde_json::Value::String(redact_hook_string(&command));
@@ -515,4 +596,42 @@ fn redact_hook_string(value: &str) -> String {
         .scan_and_redact(value)
         .redacted_content
         .unwrap_or_else(|| "[REDACTED]".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_apply_patch_payload_exposes_all_changed_paths() {
+        let payload = AgentHookPayload::parse(
+            &serde_json::json!({
+                "hook_event_name": "PostToolUse",
+                "tool_name": "apply_patch",
+                "tool_input": {
+                    "patch": "*** Begin Patch\n*** Update File: src/lib.rs\n@@\n*** Add File: docs/new.md\n@@\n*** End Patch"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(payload.file_paths(), vec!["docs/new.md", "src/lib.rs"]);
+    }
+
+    #[test]
+    fn editor_file_arrays_are_collected_without_duplicates() {
+        let payload = AgentHookPayload::parse(
+            &serde_json::json!({
+                "tool_input": {
+                    "files": ["src/a.ts", "src/b.ts"],
+                    "result": {"file_path": "src/a.ts"}
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(payload.file_paths(), vec!["src/a.ts", "src/b.ts"]);
+    }
 }

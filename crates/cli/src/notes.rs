@@ -1,7 +1,7 @@
 //! Git authorship-notes commands (`notes export|show|import|fetch|push|
 //! install-config`) and the no-server `team report` aggregation.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 use tellur_core::storage::{RepoStorage, TraceIndex};
 
@@ -16,13 +16,14 @@ pub(crate) fn cmd_notes_export(commit: &str, notes_ref: &str, print: bool) -> Re
     }
 
     let index = TraceIndex::open(&storage.index_path)?;
-    let attributions = index.list_attributions()?;
+    let commit_sha = resolve_commit(&storage.root, commit)?;
+    let attributions =
+        commit_scoped_attributions(&storage.root, &commit_sha, index.list_attributions()?)?;
     if attributions.is_empty() {
-        println!("No attribution data to export.");
+        println!("No exact attribution data for this commit to export.");
         return Ok(());
     }
 
-    let commit_sha = resolve_commit(&storage.root, commit)?;
     let note = tellur_core::notes::render_git_ai_note(
         &attributions,
         &commit_sha,
@@ -43,6 +44,150 @@ pub(crate) fn cmd_notes_export(commit: &str, notes_ref: &str, print: bool) -> Re
     );
     println!("Push with: tellur notes push");
     Ok(())
+}
+
+pub(crate) fn cmd_notes_attest_ai(
+    commit: &str,
+    notes_ref: &str,
+    session_id: &str,
+    agent_id: &str,
+    model_id: &str,
+    force: bool,
+) -> Result<()> {
+    let storage = RepoStorage::discover()?;
+    let commit_sha = resolve_commit(&storage.root, commit)?;
+    if !force && read_git_note(&storage.root, notes_ref, &commit_sha).is_ok() {
+        bail!(
+            "{} already has an authorship note in {}; pass --force to replace it",
+            short_sha(&commit_sha),
+            notes_ref
+        );
+    }
+    let patch = git_output(
+        &storage.root,
+        &[
+            "-c",
+            "core.quotePath=false",
+            "show",
+            "--first-parent",
+            "--format=",
+            "--unified=0",
+            "--no-ext-diff",
+            &commit_sha,
+        ],
+    )?;
+    let (added_ranges, _) = tellur_core::report::team_report::parse_commit_patch(&patch);
+    if added_ranges.is_empty() {
+        println!("Commit has no added lines to attest.");
+        return Ok(());
+    }
+    let attestor = git_output(&storage.root, &["config", "user.name"])
+        .ok()
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty());
+    let mut attributions = Vec::new();
+    for (file_path, ranges) in added_ranges {
+        let blob_sha = git_output(
+            &storage.root,
+            &["rev-parse", &format!("{}:{}", commit_sha, file_path)],
+        )?;
+        for (start, end) in ranges {
+            attributions.push(tellur_core::notes::IndexedAttribution {
+                file_path: file_path.clone(),
+                git_blob_sha: blob_sha.trim().to_string(),
+                range: tellur_core::schema::types::AttributionRange {
+                    range_id: format!(
+                        "claim_{}_{}_{}_{}",
+                        short_sha(&commit_sha),
+                        sanitize_id(&file_path),
+                        start,
+                        end
+                    ),
+                    start_line: start,
+                    end_line: end,
+                    origin: tellur_core::schema::types::Origin::Ai,
+                    evidence_strength: tellur_core::schema::types::EvidenceStrength::Claimed,
+                    confidence: 1.0,
+                    state: tellur_core::schema::types::AttributionState::Exact,
+                    session_id: session_id.to_string(),
+                    event_ids: vec![],
+                    agent_id: agent_id.to_string(),
+                    model_id: Some(model_id.to_string()),
+                    prompt_hash: None,
+                    context_set_id: None,
+                    policy_tags: vec![],
+                    risk_tags: vec![],
+                    risk_level: None,
+                    tests_run: vec![],
+                    tests_passed: false,
+                    reviewer: attestor.clone(),
+                    reviewed_at: Some(chrono::Utc::now().to_rfc3339()),
+                },
+            });
+        }
+    }
+    let note = tellur_core::notes::render_git_ai_note(
+        &attributions,
+        &commit_sha,
+        env!("CARGO_PKG_VERSION"),
+    )?;
+    write_git_note(&storage.root, notes_ref, &commit_sha, &note)?;
+    println!(
+        "Claimed AI authorship for {} added range(s) on {} (evidence: claimed)",
+        attributions.len(),
+        short_sha(&commit_sha)
+    );
+    Ok(())
+}
+
+fn commit_scoped_attributions(
+    repo: &std::path::Path,
+    commit_sha: &str,
+    attributions: Vec<tellur_core::notes::IndexedAttribution>,
+) -> Result<Vec<tellur_core::notes::IndexedAttribution>> {
+    let patch = git_output(
+        repo,
+        &[
+            "-c",
+            "core.quotePath=false",
+            "show",
+            "--first-parent",
+            "--format=",
+            "--unified=0",
+            "--no-ext-diff",
+            commit_sha,
+        ],
+    )?;
+    let (added_ranges, _) = tellur_core::report::team_report::parse_commit_patch(&patch);
+    let mut scoped = Vec::new();
+
+    for item in attributions {
+        let Some(commit_ranges) = added_ranges.get(&item.file_path) else {
+            continue;
+        };
+        let Ok(blob_sha) = git_output(
+            repo,
+            &["rev-parse", &format!("{}:{}", commit_sha, item.file_path)],
+        ) else {
+            continue;
+        };
+        if blob_sha.trim() != item.git_blob_sha {
+            continue;
+        }
+        for (added_start, added_end) in commit_ranges {
+            let start = item.range.start_line.max(*added_start);
+            let end = item.range.end_line.min(*added_end);
+            if start > end {
+                continue;
+            }
+            let mut exact = item.clone();
+            exact.range.start_line = start;
+            exact.range.end_line = end;
+            exact.range.range_id = format!("{}-{}-{}", exact.range.range_id, start, end);
+            scoped.push(exact);
+        }
+    }
+    Ok(scoped)
 }
 
 pub(crate) fn cmd_notes_show(commit: &str, notes_ref: &str, json: bool) -> Result<()> {

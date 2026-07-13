@@ -181,6 +181,10 @@ fn attestation_key(
         Origin::Ai | Origin::Mixed => {
             let session_key = stable_key("s", &item.range.session_id);
             let trace_key = stable_key("t", &item.range.range_id);
+            let evidence = serde_json::to_value(&item.range.evidence_strength)
+                .ok()
+                .and_then(|value| value.as_str().map(ToString::to_string))
+                .unwrap_or_else(|| "unknown".to_string());
             sessions
                 .entry(session_key.clone())
                 .or_insert_with(|| GitAiSessionRecord {
@@ -194,7 +198,13 @@ fn attestation_key(
                             .unwrap_or_else(|| "unknown".to_string()),
                     },
                     human_author: item.range.reviewer.clone(),
-                    custom_attributes: BTreeMap::new(),
+                    custom_attributes: BTreeMap::from([
+                        ("tellur.evidence_strength".to_string(), evidence),
+                        (
+                            "tellur.confidence".to_string(),
+                            format!("{:.2}", item.range.confidence),
+                        ),
+                    ]),
                 });
             Some(format!("{}::{}", session_key, trace_key))
         }

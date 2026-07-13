@@ -1,6 +1,7 @@
 //! `tellur setup` — install, uninstall, and inspect the global editor & agent
 //! integrations (Claude Code, Codex, Cursor, VS Code, Windsurf, Gemini CLI,
-//! Antigravity): hook configs, MCP server entries, and the Codex plugin.
+//! Antigravity): hook configs, MCP server entries, and the single-owner Codex
+//! plugin hook surface.
 
 use std::path::{Path, PathBuf};
 
@@ -31,7 +32,10 @@ pub(crate) fn cmd_setup_agents(home: Option<&Path>) -> Result<()> {
     let codex_command = tellur_hook_command(TELLUR_CODEX_HOOK_SOURCE)?;
     let claude_command = tellur_hook_command(TELLUR_CLAUDE_HOOK_SOURCE)?;
     install_claude_global_hooks(&home, &claude_command)?;
-    install_codex_global_hooks(&home, &codex_command)?;
+    // Codex loads plugin hooks and user-level hooks together on supported
+    // versions. Installing the same handler in both places duplicates every
+    // event, so the personal plugin is the single hook delivery surface.
+    remove_hook_command_from_json(&home.join(".codex/hooks.json"), TELLUR_CODEX_HOOK_SOURCE)?;
     install_codex_personal_plugin(&home, &codex_command)?;
     install_cursor_integration(&home, &tellur_exe)?;
     install_vscode_integration(&home, &tellur_exe)?;
@@ -46,11 +50,7 @@ pub(crate) fn cmd_setup_agents(home: Option<&Path>) -> Result<()> {
         home.join(".claude/settings.json").display()
     );
     println!(
-        "  Codex hooks: {}",
-        home.join(".codex/hooks.json").display()
-    );
-    println!(
-        "  Codex plugin marketplace: {}",
+        "  Codex hooks + plugin marketplace: {}",
         home.join(".agents/plugins/marketplace.json").display()
     );
     println!(
@@ -80,12 +80,11 @@ pub(crate) fn cmd_setup_agents(home: Option<&Path>) -> Result<()> {
 pub(crate) fn cmd_setup_codex(home: Option<&Path>) -> Result<()> {
     let home = home_dir_override(home)?;
     let codex_command = tellur_hook_command(TELLUR_CODEX_HOOK_SOURCE)?;
-    install_codex_global_hooks(&home, &codex_command)?;
+    remove_hook_command_from_json(&home.join(".codex/hooks.json"), TELLUR_CODEX_HOOK_SOURCE)?;
     install_codex_personal_plugin(&home, &codex_command)?;
     println!("✓ Installed Tellur global Codex integration");
-    println!("  Hooks: {}", home.join(".codex/hooks.json").display());
     println!(
-        "  Plugin marketplace: {}",
+        "  Hooks + plugin marketplace: {}",
         home.join(".agents/plugins/marketplace.json").display()
     );
     Ok(())
@@ -160,7 +159,7 @@ pub(crate) fn cmd_setup_status(home: Option<&Path>) -> Result<()> {
         &home.join(".claude/settings.json"),
         TELLUR_CLAUDE_HOOK_SOURCE,
     );
-    let codex =
+    let codex_legacy =
         hook_config_has_tellur_source(&home.join(".codex/hooks.json"), TELLUR_CODEX_HOOK_SOURCE);
     let plugin = codex_plugin_status(&home);
     let cursor = cursor_integration_status(&home);
@@ -173,8 +172,16 @@ pub(crate) fn cmd_setup_status(home: Option<&Path>) -> Result<()> {
         if claude { "installed" } else { "missing" }
     );
     println!(
-        "Codex global hooks: {}",
-        if codex { "installed" } else { "missing" }
+        "Codex hook delivery: {}",
+        if plugin && !codex_legacy {
+            "installed (personal plugin)"
+        } else if plugin {
+            "duplicate (plugin + legacy global hooks)"
+        } else if codex_legacy {
+            "legacy global hooks only"
+        } else {
+            "missing"
+        }
     );
     println!(
         "Codex personal plugin: {}",
@@ -924,11 +931,6 @@ fn remove_antigravity_mcp(path: &Path) -> Result<()> {
 fn install_claude_global_hooks(home: &Path, command: &str) -> Result<()> {
     let path = home.join(".claude/settings.json");
     install_hooks_json(&path, command, false)
-}
-
-fn install_codex_global_hooks(home: &Path, command: &str) -> Result<()> {
-    let path = home.join(".codex/hooks.json");
-    install_hooks_json(&path, command, true)
 }
 
 fn install_hooks_json(path: &Path, command: &str, include_codex_matchers: bool) -> Result<()> {

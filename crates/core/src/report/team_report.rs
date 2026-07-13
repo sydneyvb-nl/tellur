@@ -57,6 +57,8 @@ pub struct TeamReport {
     pub by_tool: BTreeMap<String, u64>,
     /// AI-assisted lines per model.
     pub by_model: BTreeMap<String, u64>,
+    /// AI-assisted lines grouped by evidence strength (recorded/imported/inferred/claimed).
+    pub by_evidence: BTreeMap<String, u64>,
     /// AI vs human lines per author.
     pub by_author: BTreeMap<String, TeamAuthorStats>,
 }
@@ -76,6 +78,7 @@ pub fn aggregate_team_report(
     let mut unknown_lines: u64 = 0;
     let mut by_tool: BTreeMap<String, u64> = BTreeMap::new();
     let mut by_model: BTreeMap<String, u64> = BTreeMap::new();
+    let mut by_evidence: BTreeMap<String, u64> = BTreeMap::new();
     let mut by_author: BTreeMap<String, TeamAuthorStats> = BTreeMap::new();
     let mut with_provenance = 0usize;
     let mut without_provenance: Vec<String> = Vec::new();
@@ -131,9 +134,14 @@ pub fn aggregate_team_report(
                     let author = session
                         .and_then(|s| s.human_author.clone())
                         .unwrap_or_else(|| "unknown".to_string());
+                    let evidence = session
+                        .and_then(|s| s.custom_attributes.get("tellur.evidence_strength"))
+                        .cloned()
+                        .unwrap_or_else(|| "unknown".to_string());
                     ai_lines += 1;
                     *by_tool.entry(tool).or_default() += 1;
                     *by_model.entry(model).or_default() += 1;
+                    *by_evidence.entry(evidence).or_default() += 1;
                     by_author.entry(author).or_default().ai_lines += 1;
                 } else if let Some(human) = parsed.humans.get(&entry.key) {
                     human_lines += 1;
@@ -185,6 +193,7 @@ pub fn aggregate_team_report(
         ai_percentage,
         by_tool,
         by_model,
+        by_evidence,
         by_author,
     }
 }
@@ -265,6 +274,14 @@ pub fn to_markdown(report: &TeamReport) -> String {
         out.push_str("## AI lines by model\n\n");
         for (model, lines) in sorted_desc(&report.by_model) {
             out.push_str(&format!("- {}: {}\n", model, lines));
+        }
+        out.push('\n');
+    }
+
+    if !report.by_evidence.is_empty() {
+        out.push_str("## AI lines by evidence strength\n\n");
+        for (evidence, lines) in sorted_desc(&report.by_evidence) {
+            out.push_str(&format!("- {}: {}\n", evidence, lines));
         }
         out.push('\n');
     }
