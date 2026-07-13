@@ -1,0 +1,25 @@
+.github/workflows/ci.yml
+  s_7a75557532985c::t_c3ffbd462c4712 166-169
+  s_7a75557532985c::t_ee092384fdc644 158
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "tellur/0.1.0",
+  "base_commit_sha": "3cff822e95109a550dcd5734c50198b7dd8fa083",
+  "prompts": {},
+  "humans": {},
+  "sessions": {
+    "s_7a75557532985c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "sess_codex_pr52_release_readiness",
+        "model": "openai:gpt-5"
+      },
+      "human_author": "sydneyvb-nl",
+      "custom_attributes": {
+        "tellur.confidence": "1.00",
+        "tellur.evidence_strength": "claimed"
+      }
+    }
+  }
+}
